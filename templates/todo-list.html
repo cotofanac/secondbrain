@@ -1,0 +1,20 @@
+{{range .Todos}}
+<div class="todo-item {{if .Done}}done{{end}}">
+    <form hx-post="/todos/toggle" hx-target="#todo-items" hx-swap="innerHTML" class="todo-check">
+        <input type="hidden" name="id" value="{{.ID}}">
+        <button type="submit" class="check-btn {{if .Done}}checked{{end}}">
+            {{if .Done}}✓{{else}}○{{end}}
+        </button>
+    </form>
+    <span class="todo-text">{{.Text}}</span>
+    {{if .DueDate}}
+    <span class="todo-date">{{formatDate .DueDate}}</span>
+    {{end}}
+    <form hx-post="/todos/delete" hx-target="#todo-items" hx-swap="innerHTML" class="todo-del">
+        <input type="hidden" name="id" value="{{.ID}}">
+        <button type="submit" class="del-btn">×</button>
+    </form>
+</div>
+{{else}}
+<div class="empty-state">No items yet</div>
+{{end}}

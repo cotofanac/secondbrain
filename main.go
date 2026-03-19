@@ -1,0 +1,760 @@
+package main
+
+import (
+	"crypto/rand"
+	"crypto/subtle"
+	"database/sql"
+	"embed"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"html/template"
+	"io/fs"
+	"log"
+	"net/http"
+	"os"
+	"regexp"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	_ "github.com/mattn/go-sqlite3"
+)
+
+//go:embed static/*
+var staticFiles embed.FS
+
+//go:embed templates/*
+var templateFiles embed.FS
+
+var (
+	db        *sql.DB
+	templates *template.Template
+	passcode  string
+
+	// Session store: token -> expiry
+	sessions   = make(map[string]time.Time)
+	sessionsMu sync.RWMutex
+)
+
+const sessionDuration = 72 * time.Hour
+
+func main() {
+	passcode = os.Getenv("PASSCODE")
+	if len(passcode) != 8 || !regexp.MustCompile(`^\d{8}$`).MatchString(passcode) {
+		log.Fatal("PASSCODE env must be exactly 8 digits")
+	}
+
+	initDB()
+	defer db.Close()
+
+	funcMap := template.FuncMap{
+		"formatDate": func(s string) string {
+			if s == "" {
+				return ""
+			}
+			t, err := time.Parse("2006-01-02", s)
+			if err != nil {
+				return s
+			}
+			return t.Format("Jan 2")
+		},
+	}
+	templates = template.Must(template.New("").Funcs(funcMap).ParseFS(templateFiles, "templates/*.html"))
+
+	staticFS, _ := fs.Sub(staticFiles, "static")
+	http.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticFS))))
+
+	http.HandleFunc("/", authMiddleware(handleIndex))
+	http.HandleFunc("/login", handleLogin)
+	http.HandleFunc("/logout", handleLogout)
+
+	// Todo API
+	http.HandleFunc("/todos", authMiddleware(handleTodos))
+	http.HandleFunc("/todos/add", authMiddleware(handleAddTodo))
+	http.HandleFunc("/todos/toggle", authMiddleware(handleToggleTodo))
+	http.HandleFunc("/todos/delete", authMiddleware(handleDeleteTodo))
+	http.HandleFunc("/todos/archive", authMiddleware(handleArchiveTodos))
+	http.HandleFunc("/todos/restore", authMiddleware(handleRestoreTodo))
+	http.HandleFunc("/todos/permanent-delete", authMiddleware(handlePermanentDeleteTodo))
+
+	// Notes API
+	http.HandleFunc("/notes", authMiddleware(handleNotes))
+	http.HandleFunc("/notes/save", authMiddleware(handleSaveNote))
+	http.HandleFunc("/notes/create", authMiddleware(handleCreateNote))
+	http.HandleFunc("/notes/delete", authMiddleware(handleDeleteNote))
+	http.HandleFunc("/notes/rename", authMiddleware(handleRenameNote))
+	http.HandleFunc("/notes/archive", authMiddleware(handleArchiveNotes))
+	http.HandleFunc("/notes/restore", authMiddleware(handleRestoreNote))
+	http.HandleFunc("/notes/permanent-delete", authMiddleware(handlePermanentDeleteNote))
+
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+	log.Printf("SecondBrain running on :%s", port)
+	log.Fatal(http.ListenAndServe(":"+port, nil))
+}
+
+func initDB() {
+	dataDir := os.Getenv("DATA_DIR")
+	if dataDir == "" {
+		dataDir = "./data"
+	}
+	os.MkdirAll(dataDir, 0750)
+
+	var err error
+	db, err = sql.Open("sqlite3", dataDir+"/secondbrain.db?_journal_mode=WAL&_busy_timeout=5000")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	migrations := []string{
+		`CREATE TABLE IF NOT EXISTS todos (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			category TEXT NOT NULL CHECK(category IN ('groceries','todo')),
+			text TEXT NOT NULL,
+			due_date TEXT DEFAULT '',
+			done INTEGER DEFAULT 0,
+			position INTEGER DEFAULT 0,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`CREATE TABLE IF NOT EXISTS notes (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			title TEXT NOT NULL UNIQUE,
+			content TEXT DEFAULT '',
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)`,
+	}
+	for _, m := range migrations {
+		if _, err := db.Exec(m); err != nil {
+			log.Fatal(err)
+		}
+	}
+
+	// Add archived columns (ignore errors if already exist)
+	db.Exec("ALTER TABLE todos ADD COLUMN archived INTEGER DEFAULT 0")
+	db.Exec("ALTER TABLE notes ADD COLUMN archived INTEGER DEFAULT 0")
+
+	// Seed a default note if none exist
+	var count int
+	db.QueryRow("SELECT COUNT(*) FROM notes").Scan(&count)
+	if count == 0 {
+		db.Exec("INSERT INTO notes (title, content) VALUES (?, ?)", "Quick Notes", "")
+	}
+}
+
+// --- Auth ---
+
+func generateToken() string {
+	b := make([]byte, 32)
+	rand.Read(b)
+	return hex.EncodeToString(b)
+}
+
+func createSession() string {
+	token := generateToken()
+	sessionsMu.Lock()
+	sessions[token] = time.Now().Add(sessionDuration)
+	sessionsMu.Unlock()
+	return token
+}
+
+func validSession(token string) bool {
+	sessionsMu.RLock()
+	expiry, ok := sessions[token]
+	sessionsMu.RUnlock()
+	if !ok {
+		return false
+	}
+	if time.Now().After(expiry) {
+		sessionsMu.Lock()
+		delete(sessions, token)
+		sessionsMu.Unlock()
+		return false
+	}
+	return true
+}
+
+func getSessionToken(r *http.Request) string {
+	cookie, err := r.Cookie("session")
+	if err != nil {
+		return ""
+	}
+	return cookie.Value
+}
+
+func authMiddleware(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		token := getSessionToken(r)
+		if !validSession(token) {
+			if r.Header.Get("HX-Request") == "true" {
+				w.Header().Set("HX-Redirect", "/login")
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			http.Redirect(w, r, "/login", http.StatusSeeOther)
+			return
+		}
+		next(w, r)
+	}
+}
+
+func handleLogin(w http.ResponseWriter, r *http.Request) {
+	if r.Method == "GET" {
+		// If already logged in, redirect
+		if validSession(getSessionToken(r)) {
+			http.Redirect(w, r, "/", http.StatusSeeOther)
+			return
+		}
+		templates.ExecuteTemplate(w, "login.html", nil)
+		return
+	}
+
+	if r.Method == "POST" {
+		// Rate limiting via small delay to prevent brute force
+		time.Sleep(200 * time.Millisecond)
+
+		submitted := r.FormValue("passcode")
+		isHTMX := r.Header.Get("HX-Request") == "true"
+
+		if len(submitted) != 8 || subtle.ConstantTimeCompare([]byte(submitted), []byte(passcode)) != 1 {
+			if isHTMX {
+				w.Header().Set("HX-Retarget", "#error")
+				w.Header().Set("HX-Reswap", "innerHTML")
+				fmt.Fprint(w, "Wrong passcode")
+			} else {
+				templates.ExecuteTemplate(w, "login.html", "Wrong passcode")
+			}
+			return
+		}
+
+		token := createSession()
+		http.SetCookie(w, &http.Cookie{
+			Name:     "session",
+			Value:    token,
+			Path:     "/",
+			HttpOnly: true,
+			SameSite: http.SameSiteStrictMode,
+			MaxAge:   int(sessionDuration.Seconds()),
+		})
+		if isHTMX {
+			w.Header().Set("HX-Redirect", "/")
+			w.WriteHeader(http.StatusOK)
+		} else {
+			http.Redirect(w, r, "/", http.StatusSeeOther)
+		}
+	}
+}
+
+func handleLogout(w http.ResponseWriter, r *http.Request) {
+	token := getSessionToken(r)
+	if token != "" {
+		sessionsMu.Lock()
+		delete(sessions, token)
+		sessionsMu.Unlock()
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     "session",
+		Value:    "",
+		Path:     "/",
+		HttpOnly: true,
+		MaxAge:   -1,
+	})
+	http.Redirect(w, r, "/login", http.StatusSeeOther)
+}
+
+// --- Pages ---
+
+func handleIndex(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/" {
+		http.NotFound(w, r)
+		return
+	}
+
+	// Fetch initial groceries for server-side render
+	rows, err := db.Query(
+		"SELECT id, category, text, due_date, done FROM todos WHERE category = 'groceries' AND archived = 0 ORDER BY done ASC, position ASC, created_at DESC",
+	)
+	var todos []Todo
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var t Todo
+			rows.Scan(&t.ID, &t.Category, &t.Text, &t.DueDate, &t.Done)
+			todos = append(todos, t)
+		}
+	}
+
+	// Fetch notes list and current note
+	noteRows, err := db.Query("SELECT id, title FROM notes WHERE archived = 0 ORDER BY title ASC")
+	var notesList []Note
+	if err == nil {
+		defer noteRows.Close()
+		for noteRows.Next() {
+			var n Note
+			noteRows.Scan(&n.ID, &n.Title)
+			notesList = append(notesList, n)
+		}
+	}
+
+	var currentNote Note
+	if len(notesList) > 0 {
+		currentNote.ID = notesList[0].ID
+		currentNote.Title = notesList[0].Title
+		db.QueryRow("SELECT content FROM notes WHERE id = ?", currentNote.ID).Scan(&currentNote.Content)
+	}
+
+	data := struct {
+		Todos       []Todo
+		Notes       []Note
+		CurrentNote Note
+	}{todos, notesList, currentNote}
+
+	templates.ExecuteTemplate(w, "index.html", data)
+}
+
+// --- Todos ---
+
+type Todo struct {
+	ID       int
+	Category string
+	Text     string
+	DueDate  string
+	Done     bool
+}
+
+func handleTodos(w http.ResponseWriter, r *http.Request) {
+	category := r.URL.Query().Get("category")
+	if category != "groceries" && category != "todo" {
+		category = "groceries"
+	}
+
+	rows, err := db.Query(
+		"SELECT id, category, text, due_date, done FROM todos WHERE category = ? AND archived = 0 ORDER BY done ASC, position ASC, created_at DESC",
+		category,
+	)
+	if err != nil {
+		http.Error(w, "DB error", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var todos []Todo
+	for rows.Next() {
+		var t Todo
+		rows.Scan(&t.ID, &t.Category, &t.Text, &t.DueDate, &t.Done)
+		todos = append(todos, t)
+	}
+
+	data := struct {
+		Category string
+		Todos    []Todo
+	}{category, todos}
+
+	templates.ExecuteTemplate(w, "todo-list.html", data)
+}
+
+func handleAddTodo(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	category := r.FormValue("category")
+	if category != "groceries" && category != "todo" {
+		http.Error(w, "Invalid category", http.StatusBadRequest)
+		return
+	}
+
+	text := strings.TrimSpace(r.FormValue("text"))
+	if text == "" || len(text) > 500 {
+		http.Error(w, "Invalid text", http.StatusBadRequest)
+		return
+	}
+
+	dueDate := ""
+	if category == "todo" {
+		dueDate = r.FormValue("due_date")
+		if dueDate != "" {
+			if _, err := time.Parse("2006-01-02", dueDate); err != nil {
+				http.Error(w, "Invalid date", http.StatusBadRequest)
+				return
+			}
+		}
+	}
+
+	_, err := db.Exec(
+		"INSERT INTO todos (category, text, due_date) VALUES (?, ?, ?)",
+		category, text, dueDate,
+	)
+	if err != nil {
+		http.Error(w, "DB error", http.StatusInternalServerError)
+		return
+	}
+
+	// Return updated list
+	r.URL.RawQuery = "category=" + category
+	handleTodos(w, r)
+}
+
+func handleToggleTodo(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	id, err := strconv.Atoi(r.FormValue("id"))
+	if err != nil {
+		http.Error(w, "Invalid ID", http.StatusBadRequest)
+		return
+	}
+
+	var category string
+	err = db.QueryRow("SELECT category FROM todos WHERE id = ?", id).Scan(&category)
+	if err != nil {
+		http.Error(w, "Not found", http.StatusNotFound)
+		return
+	}
+
+	db.Exec("UPDATE todos SET done = CASE WHEN done = 0 THEN 1 ELSE 0 END WHERE id = ?", id)
+
+	r.URL.RawQuery = "category=" + category
+	handleTodos(w, r)
+}
+
+func handleDeleteTodo(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	id, err := strconv.Atoi(r.FormValue("id"))
+	if err != nil {
+		http.Error(w, "Invalid ID", http.StatusBadRequest)
+		return
+	}
+
+	var category string
+	err = db.QueryRow("SELECT category FROM todos WHERE id = ?", id).Scan(&category)
+	if err != nil {
+		http.Error(w, "Not found", http.StatusNotFound)
+		return
+	}
+
+	db.Exec("UPDATE todos SET archived = 1 WHERE id = ?", id)
+
+	r.URL.RawQuery = "category=" + category
+	handleTodos(w, r)
+}
+
+func handleArchiveTodos(w http.ResponseWriter, r *http.Request) {
+	category := r.URL.Query().Get("category")
+	if category != "groceries" && category != "todo" {
+		category = "groceries"
+	}
+
+	rows, err := db.Query(
+		"SELECT id, category, text, due_date, done FROM todos WHERE category = ? AND archived = 1 ORDER BY created_at DESC",
+		category,
+	)
+	if err != nil {
+		http.Error(w, "DB error", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var todos []Todo
+	for rows.Next() {
+		var t Todo
+		rows.Scan(&t.ID, &t.Category, &t.Text, &t.DueDate, &t.Done)
+		todos = append(todos, t)
+	}
+
+	data := struct {
+		Category string
+		Todos    []Todo
+	}{category, todos}
+
+	templates.ExecuteTemplate(w, "todo-archive.html", data)
+}
+
+func handleRestoreTodo(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	id, err := strconv.Atoi(r.FormValue("id"))
+	if err != nil {
+		http.Error(w, "Invalid ID", http.StatusBadRequest)
+		return
+	}
+
+	var category string
+	err = db.QueryRow("SELECT category FROM todos WHERE id = ?", id).Scan(&category)
+	if err != nil {
+		http.Error(w, "Not found", http.StatusNotFound)
+		return
+	}
+
+	db.Exec("UPDATE todos SET archived = 0 WHERE id = ?", id)
+
+	r.URL.RawQuery = "category=" + category
+	handleArchiveTodos(w, r)
+}
+
+func handlePermanentDeleteTodo(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	id, err := strconv.Atoi(r.FormValue("id"))
+	if err != nil {
+		http.Error(w, "Invalid ID", http.StatusBadRequest)
+		return
+	}
+
+	var category string
+	err = db.QueryRow("SELECT category FROM todos WHERE id = ?", id).Scan(&category)
+	if err != nil {
+		http.Error(w, "Not found", http.StatusNotFound)
+		return
+	}
+
+	db.Exec("DELETE FROM todos WHERE id = ?", id)
+
+	r.URL.RawQuery = "category=" + category
+	handleArchiveTodos(w, r)
+}
+
+// --- Notes ---
+
+type Note struct {
+	ID        int
+	Title     string
+	Content   string
+	UpdatedAt string
+}
+
+func handleNotes(w http.ResponseWriter, r *http.Request) {
+	noteIDStr := r.URL.Query().Get("id")
+
+	// Get all note titles for dropdown
+	rows, err := db.Query("SELECT id, title FROM notes WHERE archived = 0 ORDER BY title ASC")
+	if err != nil {
+		http.Error(w, "DB error", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var notesList []Note
+	for rows.Next() {
+		var n Note
+		rows.Scan(&n.ID, &n.Title)
+		notesList = append(notesList, n)
+	}
+
+	if len(notesList) == 0 {
+		http.Error(w, "No notes", http.StatusNotFound)
+		return
+	}
+
+	// Determine which note to show
+	var currentNote Note
+	if noteIDStr != "" {
+		noteID, _ := strconv.Atoi(noteIDStr)
+		db.QueryRow("SELECT id, title, content FROM notes WHERE id = ?", noteID).Scan(
+			&currentNote.ID, &currentNote.Title, &currentNote.Content,
+		)
+	}
+	if currentNote.ID == 0 {
+		currentNote.ID = notesList[0].ID
+		currentNote.Title = notesList[0].Title
+		db.QueryRow("SELECT content FROM notes WHERE id = ?", currentNote.ID).Scan(&currentNote.Content)
+	}
+
+	data := struct {
+		Notes       []Note
+		CurrentNote Note
+	}{notesList, currentNote}
+
+	templates.ExecuteTemplate(w, "notes.html", data)
+}
+
+func handleSaveNote(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	id, err := strconv.Atoi(r.FormValue("id"))
+	if err != nil {
+		http.Error(w, "Invalid ID", http.StatusBadRequest)
+		return
+	}
+
+	content := r.FormValue("content")
+	if len(content) > 1_000_000 {
+		http.Error(w, "Content too large", http.StatusBadRequest)
+		return
+	}
+
+	_, err = db.Exec("UPDATE notes SET content = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", content, id)
+	if err != nil {
+		http.Error(w, "DB error", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "saved"})
+}
+
+func handleCreateNote(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	title := strings.TrimSpace(r.FormValue("title"))
+	if title == "" || len(title) > 200 {
+		http.Error(w, "Invalid title", http.StatusBadRequest)
+		return
+	}
+
+	// Sanitize: only allow alphanumeric, spaces, hyphens, underscores
+	if !regexp.MustCompile(`^[\w\s\-]+$`).MatchString(title) {
+		http.Error(w, "Invalid characters in title", http.StatusBadRequest)
+		return
+	}
+
+	result, err := db.Exec("INSERT INTO notes (title, content) VALUES (?, ?)", title, "")
+	if err != nil {
+		if strings.Contains(err.Error(), "UNIQUE") {
+			http.Error(w, "Note with this name already exists", http.StatusConflict)
+			return
+		}
+		http.Error(w, "DB error", http.StatusInternalServerError)
+		return
+	}
+
+	newID, _ := result.LastInsertId()
+	r.URL.RawQuery = "id=" + strconv.FormatInt(newID, 10)
+	handleNotes(w, r)
+}
+
+func handleDeleteNote(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	id, err := strconv.Atoi(r.FormValue("id"))
+	if err != nil {
+		http.Error(w, "Invalid ID", http.StatusBadRequest)
+		return
+	}
+
+	// Don't archive if it's the last active note
+	var count int
+	db.QueryRow("SELECT COUNT(*) FROM notes WHERE archived = 0").Scan(&count)
+	if count <= 1 {
+		http.Error(w, "Cannot delete the last note", http.StatusBadRequest)
+		return
+	}
+
+	db.Exec("UPDATE notes SET archived = 1 WHERE id = ?", id)
+
+	r.URL.RawQuery = ""
+	handleNotes(w, r)
+}
+
+func handleRenameNote(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	id, err := strconv.Atoi(r.FormValue("id"))
+	if err != nil {
+		http.Error(w, "Invalid ID", http.StatusBadRequest)
+		return
+	}
+
+	title := strings.TrimSpace(r.FormValue("title"))
+	if title == "" || len(title) > 200 {
+		http.Error(w, "Invalid title", http.StatusBadRequest)
+		return
+	}
+
+	if !regexp.MustCompile(`^[\w\s\-]+$`).MatchString(title) {
+		http.Error(w, "Invalid characters in title", http.StatusBadRequest)
+		return
+	}
+
+	_, err = db.Exec("UPDATE notes SET title = ? WHERE id = ?", title, id)
+	if err != nil {
+		if strings.Contains(err.Error(), "UNIQUE") {
+			http.Error(w, "A note with this name already exists", http.StatusConflict)
+			return
+		}
+		http.Error(w, "DB error", http.StatusInternalServerError)
+		return
+	}
+
+	r.URL.RawQuery = "id=" + strconv.Itoa(id)
+	handleNotes(w, r)
+}
+
+func handleArchiveNotes(w http.ResponseWriter, r *http.Request) {
+	rows, err := db.Query("SELECT id, title FROM notes WHERE archived = 1 ORDER BY title ASC")
+	if err != nil {
+		http.Error(w, "DB error", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var notes []Note
+	for rows.Next() {
+		var n Note
+		rows.Scan(&n.ID, &n.Title)
+		notes = append(notes, n)
+	}
+
+	templates.ExecuteTemplate(w, "notes-archive.html", notes)
+}
+
+func handleRestoreNote(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	id, err := strconv.Atoi(r.FormValue("id"))
+	if err != nil {
+		http.Error(w, "Invalid ID", http.StatusBadRequest)
+		return
+	}
+
+	db.Exec("UPDATE notes SET archived = 0 WHERE id = ?", id)
+	handleArchiveNotes(w, r)
+}
+
+func handlePermanentDeleteNote(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	id, err := strconv.Atoi(r.FormValue("id"))
+	if err != nil {
+		http.Error(w, "Invalid ID", http.StatusBadRequest)
+		return
+	}
+
+	db.Exec("DELETE FROM notes WHERE id = ?", id)
+	handleArchiveNotes(w, r)
+}

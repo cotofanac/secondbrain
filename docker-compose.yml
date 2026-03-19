@@ -1,0 +1,16 @@
+services:
+  secondbrain:
+    build: .
+    container_name: secondbrain
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      - PASSCODE=${PASSCODE}
+      - PORT=8080
+      - DATA_DIR=/app/data
+    volumes:
+      - secondbrain-data:/app/data
+
+volumes:
+  secondbrain-data:

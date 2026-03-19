@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <meta name="theme-color" content="#0f0f0f">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>SecondBrain</title>
+    <link rel="manifest" href="/static/manifest.json">
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <link rel="apple-touch-icon" href="/static/icon-192.svg">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <!-- Top nav: mode switcher -->
+    <header class="topbar" id="topbar">
+        <nav class="mode-switch">
+            <button class="mode-btn active" data-mode="todos" onclick="switchMode('todos')">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+                Tasks
+            </button>
+            <button class="mode-btn" data-mode="notes" onclick="switchMode('notes')">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+                Notes
+            </button>
+        </nav>
+        <a href="/logout" class="logout-btn" title="Logout">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+        </a>
+    </header>
+
+    <!-- Todos view -->
+    <main id="todos-view" class="view active">
+        <!-- Category tabs -->
+        <div class="tab-bar" id="tab-bar">
+            <div class="tab-group">
+                <button class="tab active" data-cat="groceries" onclick="switchTab('groceries')">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg>
+                    Groceries
+                </button>
+                <button class="tab" data-cat="todo" onclick="switchTab('todo')">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+                    To-Do
+                </button>
+            </div>
+            <button class="btn-icon tab-archive" id="archive-btn" onclick="showArchive()" title="Archive">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
+            </button>
+        </div>
+
+        <!-- Add form -->
+        <div class="add-form" id="add-form">
+            <form hx-post="/todos/add" hx-target="#todo-items" hx-swap="innerHTML" 
+                  hx-on::after-request="this.reset()" class="add-row">
+                <input type="hidden" name="category" id="add-category" value="groceries">
+                <input type="text" name="text" placeholder="Add item..." class="add-input" required autocomplete="off">
+                <input type="date" name="due_date" class="add-date" id="add-date" style="display:none">
+                <button type="submit" class="btn btn-add">+</button>
+            </form>
+        </div>
+
+        <!-- Todo list -->
+        <div id="todo-items">
+            {{range .Todos}}
+            <div class="todo-item {{if .Done}}done{{end}}">
+                <form hx-post="/todos/toggle" hx-target="#todo-items" hx-swap="innerHTML" class="todo-check">
+                    <input type="hidden" name="id" value="{{.ID}}">
+                    <button type="submit" class="check-btn {{if .Done}}checked{{end}}">
+                        {{if .Done}}✓{{else}}○{{end}}
+                    </button>
+                </form>
+                <span class="todo-text">{{.Text}}</span>
+                {{if .DueDate}}
+                <span class="todo-date">{{formatDate .DueDate}}</span>
+                {{end}}
+                <form hx-post="/todos/delete" hx-target="#todo-items" hx-swap="innerHTML" class="todo-del">
+                    <input type="hidden" name="id" value="{{.ID}}">
+                    <button type="submit" class="del-btn">×</button>
+                </form>
+            </div>
+            {{else}}
+            <div class="empty-state">No items yet</div>
+            {{end}}
+        </div>
+    </main>
+
+    <!-- Notes view -->
+    <main id="notes-view" class="view">
+        <div id="notes-content">
+            <div class="notes-toolbar">
+                <select id="note-select" class="note-select" onchange="loadNote(this.value)">
+                    {{range .Notes}}
+                    <option value="{{.ID}}" {{if eq .ID $.CurrentNote.ID}}selected{{end}}>{{.Title}}</option>
+                    {{end}}
+                </select>
+                <div class="notes-actions">
+                    <button class="btn btn-icon" onclick="createNote()" title="New note">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                    </button>
+                    <button class="btn btn-icon" onclick="renameNote()" title="Rename">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+                    </button>
+                    <button class="btn btn-icon btn-danger" onclick="deleteNote()" title="Delete">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                    </button>
+                    <button class="btn btn-icon" onclick="showNotesArchive()" title="Archive">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
+                    </button>
+                </div>
+            </div>
+            <div class="note-status" id="note-status"></div>
+            <textarea id="note-editor" class="note-editor" 
+                      data-note-id="{{.CurrentNote.ID}}"
+                      placeholder="Start typing...">{{.CurrentNote.Content}}</textarea>
+        </div>
+    </main>
+
+    <script src="https://unpkg.com/htmx.org@2.0.4/dist/htmx.min.js"></script>
+    <script src="/static/app.js"></script>
+</body>
+</html>

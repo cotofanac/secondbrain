@@ -1,0 +1,27 @@
+<div class="archive-header">
+    <button class="btn btn-sm btn-back" onclick="hideArchive()">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+        Back
+    </button>
+    <span class="archive-title">Archive</span>
+</div>
+{{range .Todos}}
+<div class="todo-item archived-item">
+    <span class="todo-text">{{.Text}}</span>
+    {{if .DueDate}}
+    <span class="todo-date">{{formatDate .DueDate}}</span>
+    {{end}}
+    <form hx-post="/todos/restore" hx-target="#todo-items" hx-swap="innerHTML" class="todo-action">
+        <input type="hidden" name="id" value="{{.ID}}">
+        <button type="submit" class="btn-restore" title="Restore">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+        </button>
+    </form>
+    <form hx-post="/todos/permanent-delete" hx-target="#todo-items" hx-swap="innerHTML" class="todo-action">
+        <input type="hidden" name="id" value="{{.ID}}">
+        <button type="submit" class="del-btn" title="Delete forever">×</button>
+    </form>
+</div>
+{{else}}
+<div class="empty-state">Archive is empty</div>
+{{end}}
