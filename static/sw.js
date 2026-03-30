@@ -1,4 +1,4 @@
-const CACHE_NAME = 'secondbrain-v1';
+const CACHE_NAME = 'secondbrain-v2';
 const PRECACHE = [
     '/static/style.css',
     '/static/app.js',
@@ -28,13 +28,13 @@ self.addEventListener('fetch', event => {
     // Only cache static assets; always go to network for API/HTML
     if (url.pathname.startsWith('/static/')) {
         event.respondWith(
-            caches.match(event.request).then(cached => {
-                return cached || fetch(event.request).then(response => {
+            fetch(event.request)
+                .then(response => {
                     const clone = response.clone();
                     caches.open(CACHE_NAME).then(cache => cache.put(event.request, clone));
                     return response;
-                });
-            })
+                })
+                .catch(() => caches.match(event.request))
         );
     }
 });

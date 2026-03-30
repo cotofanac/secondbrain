@@ -206,7 +206,7 @@ html, body {
     background: transparent;
     border: none;
     color: var(--text-dim);
-    padding: 0.45rem 1rem;
+    padding: 0.45rem 0.85rem;
     font-size: 0.82rem;
     cursor: pointer;
     transition: all 0.15s;
@@ -636,4 +636,123 @@ html, body {
 .archive-note-actions {
     display: flex;
     gap: 0.25rem;
+}
+
+/* Habits */
+.habits-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.habits-title {
+    font-size: 0.85rem;
+    color: var(--text-dim);
+    font-weight: 600;
+}
+
+.habits-actions {
+    display: flex;
+    gap: 0.35rem;
+}
+
+.habit-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+    transition: opacity 0.2s;
+}
+
+.habit-item.done {
+    opacity: 0.55;
+}
+
+.habit-name {
+    flex: 1;
+    font-size: 0.95rem;
+    word-break: break-word;
+}
+
+.habit-check,
+.habit-check-form,
+.habit-del-form {
+    display: flex;
+    margin: 0;
+}
+
+.habit-check {
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    font-size: 1.2rem;
+    cursor: pointer;
+    padding: 0.2rem;
+    width: 1.8rem;
+    height: 1.8rem;
+    align-items: center;
+    justify-content: center;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.habit-check.checked {
+    color: var(--success);
+}
+
+.habit-streak {
+    font-size: 0.74rem;
+    color: #ffaa44;
+    background: rgba(255, 170, 68, 0.12);
+    border: 1px solid rgba(255, 170, 68, 0.35);
+    border-radius: 999px;
+    padding: 0.12rem 0.45rem;
+    min-width: 2rem;
+    text-align: center;
+}
+
+/* Inactivity warning */
+.inactivity-warning {
+    position: fixed;
+    inset: 0;
+    z-index: 1200;
+    background: rgba(0, 0, 0, 0.52);
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    padding: 1rem;
+}
+
+.inactivity-warning[hidden] {
+    display: none !important;
+}
+
+.inactivity-sheet {
+    width: 100%;
+    max-width: 480px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 1rem;
+    box-shadow: 0 10px 35px rgba(0, 0, 0, 0.45);
+}
+
+.inactivity-title {
+    font-size: 1rem;
+    margin-bottom: 0.35rem;
+}
+
+.inactivity-message {
+    font-size: 0.88rem;
+    color: var(--text-dim);
+    margin-bottom: 0.8rem;
+}
+
+.inactivity-actions {
+    display: flex;
+    gap: 0.5rem;
+    justify-content: flex-end;
 }

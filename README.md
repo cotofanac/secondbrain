@@ -30,6 +30,7 @@ docker compose up -d
 | `PASSCODE` | *(required)* | 8-digit numeric passcode |
 | `PORT` | `8080` | Server port |
 | `DATA_DIR` | `./data` | SQLite database location |
+| `INACTIVITY_LOGOUT_MINUTES` | `45` | Auto-logout timeout after inactivity |
 
 ## Development
 

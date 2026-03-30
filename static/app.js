@@ -1,4 +1,4 @@
-// --- Mode switching (Tasks / Notes) ---
+// --- Mode switching (Tasks / Notes / Habits) ---
 function switchMode(mode) {
     document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
     document.querySelector(`[data-mode="${mode}"]`).classList.add('active');
@@ -34,8 +34,6 @@ function switchTab(category) {
 (function() {
     let lastScrollY = 0;
     const threshold = 30;
-    const todosView = document.getElementById('todos-view');
-
     window.addEventListener('scroll', function() {
         const sy = window.scrollY;
         const tabBar = document.getElementById('tab-bar');
@@ -61,15 +59,118 @@ function initNoteEditor() {
     const editor = document.getElementById('note-editor');
     if (!editor) return;
 
+    editor.addEventListener('keydown', function(e) {
+        handleNoteEditorKeydown(e, editor);
+    });
+
     editor.addEventListener('input', function() {
+        applyInlineNoteCommands(editor);
         clearTimeout(saveTimer);
         showNoteStatus('Unsaved...');
         saveTimer = setTimeout(() => saveCurrentNote(), 800);
     });
 
-    // Auto-resize
     autoResize(editor);
     editor.addEventListener('input', () => autoResize(editor));
+}
+
+function handleNoteEditorKeydown(e, editor) {
+    const isMod = e.metaKey || e.ctrlKey;
+    if (isMod && !e.shiftKey && (e.key === 'b' || e.key === 'B')) {
+        e.preventDefault();
+        toggleWrappedSelection(editor, '*');
+        return;
+    }
+    if (isMod && !e.shiftKey && (e.key === 'i' || e.key === 'I')) {
+        e.preventDefault();
+        toggleWrappedSelection(editor, '_');
+        return;
+    }
+
+    if (e.key !== 'Enter' || e.shiftKey || e.altKey || e.ctrlKey || e.metaKey) {
+        return;
+    }
+
+    const selectionStart = editor.selectionStart;
+    const selectionEnd = editor.selectionEnd;
+    if (selectionStart !== selectionEnd) return;
+
+    const line = getCurrentLine(editor.value, selectionStart);
+    const numbered = line.text.match(/^(\s*)(\d+)\.\s+(.*)$/);
+    if (numbered) {
+        e.preventDefault();
+        const next = Number(numbered[2]) + 1;
+        const content = numbered[3].trim();
+        const insertion = content ? `\n${numbered[1]}${next}. ` : '\n';
+        editor.setRangeText(insertion, selectionStart, selectionEnd, 'end');
+        editor.dispatchEvent(new Event('input', { bubbles: true }));
+        return;
+    }
+
+    const checkbox = line.text.match(/^(\s*)-\s\[(?: |x|X)\]\s+(.*)$/);
+    if (checkbox) {
+        e.preventDefault();
+        const content = checkbox[2].trim();
+        const insertion = content ? `\n${checkbox[1]}- [ ] ` : '\n';
+        editor.setRangeText(insertion, selectionStart, selectionEnd, 'end');
+        editor.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+}
+
+function applyInlineNoteCommands(editor) {
+    const selectionStart = editor.selectionStart;
+    const selectionEnd = editor.selectionEnd;
+    if (selectionStart !== selectionEnd) return;
+
+    const line = getCurrentLine(editor.value, selectionStart);
+    const beforeCaret = line.text.slice(0, selectionStart - line.start);
+    const indent = beforeCaret.match(/^\s*/)[0];
+    const replaceFrom = line.start + indent.length;
+
+    if (/^\s*\[(?:\s)?\]\s$/.test(beforeCaret)) {
+        editor.setRangeText('- [ ] ', replaceFrom, selectionStart, 'end');
+        return;
+    }
+
+    if (/^\s*\[(?:x|X)\]\s$/.test(beforeCaret)) {
+        editor.setRangeText('- [x] ', replaceFrom, selectionStart, 'end');
+        return;
+    }
+
+    const numbered = beforeCaret.match(/^(\s*)(\d+)\)\s$/);
+    if (numbered) {
+        const replacement = `${numbered[1]}${numbered[2]}. `;
+        editor.setRangeText(replacement, line.start, selectionStart, 'end');
+    }
+}
+
+function toggleWrappedSelection(editor, marker) {
+    const start = editor.selectionStart;
+    const end = editor.selectionEnd;
+    if (start === end) return;
+
+    const selected = editor.value.slice(start, end);
+    const wrapped = selected.startsWith(marker) && selected.endsWith(marker) && selected.length >= marker.length * 2;
+
+    if (wrapped) {
+        const unwrapped = selected.slice(marker.length, selected.length - marker.length);
+        editor.setRangeText(unwrapped, start, end, 'select');
+    } else {
+        editor.setRangeText(`${marker}${selected}${marker}`, start, end, 'select');
+    }
+
+    editor.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+function getCurrentLine(text, position) {
+    const start = text.lastIndexOf('\n', position - 1) + 1;
+    const lineEndIndex = text.indexOf('\n', position);
+    const end = lineEndIndex === -1 ? text.length : lineEndIndex;
+    return {
+        start,
+        end,
+        text: text.slice(start, end)
+    };
 }
 
 function autoResize(el) {
@@ -104,7 +205,12 @@ function showNoteStatus(msg) {
 }
 
 function loadNote(id) {
-    htmx.ajax('GET', '/notes?id=' + id, '#notes-content');
+    const select = document.getElementById('note-select');
+    if (select) select.blur();
+
+    setTimeout(() => {
+        htmx.ajax('GET', '/notes?id=' + id, '#notes-content');
+    }, 0);
 }
 
 function createNote() {
@@ -138,9 +244,8 @@ function renameNote() {
     });
 }
 
-// Register service worker
 if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('/static/sw.js');
+    navigator.serviceWorker.register('/static/sw.js?v=20260330');
 }
 
 // --- Archive ---
@@ -166,7 +271,158 @@ function hideNotesArchive() {
     htmx.ajax('GET', '/notes', '#notes-content');
 }
 
-// Init notes editor on page load
+function addHabit() {
+    const name = prompt('Habit name:');
+    if (!name || !name.trim()) return;
+    htmx.ajax('POST', '/habits/add', {
+        target: '#habits-content',
+        values: { name: name.trim() }
+    });
+}
+
+function showHabitsArchive() {
+    htmx.ajax('GET', '/habits/archive', '#habits-content');
+}
+
+function hideHabitsArchive() {
+    htmx.ajax('GET', '/habits', '#habits-content');
+}
+
+// --- Inactivity auto-logout ---
+const INACTIVITY_WARNING_MS = 60 * 1000;
+let inactivityWarnTimer = null;
+let inactivityLogoutTimer = null;
+let inactivityCountdownTimer = null;
+let inactivityLastActivityTs = 0;
+
+function setupInactivityLogout() {
+    const body = document.body;
+    if (!body) return;
+
+    const timeoutSeconds = Number(body.dataset.inactivityTimeoutSeconds || 0);
+    if (!Number.isFinite(timeoutSeconds) || timeoutSeconds <= 0) return;
+
+    const timeoutMs = timeoutSeconds * 1000;
+    bindInactivityActions(timeoutMs);
+    startInactivityTimers(timeoutMs);
+}
+
+function bindInactivityActions(timeoutMs) {
+    const stayBtn = document.getElementById('inactivity-stay-btn');
+    const logoutBtn = document.getElementById('inactivity-logout-btn');
+    const warning = document.getElementById('inactivity-warning');
+
+    if (stayBtn) {
+        stayBtn.addEventListener('click', function() {
+            hideInactivityWarning();
+            startInactivityTimers(timeoutMs);
+        });
+    }
+
+    if (logoutBtn) {
+        logoutBtn.addEventListener('click', function() {
+            window.location.href = '/logout';
+        });
+    }
+
+    if (warning) {
+        warning.addEventListener('click', function(e) {
+            if (e.target === warning) {
+                hideInactivityWarning();
+                startInactivityTimers(timeoutMs);
+            }
+        });
+    }
+
+    const activityEvents = ['pointerdown', 'touchstart', 'keydown', 'scroll'];
+    activityEvents.forEach(function(eventName) {
+        window.addEventListener(eventName, function() {
+            const now = Date.now();
+            if (now - inactivityLastActivityTs < 750) return;
+            inactivityLastActivityTs = now;
+            hideInactivityWarning();
+            startInactivityTimers(timeoutMs);
+        }, { passive: true });
+    });
+
+    document.addEventListener('visibilitychange', function() {
+        if (!document.hidden) {
+            hideInactivityWarning();
+            startInactivityTimers(timeoutMs);
+        }
+    });
+
+    document.body.addEventListener('htmx:afterRequest', function() {
+        hideInactivityWarning();
+        startInactivityTimers(timeoutMs);
+    });
+}
+
+function startInactivityTimers(timeoutMs) {
+    clearInactivityTimers();
+
+    let warningLeadMs = Math.min(INACTIVITY_WARNING_MS, timeoutMs);
+    if (timeoutMs <= INACTIVITY_WARNING_MS) {
+        // For short sessions, show the warning in the second half, not immediately.
+        warningLeadMs = Math.max(Math.floor(timeoutMs / 2), 5 * 1000);
+        warningLeadMs = Math.min(warningLeadMs, Math.max(timeoutMs - 1000, 1000));
+    }
+    const warningDelayMs = Math.max(timeoutMs - warningLeadMs, 0);
+
+    inactivityWarnTimer = setTimeout(function() {
+        showInactivityWarning(Math.ceil(warningLeadMs / 1000));
+    }, warningDelayMs);
+
+    inactivityLogoutTimer = setTimeout(function() {
+        window.location.href = '/logout';
+    }, timeoutMs);
+}
+
+function clearInactivityTimers() {
+    if (inactivityWarnTimer) clearTimeout(inactivityWarnTimer);
+    if (inactivityLogoutTimer) clearTimeout(inactivityLogoutTimer);
+    if (inactivityCountdownTimer) clearInterval(inactivityCountdownTimer);
+    inactivityWarnTimer = null;
+    inactivityLogoutTimer = null;
+    inactivityCountdownTimer = null;
+}
+
+function showInactivityWarning(seconds) {
+    const warning = document.getElementById('inactivity-warning');
+    const countdown = document.getElementById('inactivity-countdown');
+    if (!warning || !countdown) return;
+
+    let remaining = seconds;
+    warning.hidden = false;
+    warning.setAttribute('aria-hidden', 'false');
+    countdown.textContent = String(remaining);
+
+    inactivityCountdownTimer = setInterval(function() {
+        remaining -= 1;
+        if (remaining <= 0) {
+            clearInterval(inactivityCountdownTimer);
+            inactivityCountdownTimer = null;
+            countdown.textContent = '0';
+            return;
+        }
+        countdown.textContent = String(remaining);
+    }, 1000);
+}
+
+function hideInactivityWarning() {
+    const warning = document.getElementById('inactivity-warning');
+    if (!warning || warning.hidden) return;
+
+    warning.hidden = true;
+    warning.setAttribute('aria-hidden', 'true');
+
+    if (inactivityCountdownTimer) {
+        clearInterval(inactivityCountdownTimer);
+        inactivityCountdownTimer = null;
+    }
+}
+
 document.addEventListener('DOMContentLoaded', function() {
     initNoteEditor();
+    setupInactivityLogout();
 });

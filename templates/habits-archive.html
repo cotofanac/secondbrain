@@ -1,0 +1,27 @@
+<div class="archive-header">
+    <button class="btn-back" onclick="hideHabitsArchive()">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+        Back
+    </button>
+    <span class="archive-title">Archived habits</span>
+</div>
+
+{{range .}}
+<div class="archive-note-item archived-item">
+    <span class="archive-note-title">{{.Name}}</span>
+    <div class="archive-note-actions">
+        <form hx-post="/habits/restore" hx-target="#habits-content" hx-swap="innerHTML" class="inline-form">
+            <input type="hidden" name="id" value="{{.ID}}">
+            <button type="submit" class="btn-restore" title="Restore">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-9"/></svg>
+            </button>
+        </form>
+        <form hx-post="/habits/permanent-delete" hx-target="#habits-content" hx-swap="innerHTML" class="inline-form">
+            <input type="hidden" name="id" value="{{.ID}}">
+            <button type="submit" class="del-btn" title="Delete forever">×</button>
+        </form>
+    </div>
+</div>
+{{else}}
+<div class="empty-state">No archived habits</div>
+{{end}}

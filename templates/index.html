@@ -7,12 +7,12 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <title>SecondBrain</title>
-    <link rel="manifest" href="/static/manifest.json">
+    <link rel="manifest" href="/static/manifest.json?v=20260330">
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
     <link rel="apple-touch-icon" href="/static/icon-192.svg">
-    <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="/static/style.css?v=20260330">
 </head>
-<body>
+<body data-inactivity-timeout-seconds="{{.InactivityTimeoutSeconds}}">
     <!-- Top nav: mode switcher -->
     <header class="topbar" id="topbar">
         <nav class="mode-switch">
@@ -23,6 +23,10 @@
             <button class="mode-btn" data-mode="notes" onclick="switchMode('notes')">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
                 Notes
+            </button>
+            <button class="mode-btn" data-mode="habits" onclick="switchMode('habits')">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                Habits
             </button>
         </nav>
         <a href="/logout" class="logout-btn" title="Logout">
@@ -112,11 +116,61 @@
             <div class="note-status" id="note-status"></div>
             <textarea id="note-editor" class="note-editor" 
                       data-note-id="{{.CurrentNote.ID}}"
-                      placeholder="Start typing...">{{.CurrentNote.Content}}</textarea>
+                      placeholder="Start typing... 1. list, *bold*, _italic_, [] checkbox">{{.CurrentNote.Content}}</textarea>
         </div>
     </main>
 
+    <!-- Habits view -->
+    <main id="habits-view" class="view">
+        <div id="habits-content">
+            <div class="habits-toolbar">
+                <span class="habits-title">Today</span>
+                <div class="habits-actions">
+                    <button class="btn btn-icon" onclick="addHabit()" title="New habit">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                    </button>
+                    <button class="btn btn-icon" onclick="showHabitsArchive()" title="Archive">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
+                    </button>
+                </div>
+            </div>
+            {{range .Habits}}
+            <div class="habit-item {{if .DoneToday}}done{{end}}">
+                <form hx-post="/habits/toggle" hx-target="#habits-content" hx-swap="innerHTML" class="habit-check-form">
+                    <input type="hidden" name="id" value="{{.ID}}">
+                    <button type="submit" class="habit-check {{if .DoneToday}}checked{{end}}">
+                        {{if .DoneToday}}✓{{else}}○{{end}}
+                    </button>
+                </form>
+                <span class="habit-name">{{.Name}}</span>
+                {{if gt .Streak 0}}
+                <span class="habit-streak">{{.Streak}}d</span>
+                {{end}}
+                <form hx-post="/habits/delete" hx-target="#habits-content" hx-swap="innerHTML" class="habit-del-form">
+                    <input type="hidden" name="id" value="{{.ID}}">
+                    <button type="submit" class="del-btn">×</button>
+                </form>
+            </div>
+            {{else}}
+            <div class="empty-state">No habits yet — tap + to add one</div>
+            {{end}}
+        </div>
+    </main>
+
+    <div id="inactivity-warning" class="inactivity-warning" hidden aria-hidden="true">
+        <div class="inactivity-sheet" role="dialog" aria-modal="true" aria-labelledby="inactivity-title" aria-describedby="inactivity-message">
+            <h2 id="inactivity-title" class="inactivity-title">Session expiring soon</h2>
+            <p id="inactivity-message" class="inactivity-message">
+                You will be logged out in <span id="inactivity-countdown">60</span>s due to inactivity.
+            </p>
+            <div class="inactivity-actions">
+                <button id="inactivity-stay-btn" class="btn btn-primary" type="button">Stay signed in</button>
+                <button id="inactivity-logout-btn" class="btn" type="button">Log out now</button>
+            </div>
+        </div>
+    </div>
+
     <script src="https://unpkg.com/htmx.org@2.0.4/dist/htmx.min.js"></script>
-    <script src="/static/app.js"></script>
+    <script src="/static/app.js?v=20260330"></script>
 </body>
 </html>

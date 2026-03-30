@@ -29,9 +29,11 @@ var staticFiles embed.FS
 var templateFiles embed.FS
 
 var (
-	db        *sql.DB
-	templates *template.Template
-	passcode  string
+	db                       *sql.DB
+	templates                *template.Template
+	passcode                 string
+	inactivityTimeoutMinutes = 45
+	validNameRe              = regexp.MustCompile(`^[\w\s\-]+$`)
 
 	// Session store: token -> expiry
 	sessions   = make(map[string]time.Time)
@@ -44,6 +46,14 @@ func main() {
 	passcode = os.Getenv("PASSCODE")
 	if len(passcode) != 8 || !regexp.MustCompile(`^\d{8}$`).MatchString(passcode) {
 		log.Fatal("PASSCODE env must be exactly 8 digits")
+	}
+
+	if raw := os.Getenv("INACTIVITY_LOGOUT_MINUTES"); raw != "" {
+		mins, err := strconv.Atoi(raw)
+		if err != nil || mins <= 0 {
+			log.Fatal("INACTIVITY_LOGOUT_MINUTES must be a positive integer")
+		}
+		inactivityTimeoutMinutes = mins
 	}
 
 	initDB()
@@ -89,6 +99,15 @@ func main() {
 	http.HandleFunc("/notes/restore", authMiddleware(handleRestoreNote))
 	http.HandleFunc("/notes/permanent-delete", authMiddleware(handlePermanentDeleteNote))
 
+	// Habits API
+	http.HandleFunc("/habits", authMiddleware(handleHabits))
+	http.HandleFunc("/habits/add", authMiddleware(handleAddHabit))
+	http.HandleFunc("/habits/toggle", authMiddleware(handleToggleHabit))
+	http.HandleFunc("/habits/delete", authMiddleware(handleDeleteHabit))
+	http.HandleFunc("/habits/archive", authMiddleware(handleArchiveHabits))
+	http.HandleFunc("/habits/restore", authMiddleware(handleRestoreHabit))
+	http.HandleFunc("/habits/permanent-delete", authMiddleware(handlePermanentDeleteHabit))
+
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
@@ -126,6 +145,19 @@ func initDB() {
 			content TEXT DEFAULT '',
 			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`CREATE TABLE IF NOT EXISTS habits (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			name TEXT NOT NULL UNIQUE,
+			archived INTEGER DEFAULT 0,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`CREATE TABLE IF NOT EXISTS habit_logs (
+			habit_id INTEGER NOT NULL,
+			date TEXT NOT NULL,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			PRIMARY KEY (habit_id, date),
+			FOREIGN KEY (habit_id) REFERENCES habits(id) ON DELETE CASCADE
 		)`,
 	}
 	for _, m := range migrations {
@@ -307,11 +339,21 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 		db.QueryRow("SELECT content FROM notes WHERE id = ?", currentNote.ID).Scan(&currentNote.Content)
 	}
 
+	habits := loadHabits()
+
 	data := struct {
-		Todos       []Todo
-		Notes       []Note
-		CurrentNote Note
-	}{todos, notesList, currentNote}
+		Todos                    []Todo
+		Notes                    []Note
+		CurrentNote              Note
+		Habits                   []Habit
+		InactivityTimeoutSeconds int
+	}{
+		Todos:                    todos,
+		Notes:                    notesList,
+		CurrentNote:              currentNote,
+		Habits:                   habits,
+		InactivityTimeoutSeconds: inactivityTimeoutMinutes * 60,
+	}
 
 	templates.ExecuteTemplate(w, "index.html", data)
 }
@@ -540,6 +582,30 @@ type Note struct {
 	UpdatedAt string
 }
 
+type Habit struct {
+	ID        int
+	Name      string
+	DoneToday bool
+	Streak    int
+}
+
+func requirePost(w http.ResponseWriter, r *http.Request) bool {
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return false
+	}
+	return true
+}
+
+func parseID(w http.ResponseWriter, r *http.Request) (int, bool) {
+	id, err := strconv.Atoi(r.FormValue("id"))
+	if err != nil {
+		http.Error(w, "Invalid ID", http.StatusBadRequest)
+		return 0, false
+	}
+	return id, true
+}
+
 func handleNotes(w http.ResponseWriter, r *http.Request) {
 	noteIDStr := r.URL.Query().Get("id")
 
@@ -626,7 +692,7 @@ func handleCreateNote(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Sanitize: only allow alphanumeric, spaces, hyphens, underscores
-	if !regexp.MustCompile(`^[\w\s\-]+$`).MatchString(title) {
+	if !validNameRe.MatchString(title) {
 		http.Error(w, "Invalid characters in title", http.StatusBadRequest)
 		return
 	}
@@ -690,7 +756,7 @@ func handleRenameNote(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !regexp.MustCompile(`^[\w\s\-]+$`).MatchString(title) {
+	if !validNameRe.MatchString(title) {
 		http.Error(w, "Invalid characters in title", http.StatusBadRequest)
 		return
 	}
@@ -757,4 +823,206 @@ func handlePermanentDeleteNote(w http.ResponseWriter, r *http.Request) {
 
 	db.Exec("DELETE FROM notes WHERE id = ?", id)
 	handleArchiveNotes(w, r)
+}
+
+func loadHabits() []Habit {
+	today := time.Now().Format("2006-01-02")
+	rows, err := db.Query(`
+		SELECT h.id, h.name,
+		       CASE WHEN hl.habit_id IS NOT NULL THEN 1 ELSE 0 END as done_today
+		FROM habits h
+		LEFT JOIN habit_logs hl ON hl.habit_id = h.id AND hl.date = ?
+		WHERE h.archived = 0
+		ORDER BY h.created_at ASC
+	`, today)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+
+	var habits []Habit
+	for rows.Next() {
+		var h Habit
+		var doneInt int
+		rows.Scan(&h.ID, &h.Name, &doneInt)
+		h.DoneToday = doneInt == 1
+		habits = append(habits, h)
+	}
+	if len(habits) == 0 {
+		return habits
+	}
+
+	logRows, err := db.Query(`
+		SELECT habit_id, date FROM habit_logs
+		WHERE habit_id IN (SELECT id FROM habits WHERE archived = 0)
+		ORDER BY habit_id ASC, date DESC
+	`)
+	if err != nil {
+		return habits
+	}
+	defer logRows.Close()
+
+	logsMap := make(map[int][]string)
+	for logRows.Next() {
+		var hid int
+		var d string
+		logRows.Scan(&hid, &d)
+		logsMap[hid] = append(logsMap[hid], d)
+	}
+
+	yesterday := time.Now().AddDate(0, 0, -1).Format("2006-01-02")
+	for i := range habits {
+		dates := logsMap[habits[i].ID]
+		if len(dates) == 0 || (dates[0] != today && dates[0] != yesterday) {
+			continue
+		}
+		streak := 0
+		expected := dates[0]
+		for _, d := range dates {
+			if d != expected {
+				break
+			}
+			streak++
+			t, _ := time.Parse("2006-01-02", expected)
+			expected = t.AddDate(0, 0, -1).Format("2006-01-02")
+		}
+		habits[i].Streak = streak
+	}
+	return habits
+}
+
+func handleHabits(w http.ResponseWriter, r *http.Request) {
+	habits := loadHabits()
+	templates.ExecuteTemplate(w, "habits.html", habits)
+}
+
+func handleAddHabit(w http.ResponseWriter, r *http.Request) {
+	if !requirePost(w, r) {
+		return
+	}
+
+	name := strings.TrimSpace(r.FormValue("name"))
+	if name == "" || len(name) > 120 {
+		http.Error(w, "Invalid habit name", http.StatusBadRequest)
+		return
+	}
+	if !validNameRe.MatchString(name) {
+		http.Error(w, "Invalid characters in habit name", http.StatusBadRequest)
+		return
+	}
+
+	_, err := db.Exec("INSERT INTO habits (name) VALUES (?)", name)
+	if err != nil {
+		if strings.Contains(err.Error(), "UNIQUE") {
+			http.Error(w, "Habit already exists", http.StatusConflict)
+			return
+		}
+		http.Error(w, "DB error", http.StatusInternalServerError)
+		return
+	}
+
+	handleHabits(w, r)
+}
+
+func handleToggleHabit(w http.ResponseWriter, r *http.Request) {
+	if !requirePost(w, r) {
+		return
+	}
+
+	id, ok := parseID(w, r)
+	if !ok {
+		return
+	}
+
+	today := time.Now().Format("2006-01-02")
+	res, err := db.Exec("DELETE FROM habit_logs WHERE habit_id = ? AND date = ?", id, today)
+	if err != nil {
+		http.Error(w, "DB error", http.StatusInternalServerError)
+		return
+	}
+
+	if n, _ := res.RowsAffected(); n == 0 {
+		_, err = db.Exec("INSERT INTO habit_logs (habit_id, date) VALUES (?, ?)", id, today)
+		if err != nil {
+			http.Error(w, "DB error", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	handleHabits(w, r)
+}
+
+func handleDeleteHabit(w http.ResponseWriter, r *http.Request) {
+	if !requirePost(w, r) {
+		return
+	}
+
+	id, ok := parseID(w, r)
+	if !ok {
+		return
+	}
+
+	_, err := db.Exec("UPDATE habits SET archived = 1 WHERE id = ?", id)
+	if err != nil {
+		http.Error(w, "DB error", http.StatusInternalServerError)
+		return
+	}
+
+	handleHabits(w, r)
+}
+
+func handleArchiveHabits(w http.ResponseWriter, r *http.Request) {
+	rows, err := db.Query("SELECT id, name FROM habits WHERE archived = 1 ORDER BY created_at DESC")
+	if err != nil {
+		http.Error(w, "DB error", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var habits []Habit
+	for rows.Next() {
+		var h Habit
+		rows.Scan(&h.ID, &h.Name)
+		habits = append(habits, h)
+	}
+
+	templates.ExecuteTemplate(w, "habits-archive.html", habits)
+}
+
+func handleRestoreHabit(w http.ResponseWriter, r *http.Request) {
+	if !requirePost(w, r) {
+		return
+	}
+
+	id, ok := parseID(w, r)
+	if !ok {
+		return
+	}
+
+	_, err := db.Exec("UPDATE habits SET archived = 0 WHERE id = ?", id)
+	if err != nil {
+		http.Error(w, "DB error", http.StatusInternalServerError)
+		return
+	}
+
+	handleArchiveHabits(w, r)
+}
+
+func handlePermanentDeleteHabit(w http.ResponseWriter, r *http.Request) {
+	if !requirePost(w, r) {
+		return
+	}
+
+	id, ok := parseID(w, r)
+	if !ok {
+		return
+	}
+
+	_, err := db.Exec("DELETE FROM habits WHERE id = ?", id)
+	if err != nil {
+		http.Error(w, "DB error", http.StatusInternalServerError)
+		return
+	}
+
+	handleArchiveHabits(w, r)
 }
