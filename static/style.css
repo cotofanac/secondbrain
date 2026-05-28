@@ -768,3 +768,106 @@ html, body {
     gap: 0.5rem;
     justify-content: flex-end;
 }
+
+/* ===== Responsive & desktop polish ===== */
+
+html {
+    accent-color: var(--accent);
+}
+
+#app {
+    width: 100%;
+}
+
+::selection {
+    background: rgba(108, 155, 255, 0.3);
+}
+
+/* Larger screens (Mac / desktop PWA): center the app into a tasteful column */
+@media (min-width: 768px) {
+    body {
+        background: #0a0a0a;
+    }
+    #app {
+        max-width: 720px;
+        margin-inline: auto;
+        min-height: 100vh;
+        background: var(--bg);
+        border-inline: 1px solid var(--border);
+    }
+    .note-editor {
+        min-height: calc(100vh - 11rem);
+    }
+    .inactivity-warning {
+        align-items: center;
+    }
+}
+
+/* Mouse / trackpad hover affordances (skipped on touch devices) */
+@media (hover: hover) {
+    .mode-btn:hover {
+        color: var(--text);
+        background: rgba(255, 255, 255, 0.05);
+    }
+    .mode-btn.active:hover {
+        background: var(--accent);
+        color: #000;
+    }
+    .tab:hover {
+        color: var(--text);
+        background: var(--surface2);
+    }
+    .tab.active:hover {
+        background: var(--accent-dim);
+        color: var(--text);
+    }
+    .btn:hover {
+        border-color: var(--text-dim);
+    }
+    .btn-primary:hover,
+    .btn-add:hover {
+        filter: brightness(1.07);
+    }
+    .btn-icon:hover {
+        color: var(--text);
+        background: var(--surface2);
+        border-color: var(--text-dim);
+    }
+    .todo-item:hover,
+    .habit-item:hover,
+    .archive-note-item:hover {
+        background: rgba(255, 255, 255, 0.025);
+    }
+    .check-btn:not(.checked):hover,
+    .habit-check:not(.checked):hover {
+        color: var(--text);
+    }
+    .btn-restore:hover {
+        filter: brightness(1.15);
+    }
+    .logout-btn:hover {
+        opacity: 1;
+    }
+    .note-select:hover,
+    .btn-back:hover {
+        border-color: var(--text-dim);
+        color: var(--text);
+    }
+}
+
+/* Keyboard focus rings */
+button:focus-visible,
+a:focus-visible,
+select:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
+/* Respect reduced-motion preferences */
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        transition-duration: 0.01ms !important;
+        animation-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+    }
+}
