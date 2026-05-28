@@ -42,6 +42,30 @@ var (
 
 const sessionDuration = 72 * time.Hour
 
+// loggingMiddleware wraps a handler and emits one log line per request:
+// METHOD /path STATUS duration
+func loggingMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		rw := &responseWriter{ResponseWriter: w, status: http.StatusOK}
+		next.ServeHTTP(rw, r)
+		// skip noisy static-asset lines in logs
+		if !strings.HasPrefix(r.URL.Path, "/static/") {
+			log.Printf("%s %s %d %s", r.Method, r.URL.Path, rw.status, time.Since(start).Round(time.Millisecond))
+		}
+	})
+}
+
+type responseWriter struct {
+	http.ResponseWriter
+	status int
+}
+
+func (rw *responseWriter) WriteHeader(code int) {
+	rw.status = code
+	rw.ResponseWriter.WriteHeader(code)
+}
+
 func main() {
 	passcode = os.Getenv("PASSCODE")
 	if len(passcode) != 8 || !regexp.MustCompile(`^\d{8}$`).MatchString(passcode) {
@@ -54,6 +78,7 @@ func main() {
 			log.Fatal("INACTIVITY_LOGOUT_MINUTES must be a positive integer")
 		}
 		inactivityTimeoutMinutes = mins
+		log.Printf("Inactivity logout set to %d minutes", inactivityTimeoutMinutes)
 	}
 
 	initDB()
@@ -72,6 +97,7 @@ func main() {
 		},
 	}
 	templates = template.Must(template.New("").Funcs(funcMap).ParseFS(templateFiles, "templates/*.html"))
+	log.Printf("Templates loaded")
 
 	staticFS, _ := fs.Sub(staticFiles, "static")
 	http.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticFS))))
@@ -112,8 +138,8 @@ func main() {
 	if port == "" {
 		port = "8080"
 	}
-	log.Printf("SecondBrain running on :%s", port)
-	log.Fatal(http.ListenAndServe(":"+port, nil))
+	log.Printf("SecondBrain listening on :%s (inactivity timeout: %d min)", port, inactivityTimeoutMinutes)
+	log.Fatal(http.ListenAndServe(":"+port, loggingMiddleware(http.DefaultServeMux)))
 }
 
 func initDB() {
@@ -123,8 +149,10 @@ func initDB() {
 	}
 	os.MkdirAll(dataDir, 0750)
 
+	dbPath := dataDir + "/secondbrain.db"
+	log.Printf("Opening database: %s", dbPath)
 	var err error
-	db, err = sql.Open("sqlite3", dataDir+"/secondbrain.db?_journal_mode=WAL&_busy_timeout=5000")
+	db, err = sql.Open("sqlite3", dbPath+"?_journal_mode=WAL&_busy_timeout=5000")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -173,7 +201,9 @@ func initDB() {
 	db.QueryRow("SELECT COUNT(*) FROM notes").Scan(&count)
 	if count == 0 {
 		db.Exec("INSERT INTO notes (title, content) VALUES (?, ?)", "Quick Notes", "")
+		log.Printf("Database initialized with default note")
 	}
+	log.Printf("Database ready")
 }
 
 // --- Auth ---
@@ -251,6 +281,7 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 		isHTMX := r.Header.Get("HX-Request") == "true"
 
 		if len(submitted) != 8 || subtle.ConstantTimeCompare([]byte(submitted), []byte(passcode)) != 1 {
+			log.Printf("Failed login attempt from %s", r.RemoteAddr)
 			if isHTMX {
 				w.Header().Set("HX-Retarget", "#error")
 				w.Header().Set("HX-Reswap", "innerHTML")
@@ -261,6 +292,7 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		log.Printf("Successful login from %s", r.RemoteAddr)
 		token := createSession()
 		http.SetCookie(w, &http.Cookie{
 			Name:     "session",
@@ -285,6 +317,7 @@ func handleLogout(w http.ResponseWriter, r *http.Request) {
 		sessionsMu.Lock()
 		delete(sessions, token)
 		sessionsMu.Unlock()
+		log.Printf("Session logged out from %s", r.RemoteAddr)
 	}
 	http.SetCookie(w, &http.Cookie{
 		Name:     "session",
@@ -434,6 +467,7 @@ func handleAddTodo(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "DB error", http.StatusInternalServerError)
 		return
 	}
+	log.Printf("Todo added: [%s] %q", category, text)
 
 	// Return updated list
 	r.URL.RawQuery = "category=" + category
@@ -460,6 +494,7 @@ func handleToggleTodo(w http.ResponseWriter, r *http.Request) {
 	}
 
 	db.Exec("UPDATE todos SET done = CASE WHEN done = 0 THEN 1 ELSE 0 END WHERE id = ?", id)
+	log.Printf("Todo toggled: id=%d [%s]", id, category)
 
 	r.URL.RawQuery = "category=" + category
 	handleTodos(w, r)
@@ -485,6 +520,7 @@ func handleDeleteTodo(w http.ResponseWriter, r *http.Request) {
 	}
 
 	db.Exec("UPDATE todos SET archived = 1 WHERE id = ?", id)
+	log.Printf("Todo archived: id=%d [%s]", id, category)
 
 	r.URL.RawQuery = "category=" + category
 	handleTodos(w, r)
@@ -541,6 +577,7 @@ func handleRestoreTodo(w http.ResponseWriter, r *http.Request) {
 	}
 
 	db.Exec("UPDATE todos SET archived = 0 WHERE id = ?", id)
+	log.Printf("Todo restored: id=%d [%s]", id, category)
 
 	r.URL.RawQuery = "category=" + category
 	handleArchiveTodos(w, r)
@@ -566,6 +603,7 @@ func handlePermanentDeleteTodo(w http.ResponseWriter, r *http.Request) {
 	}
 
 	db.Exec("DELETE FROM todos WHERE id = ?", id)
+	log.Printf("Todo permanently deleted: id=%d [%s]", id, category)
 
 	r.URL.RawQuery = "category=" + category
 	handleArchiveTodos(w, r)
@@ -672,6 +710,7 @@ func handleSaveNote(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "DB error", http.StatusInternalServerError)
 		return
 	}
+	log.Printf("Note saved: id=%d (%d bytes)", id, len(content))
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "saved"})
@@ -706,6 +745,7 @@ func handleCreateNote(w http.ResponseWriter, r *http.Request) {
 	}
 
 	newID, _ := result.LastInsertId()
+	log.Printf("Note created: %q (id=%d)", title, newID)
 	r.URL.RawQuery = "id=" + strconv.FormatInt(newID, 10)
 	handleNotes(w, r)
 }
@@ -731,6 +771,7 @@ func handleDeleteNote(w http.ResponseWriter, r *http.Request) {
 	}
 
 	db.Exec("UPDATE notes SET archived = 1 WHERE id = ?", id)
+	log.Printf("Note archived: id=%d", id)
 
 	r.URL.RawQuery = ""
 	handleNotes(w, r)
@@ -768,6 +809,7 @@ func handleRenameNote(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "DB error", http.StatusInternalServerError)
 		return
 	}
+	log.Printf("Note renamed: id=%d -> %q", id, title)
 
 	r.URL.RawQuery = "id=" + strconv.Itoa(id)
 	handleNotes(w, r)
@@ -918,6 +960,7 @@ func handleAddHabit(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "DB error", http.StatusInternalServerError)
 		return
 	}
+	log.Printf("Habit added: %q", name)
 
 	handleHabits(w, r)
 }
@@ -945,6 +988,9 @@ func handleToggleHabit(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "DB error", http.StatusInternalServerError)
 			return
 		}
+		log.Printf("Habit checked: id=%d date=%s", id, today)
+	} else {
+		log.Printf("Habit unchecked: id=%d date=%s", id, today)
 	}
 
 	handleHabits(w, r)
@@ -965,6 +1011,7 @@ func handleDeleteHabit(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "DB error", http.StatusInternalServerError)
 		return
 	}
+	log.Printf("Habit archived: id=%d", id)
 
 	handleHabits(w, r)
 }
