@@ -12,15 +12,23 @@ function switchMode(mode) {
     }
 }
 
-// --- Tab switching (Groceries / To-Do) ---
-function switchTab(category) {
+// --- Tab switching (Shopping List / To-Do / Groceries Checklist) ---
+function switchTab(category, el) {
     document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-    document.querySelector(`[data-cat="${category}"]`).classList.add('active');
+    const target = el || document.querySelector(`[data-cat="${category}"]`);
+    if (target) target.classList.add('active');
 
     document.getElementById('add-category').value = category;
 
     const dateInput = document.getElementById('add-date');
-    dateInput.style.display = category === 'todo' ? 'block' : 'none';
+    const calendarBtn = document.getElementById('calendar-btn');
+    const calendarWrap = document.getElementById('calendar-wrap');
+    const isTodo = category === 'todo';
+    if (calendarWrap) calendarWrap.style.display = isTodo ? 'inline-flex' : 'none';
+    if (!isTodo && dateInput) {
+        dateInput.value = '';
+        updateCalendarBtn(dateInput, calendarBtn);
+    }
 
     // Reset archive view
     document.getElementById('add-form').style.display = '';
@@ -245,7 +253,64 @@ function renameNote() {
 }
 
 if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('/static/sw.js?v=20260330');
+    navigator.serviceWorker.register('/static/sw.js?v=20260528');
+}
+
+// --- Calendar button for todo due date ---
+const CALENDAR_ICON = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>`;
+
+function openDatePicker(dateInput) {
+    if (!dateInput) return;
+    if (typeof dateInput.showPicker === 'function') {
+        try {
+            dateInput.showPicker();
+            return;
+        } catch (e) { /* fall through to focus-based fallback */ }
+    }
+    dateInput.focus();
+    dateInput.click();
+}
+
+function updateCalendarBtn(dateInput, calendarBtn) {
+    if (!calendarBtn) return;
+    const val = dateInput ? dateInput.value : '';
+    if (val) {
+        const d = new Date(val + 'T12:00:00');
+        const label = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        calendarBtn.innerHTML = `<span class="calendar-btn-label">${label}</span>`;
+        calendarBtn.classList.add('has-date');
+        calendarBtn.title = 'Clear due date';
+        calendarBtn.onclick = function() {
+            if (dateInput) dateInput.value = '';
+            updateCalendarBtn(dateInput, calendarBtn);
+        };
+    } else {
+        calendarBtn.innerHTML = CALENDAR_ICON;
+        calendarBtn.classList.remove('has-date');
+        calendarBtn.title = 'Due date';
+        calendarBtn.onclick = function() {
+            openDatePicker(dateInput);
+        };
+    }
+}
+
+function initCalendarBtn() {
+    const dateInput = document.getElementById('add-date');
+    const calendarBtn = document.getElementById('calendar-btn');
+    if (!dateInput || !calendarBtn) return;
+
+    updateCalendarBtn(dateInput, calendarBtn);
+
+    dateInput.addEventListener('change', function() {
+        updateCalendarBtn(dateInput, calendarBtn);
+    });
+
+    const addRow = document.querySelector('.add-row');
+    if (addRow) {
+        addRow.addEventListener('htmx:afterRequest', function() {
+            setTimeout(function() { updateCalendarBtn(dateInput, calendarBtn); }, 0);
+        });
+    }
 }
 
 // --- Archive ---
@@ -424,5 +489,6 @@ function hideInactivityWarning() {
 
 document.addEventListener('DOMContentLoaded', function() {
     initNoteEditor();
+    initCalendarBtn();
     setupInactivityLogout();
 });

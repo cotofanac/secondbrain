@@ -129,22 +129,24 @@ func initDB() {
 		log.Fatal(err)
 	}
 
-	migrations := []string{
+	schema := []string{
 		`CREATE TABLE IF NOT EXISTS todos (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			category TEXT NOT NULL CHECK(category IN ('groceries','todo')),
+			category TEXT NOT NULL CHECK(category IN ('groceries','todo','shopping')),
 			text TEXT NOT NULL,
 			due_date TEXT DEFAULT '',
 			done INTEGER DEFAULT 0,
 			position INTEGER DEFAULT 0,
-			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			archived INTEGER DEFAULT 0
 		)`,
 		`CREATE TABLE IF NOT EXISTS notes (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			title TEXT NOT NULL UNIQUE,
 			content TEXT DEFAULT '',
 			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			archived INTEGER DEFAULT 0
 		)`,
 		`CREATE TABLE IF NOT EXISTS habits (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -160,15 +162,11 @@ func initDB() {
 			FOREIGN KEY (habit_id) REFERENCES habits(id) ON DELETE CASCADE
 		)`,
 	}
-	for _, m := range migrations {
-		if _, err := db.Exec(m); err != nil {
+	for _, stmt := range schema {
+		if _, err := db.Exec(stmt); err != nil {
 			log.Fatal(err)
 		}
 	}
-
-	// Add archived columns (ignore errors if already exist)
-	db.Exec("ALTER TABLE todos ADD COLUMN archived INTEGER DEFAULT 0")
-	db.Exec("ALTER TABLE notes ADD COLUMN archived INTEGER DEFAULT 0")
 
 	// Seed a default note if none exist
 	var count int
@@ -370,7 +368,7 @@ type Todo struct {
 
 func handleTodos(w http.ResponseWriter, r *http.Request) {
 	category := r.URL.Query().Get("category")
-	if category != "groceries" && category != "todo" {
+	if category != "groceries" && category != "todo" && category != "shopping" {
 		category = "groceries"
 	}
 
@@ -406,7 +404,7 @@ func handleAddTodo(w http.ResponseWriter, r *http.Request) {
 	}
 
 	category := r.FormValue("category")
-	if category != "groceries" && category != "todo" {
+	if category != "groceries" && category != "todo" && category != "shopping" {
 		http.Error(w, "Invalid category", http.StatusBadRequest)
 		return
 	}
@@ -494,7 +492,7 @@ func handleDeleteTodo(w http.ResponseWriter, r *http.Request) {
 
 func handleArchiveTodos(w http.ResponseWriter, r *http.Request) {
 	category := r.URL.Query().Get("category")
-	if category != "groceries" && category != "todo" {
+	if category != "groceries" && category != "todo" && category != "shopping" {
 		category = "groceries"
 	}
 

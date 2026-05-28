@@ -5,3 +5,4 @@ data/
 .env
 cmd/download/
 /tmp/
+.DS_Store

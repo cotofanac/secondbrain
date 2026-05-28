@@ -345,22 +345,34 @@ html, body {
     box-shadow: 0 0 0 3px rgba(108, 155, 255, 0.08);
 }
 
-.add-date {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    color: var(--text);
-    padding: 0.5rem;
-    font-size: 0.85rem;
-    outline: none;
-    width: 2.5rem;
-    min-width: 2.5rem;
-    color-scheme: dark;
+.calendar-wrap {
+    position: relative;
+    display: inline-flex;
+    flex-shrink: 0;
 }
 
-.add-date::-webkit-calendar-picker-indicator {
-    filter: invert(0.7);
-    cursor: pointer;
+.add-date {
+    position: absolute;
+    left: 0;
+    bottom: 0;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+    border: 0;
+    padding: 0;
+    pointer-events: none;
+}
+
+.calendar-btn.has-date {
+    border-color: var(--accent);
+    color: var(--accent);
+    min-width: 3.2rem;
+}
+
+.calendar-btn-label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    white-space: nowrap;
 }
 
 .btn-add {

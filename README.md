@@ -16,7 +16,7 @@ docker compose up -d
 
 ## Features
 
-- **Tasks**: Groceries + To-Do tabs with due dates
+- **Tasks**: Shopping List + To-Do tabs with due dates
 - **Notes**: Multiple files, auto-save
 - **PWA**: Install on mobile, works from home screen
 - **Secure**: 8-digit passcode, HttpOnly cookies, constant-time comparison
