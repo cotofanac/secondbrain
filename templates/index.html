@@ -7,12 +7,13 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <title>SecondBrain</title>
-    <link rel="manifest" href="/static/manifest.json?v=20260528">
+    <link rel="manifest" href="/static/manifest.json?v=20260528b">
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
     <link rel="apple-touch-icon" href="/static/icon-192.svg">
-    <link rel="stylesheet" href="/static/style.css?v=20260528">
+    <link rel="stylesheet" href="/static/style.css?v=20260528b">
 </head>
 <body data-inactivity-timeout-seconds="{{.InactivityTimeoutSeconds}}">
+    <div id="app">
     <!-- Top nav: mode switcher -->
     <header class="topbar" id="topbar">
         <nav class="mode-switch">
@@ -40,7 +41,7 @@
         <div class="tab-bar" id="tab-bar">
             <div class="tab-group">
                 <button class="tab" data-cat="shopping" onclick="switchTab('shopping', this)">
-                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg>
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 0 1-8 0"/></svg>
                     Shopping List
                 </button>
                 <button class="tab active" data-cat="groceries" onclick="switchTab('groceries', this)">
@@ -170,6 +171,7 @@
             {{end}}
         </div>
     </main>
+    </div><!-- #app -->
 
     <div id="inactivity-warning" class="inactivity-warning" hidden aria-hidden="true">
         <div class="inactivity-sheet" role="dialog" aria-modal="true" aria-labelledby="inactivity-title" aria-describedby="inactivity-message">
@@ -184,7 +186,8 @@
         </div>
     </div>
 
-    <script src="https://unpkg.com/htmx.org@2.0.4/dist/htmx.min.js"></script>
-    <script src="/static/app.js?v=20260528"></script>
+    <script src="/static/htmx.min.js"></script>
+    <script>window.htmx || document.write('<script src="https://unpkg.com/htmx.org@2.0.4/dist/htmx.min.js"><\/script>')</script>
+    <script src="/static/app.js?v=20260528b"></script>
 </body>
 </html>

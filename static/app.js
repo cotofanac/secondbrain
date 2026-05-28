@@ -253,7 +253,7 @@ function renameNote() {
 }
 
 if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('/static/sw.js?v=20260528');
+    navigator.serviceWorker.register('/static/sw.js?v=20260528b');
 }
 
 // --- Calendar button for todo due date ---
