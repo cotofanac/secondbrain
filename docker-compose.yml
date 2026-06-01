@@ -1,6 +1,6 @@
 services:
   secondbrain:
-    build: .
+    image: havedreams/secondbrain:latest
     container_name: secondbrain
     restart: unless-stopped
     ports:
@@ -17,3 +17,9 @@ services:
       #   mkdir -p data && sudo chown -R 1000:1000 data
       # An absolute host path works too (e.g. /srv/secondbrain/data:/app/data)
       - ./data:/app/data
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s

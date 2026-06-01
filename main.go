@@ -16,7 +16,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -33,14 +32,56 @@ var (
 	templates                *template.Template
 	passcode                 string
 	inactivityTimeoutMinutes = 45
-	validNameRe              = regexp.MustCompile(`^[\w\s\-]+$`)
+	validNameRe              = regexp.MustCompile(`^[^\x00-\x1f\x7f]+$`)
 
-	// Session store: token -> expiry
-	sessions   = make(map[string]time.Time)
-	sessionsMu sync.RWMutex
 )
 
 const sessionDuration = 72 * time.Hour
+
+func securityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:")
+		next.ServeHTTP(w, r)
+	})
+}
+
+func handleHealth(w http.ResponseWriter, _ *http.Request) {
+	if err := db.Ping(); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		w.Write([]byte(`{"status":"error"}`))
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Write([]byte(`{"status":"ok"}`))
+}
+
+// loggingMiddleware wraps a handler and emits one log line per request:
+// METHOD /path STATUS duration
+func loggingMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		rw := &responseWriter{ResponseWriter: w, status: http.StatusOK}
+		next.ServeHTTP(rw, r)
+		// skip noisy static-asset lines in logs
+		if !strings.HasPrefix(r.URL.Path, "/static/") {
+			log.Printf("%s %s %d %s", r.Method, r.URL.Path, rw.status, time.Since(start).Round(time.Millisecond))
+		}
+	})
+}
+
+type responseWriter struct {
+	http.ResponseWriter
+	status int
+}
+
+func (rw *responseWriter) WriteHeader(code int) {
+	rw.status = code
+	rw.ResponseWriter.WriteHeader(code)
+}
 
 func main() {
 	passcode = os.Getenv("PASSCODE")
@@ -54,6 +95,7 @@ func main() {
 			log.Fatal("INACTIVITY_LOGOUT_MINUTES must be a positive integer")
 		}
 		inactivityTimeoutMinutes = mins
+		log.Printf("Inactivity logout set to %d minutes", inactivityTimeoutMinutes)
 	}
 
 	initDB()
@@ -70,12 +112,24 @@ func main() {
 			}
 			return t.Format("Jan 2")
 		},
+		"isOverdue": func(s string) bool {
+			if s == "" {
+				return false
+			}
+			t, err := time.Parse("2006-01-02", s)
+			if err != nil {
+				return false
+			}
+			return t.Before(time.Now().Truncate(24 * time.Hour))
+		},
 	}
 	templates = template.Must(template.New("").Funcs(funcMap).ParseFS(templateFiles, "templates/*.html"))
+	log.Printf("Templates loaded")
 
 	staticFS, _ := fs.Sub(staticFiles, "static")
 	http.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticFS))))
 
+	http.HandleFunc("/health", handleHealth)
 	http.HandleFunc("/", authMiddleware(handleIndex))
 	http.HandleFunc("/login", handleLogin)
 	http.HandleFunc("/logout", handleLogout)
@@ -83,8 +137,10 @@ func main() {
 	// Todo API
 	http.HandleFunc("/todos", authMiddleware(handleTodos))
 	http.HandleFunc("/todos/add", authMiddleware(handleAddTodo))
+	http.HandleFunc("/todos/edit", authMiddleware(handleEditTodo))
 	http.HandleFunc("/todos/toggle", authMiddleware(handleToggleTodo))
 	http.HandleFunc("/todos/delete", authMiddleware(handleDeleteTodo))
+	http.HandleFunc("/todos/clear-checked", authMiddleware(handleClearChecked))
 	http.HandleFunc("/todos/archive", authMiddleware(handleArchiveTodos))
 	http.HandleFunc("/todos/restore", authMiddleware(handleRestoreTodo))
 	http.HandleFunc("/todos/permanent-delete", authMiddleware(handlePermanentDeleteTodo))
@@ -102,6 +158,7 @@ func main() {
 	// Habits API
 	http.HandleFunc("/habits", authMiddleware(handleHabits))
 	http.HandleFunc("/habits/add", authMiddleware(handleAddHabit))
+	http.HandleFunc("/habits/rename", authMiddleware(handleRenameHabit))
 	http.HandleFunc("/habits/toggle", authMiddleware(handleToggleHabit))
 	http.HandleFunc("/habits/delete", authMiddleware(handleDeleteHabit))
 	http.HandleFunc("/habits/archive", authMiddleware(handleArchiveHabits))
@@ -112,8 +169,8 @@ func main() {
 	if port == "" {
 		port = "8080"
 	}
-	log.Printf("SecondBrain running on :%s", port)
-	log.Fatal(http.ListenAndServe(":"+port, nil))
+	log.Printf("SecondBrain listening on :%s (inactivity timeout: %d min)", port, inactivityTimeoutMinutes)
+	log.Fatal(http.ListenAndServe(":"+port, loggingMiddleware(securityHeaders(http.DefaultServeMux))))
 }
 
 func initDB() {
@@ -123,8 +180,10 @@ func initDB() {
 	}
 	os.MkdirAll(dataDir, 0750)
 
+	dbPath := dataDir + "/secondbrain.db"
+	log.Printf("Opening database: %s", dbPath)
 	var err error
-	db, err = sql.Open("sqlite3", dataDir+"/secondbrain.db?_journal_mode=WAL&_busy_timeout=5000")
+	db, err = sql.Open("sqlite3", dbPath+"?_journal_mode=WAL&_busy_timeout=5000")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -161,6 +220,10 @@ func initDB() {
 			PRIMARY KEY (habit_id, date),
 			FOREIGN KEY (habit_id) REFERENCES habits(id) ON DELETE CASCADE
 		)`,
+		`CREATE TABLE IF NOT EXISTS sessions (
+			token TEXT PRIMARY KEY,
+			expires_at TEXT NOT NULL
+		)`,
 	}
 	for _, stmt := range schema {
 		if _, err := db.Exec(stmt); err != nil {
@@ -168,12 +231,16 @@ func initDB() {
 		}
 	}
 
+	db.Exec("DELETE FROM sessions WHERE expires_at <= datetime('now')")
+
 	// Seed a default note if none exist
 	var count int
 	db.QueryRow("SELECT COUNT(*) FROM notes").Scan(&count)
 	if count == 0 {
 		db.Exec("INSERT INTO notes (title, content) VALUES (?, ?)", "Quick Notes", "")
+		log.Printf("Database initialized with default note")
 	}
+	log.Printf("Database ready")
 }
 
 // --- Auth ---
@@ -186,26 +253,21 @@ func generateToken() string {
 
 func createSession() string {
 	token := generateToken()
-	sessionsMu.Lock()
-	sessions[token] = time.Now().Add(sessionDuration)
-	sessionsMu.Unlock()
+	expiry := time.Now().UTC().Add(sessionDuration).Format(time.RFC3339)
+	db.Exec("INSERT INTO sessions (token, expires_at) VALUES (?, ?)", token, expiry)
 	return token
 }
 
 func validSession(token string) bool {
-	sessionsMu.RLock()
-	expiry, ok := sessions[token]
-	sessionsMu.RUnlock()
-	if !ok {
+	if token == "" {
 		return false
 	}
-	if time.Now().After(expiry) {
-		sessionsMu.Lock()
-		delete(sessions, token)
-		sessionsMu.Unlock()
-		return false
-	}
-	return true
+	var count int
+	err := db.QueryRow(
+		"SELECT COUNT(*) FROM sessions WHERE token = ? AND expires_at > datetime('now')",
+		token,
+	).Scan(&count)
+	return err == nil && count > 0
 }
 
 func getSessionToken(r *http.Request) string {
@@ -251,6 +313,7 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 		isHTMX := r.Header.Get("HX-Request") == "true"
 
 		if len(submitted) != 8 || subtle.ConstantTimeCompare([]byte(submitted), []byte(passcode)) != 1 {
+			log.Printf("Failed login attempt from %s", r.RemoteAddr)
 			if isHTMX {
 				w.Header().Set("HX-Retarget", "#error")
 				w.Header().Set("HX-Reswap", "innerHTML")
@@ -261,6 +324,7 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		log.Printf("Successful login from %s", r.RemoteAddr)
 		token := createSession()
 		http.SetCookie(w, &http.Cookie{
 			Name:     "session",
@@ -282,9 +346,8 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 func handleLogout(w http.ResponseWriter, r *http.Request) {
 	token := getSessionToken(r)
 	if token != "" {
-		sessionsMu.Lock()
-		delete(sessions, token)
-		sessionsMu.Unlock()
+		db.Exec("DELETE FROM sessions WHERE token = ?", token)
+		log.Printf("Session logged out from %s", r.RemoteAddr)
 	}
 	http.SetCookie(w, &http.Cookie{
 		Name:     "session",
@@ -297,6 +360,24 @@ func handleLogout(w http.ResponseWriter, r *http.Request) {
 }
 
 // --- Pages ---
+
+func loadSuggestions(category string) []string {
+	rows, err := db.Query(
+		"SELECT DISTINCT text FROM todos WHERE category = ? ORDER BY text ASC",
+		category,
+	)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var s string
+		rows.Scan(&s)
+		items = append(items, s)
+	}
+	return items
+}
 
 func handleIndex(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
@@ -345,12 +426,16 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 		CurrentNote              Note
 		Habits                   []Habit
 		InactivityTimeoutSeconds int
+		GrocerySuggestions       []string
+		ShoppingSuggestions      []string
 	}{
 		Todos:                    todos,
 		Notes:                    notesList,
 		CurrentNote:              currentNote,
 		Habits:                   habits,
 		InactivityTimeoutSeconds: inactivityTimeoutMinutes * 60,
+		GrocerySuggestions:       loadSuggestions("groceries"),
+		ShoppingSuggestions:      loadSuggestions("shopping"),
 	}
 
 	templates.ExecuteTemplate(w, "index.html", data)
@@ -426,16 +511,84 @@ func handleAddTodo(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	_, err := db.Exec(
-		"INSERT INTO todos (category, text, due_date) VALUES (?, ?, ?)",
-		category, text, dueDate,
-	)
+	// For list-type categories, reuse an existing item (active or archived) rather than
+	// creating a duplicate. This keeps recurring items (e.g. "potatoes") as a single row.
+	var action string
+	if category == "groceries" || category == "shopping" {
+		var existingID int
+		err := db.QueryRow(
+			"SELECT id FROM todos WHERE category = ? AND text = ? COLLATE NOCASE LIMIT 1",
+			category, text,
+		).Scan(&existingID)
+		if err == nil {
+			_, err = db.Exec(
+				"UPDATE todos SET done = 0, archived = 0, due_date = '' WHERE id = ?",
+				existingID,
+			)
+			if err != nil {
+				http.Error(w, "DB error", http.StatusInternalServerError)
+				return
+			}
+			action = "restored"
+		} else {
+			_, err = db.Exec(
+				"INSERT INTO todos (category, text, due_date) VALUES (?, ?, ?)",
+				category, text, dueDate,
+			)
+			if err != nil {
+				http.Error(w, "DB error", http.StatusInternalServerError)
+				return
+			}
+			action = "added"
+		}
+	} else {
+		_, err := db.Exec(
+			"INSERT INTO todos (category, text, due_date) VALUES (?, ?, ?)",
+			category, text, dueDate,
+		)
+		if err != nil {
+			http.Error(w, "DB error", http.StatusInternalServerError)
+			return
+		}
+		action = "added"
+	}
+	log.Printf("Todo %s: [%s] %q", action, category, text)
+
+	// Return updated list
+	r.URL.RawQuery = "category=" + category
+	handleTodos(w, r)
+}
+
+func handleEditTodo(w http.ResponseWriter, r *http.Request) {
+	if !requirePost(w, r) {
+		return
+	}
+
+	id, ok := parseID(w, r)
+	if !ok {
+		return
+	}
+
+	text := strings.TrimSpace(r.FormValue("text"))
+	if text == "" || len(text) > 500 {
+		http.Error(w, "Invalid text", http.StatusBadRequest)
+		return
+	}
+
+	var category string
+	err := db.QueryRow("SELECT category FROM todos WHERE id = ? AND archived = 0", id).Scan(&category)
+	if err != nil {
+		http.Error(w, "Not found", http.StatusNotFound)
+		return
+	}
+
+	_, err = db.Exec("UPDATE todos SET text = ? WHERE id = ?", text, id)
 	if err != nil {
 		http.Error(w, "DB error", http.StatusInternalServerError)
 		return
 	}
+	log.Printf("Todo edited: id=%d %q", id, text)
 
-	// Return updated list
 	r.URL.RawQuery = "category=" + category
 	handleTodos(w, r)
 }
@@ -460,6 +613,7 @@ func handleToggleTodo(w http.ResponseWriter, r *http.Request) {
 	}
 
 	db.Exec("UPDATE todos SET done = CASE WHEN done = 0 THEN 1 ELSE 0 END WHERE id = ?", id)
+	log.Printf("Todo toggled: id=%d [%s]", id, category)
 
 	r.URL.RawQuery = "category=" + category
 	handleTodos(w, r)
@@ -485,6 +639,25 @@ func handleDeleteTodo(w http.ResponseWriter, r *http.Request) {
 	}
 
 	db.Exec("UPDATE todos SET archived = 1 WHERE id = ?", id)
+	log.Printf("Todo archived: id=%d [%s]", id, category)
+
+	r.URL.RawQuery = "category=" + category
+	handleTodos(w, r)
+}
+
+func handleClearChecked(w http.ResponseWriter, r *http.Request) {
+	if !requirePost(w, r) {
+		return
+	}
+
+	category := r.FormValue("category")
+	if category != "groceries" && category != "shopping" {
+		http.Error(w, "Invalid category", http.StatusBadRequest)
+		return
+	}
+
+	db.Exec("UPDATE todos SET done = 0 WHERE category = ? AND archived = 0 AND done = 1", category)
+	log.Printf("Cleared checked items: [%s]", category)
 
 	r.URL.RawQuery = "category=" + category
 	handleTodos(w, r)
@@ -541,6 +714,7 @@ func handleRestoreTodo(w http.ResponseWriter, r *http.Request) {
 	}
 
 	db.Exec("UPDATE todos SET archived = 0 WHERE id = ?", id)
+	log.Printf("Todo restored: id=%d [%s]", id, category)
 
 	r.URL.RawQuery = "category=" + category
 	handleArchiveTodos(w, r)
@@ -566,6 +740,7 @@ func handlePermanentDeleteTodo(w http.ResponseWriter, r *http.Request) {
 	}
 
 	db.Exec("DELETE FROM todos WHERE id = ?", id)
+	log.Printf("Todo permanently deleted: id=%d [%s]", id, category)
 
 	r.URL.RawQuery = "category=" + category
 	handleArchiveTodos(w, r)
@@ -672,6 +847,7 @@ func handleSaveNote(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "DB error", http.StatusInternalServerError)
 		return
 	}
+	log.Printf("Note saved: id=%d (%d bytes)", id, len(content))
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "saved"})
@@ -706,6 +882,7 @@ func handleCreateNote(w http.ResponseWriter, r *http.Request) {
 	}
 
 	newID, _ := result.LastInsertId()
+	log.Printf("Note created: %q (id=%d)", title, newID)
 	r.URL.RawQuery = "id=" + strconv.FormatInt(newID, 10)
 	handleNotes(w, r)
 }
@@ -731,6 +908,7 @@ func handleDeleteNote(w http.ResponseWriter, r *http.Request) {
 	}
 
 	db.Exec("UPDATE notes SET archived = 1 WHERE id = ?", id)
+	log.Printf("Note archived: id=%d", id)
 
 	r.URL.RawQuery = ""
 	handleNotes(w, r)
@@ -768,6 +946,7 @@ func handleRenameNote(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "DB error", http.StatusInternalServerError)
 		return
 	}
+	log.Printf("Note renamed: id=%d -> %q", id, title)
 
 	r.URL.RawQuery = "id=" + strconv.Itoa(id)
 	handleNotes(w, r)
@@ -918,6 +1097,41 @@ func handleAddHabit(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "DB error", http.StatusInternalServerError)
 		return
 	}
+	log.Printf("Habit added: %q", name)
+
+	handleHabits(w, r)
+}
+
+func handleRenameHabit(w http.ResponseWriter, r *http.Request) {
+	if !requirePost(w, r) {
+		return
+	}
+
+	id, ok := parseID(w, r)
+	if !ok {
+		return
+	}
+
+	name := strings.TrimSpace(r.FormValue("name"))
+	if name == "" || len(name) > 120 {
+		http.Error(w, "Invalid habit name", http.StatusBadRequest)
+		return
+	}
+	if !validNameRe.MatchString(name) {
+		http.Error(w, "Invalid characters in habit name", http.StatusBadRequest)
+		return
+	}
+
+	_, err := db.Exec("UPDATE habits SET name = ? WHERE id = ?", name, id)
+	if err != nil {
+		if strings.Contains(err.Error(), "UNIQUE") {
+			http.Error(w, "Habit already exists", http.StatusConflict)
+			return
+		}
+		http.Error(w, "DB error", http.StatusInternalServerError)
+		return
+	}
+	log.Printf("Habit renamed: id=%d -> %q", id, name)
 
 	handleHabits(w, r)
 }
@@ -945,6 +1159,9 @@ func handleToggleHabit(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "DB error", http.StatusInternalServerError)
 			return
 		}
+		log.Printf("Habit checked: id=%d date=%s", id, today)
+	} else {
+		log.Printf("Habit unchecked: id=%d date=%s", id, today)
 	}
 
 	handleHabits(w, r)
@@ -965,6 +1182,7 @@ func handleDeleteHabit(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "DB error", http.StatusInternalServerError)
 		return
 	}
+	log.Printf("Habit archived: id=%d", id)
 
 	handleHabits(w, r)
 }

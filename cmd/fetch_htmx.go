@@ -34,5 +34,10 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Failed to write: %v\n", err)
 		os.Exit(1)
 	}
+	if n < 20000 {
+		os.Remove("static/htmx.min.js")
+		fmt.Fprintf(os.Stderr, "Downloaded file too small (%d bytes) — likely corrupted\n", n)
+		os.Exit(1)
+	}
 	fmt.Printf("Downloaded HTMX: %d bytes\n", n)
 }
