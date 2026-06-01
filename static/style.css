@@ -11,8 +11,8 @@
     --border: #333;
     --text: #e0e0e0;
     --text-dim: #888;
-    --accent: #6c9bff;
-    --accent-dim: #3a5a8a;
+    --accent: #7a9ef5;
+    --accent-dim: #3d5a9a;
     --danger: #ff6b6b;
     --success: #6bff9b;
     --radius: 10px;
@@ -47,25 +47,12 @@ html, body {
     max-width: 340px;
 }
 
-.login-icon {
-    color: var(--accent);
-    margin-bottom: 1.2rem;
-    opacity: 0.7;
-}
-
 .login-title {
     font-size: 1.6rem;
     font-weight: 700;
     margin-bottom: 0.3rem;
     color: var(--text);
     letter-spacing: -0.03em;
-}
-
-.login-subtitle {
-    font-size: 0.85rem;
-    color: var(--text-dim);
-    margin-bottom: 2rem;
-    font-weight: 400;
 }
 
 .login-form {
@@ -105,16 +92,6 @@ html, body {
     color: var(--danger);
     font-size: 0.82rem;
     min-height: 1.2em;
-}
-
-.btn-unlock {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 0.5rem;
-    padding: 0.7rem 1.2rem;
-    font-size: 0.95rem;
-    border-radius: 12px;
 }
 
 /* Buttons */
@@ -418,7 +395,6 @@ html, body {
     background: none;
     border: none;
     color: var(--text-dim);
-    font-size: 1.2rem;
     cursor: pointer;
     padding: 0.2rem;
     width: 1.8rem;
@@ -428,6 +404,10 @@ html, body {
     justify-content: center;
     -webkit-tap-highlight-color: transparent;
 }
+
+.icon-checked { display: none; }
+.checked .icon-unchecked { display: none; }
+.checked .icon-checked { display: block; }
 
 .check-btn.checked {
     color: var(--success);
@@ -444,6 +424,23 @@ html, body {
     font-size: 0.75rem;
     white-space: nowrap;
     flex-shrink: 0;
+}
+
+.todo-date.overdue {
+    color: var(--danger);
+}
+
+.todo-edit-input {
+    flex: 1;
+    background: none;
+    border: none;
+    border-bottom: 1px solid var(--accent);
+    color: var(--text);
+    font-size: inherit;
+    font-family: inherit;
+    padding: 0;
+    outline: none;
+    min-width: 0;
 }
 
 .del-btn {
@@ -701,11 +698,11 @@ html, body {
     background: none;
     border: none;
     color: var(--text-dim);
-    font-size: 1.2rem;
     cursor: pointer;
     padding: 0.2rem;
     width: 1.8rem;
     height: 1.8rem;
+    display: flex;
     align-items: center;
     justify-content: center;
     -webkit-tap-highlight-color: transparent;
@@ -716,14 +713,10 @@ html, body {
 }
 
 .habit-streak {
-    font-size: 0.74rem;
-    color: #ffaa44;
-    background: rgba(255, 170, 68, 0.12);
-    border: 1px solid rgba(255, 170, 68, 0.35);
-    border-radius: 999px;
-    padding: 0.12rem 0.45rem;
-    min-width: 2rem;
-    text-align: center;
+    font-size: 0.75rem;
+    color: rgba(255, 170, 68, 0.65);
+    font-weight: 500;
+    flex-shrink: 0;
 }
 
 /* Inactivity warning */
@@ -797,6 +790,8 @@ html {
     }
     .note-editor {
         min-height: calc(100vh - 11rem);
+        max-width: 65ch;
+        margin-inline: auto;
     }
     .inactivity-warning {
         align-items: center;

@@ -35,6 +35,19 @@ function switchTab(category, el) {
     const archiveBtn = document.getElementById('archive-btn');
     if (archiveBtn) archiveBtn.classList.remove('active');
 
+    const addInput = document.querySelector('.add-input');
+    if (addInput) {
+        if (category === 'groceries') addInput.setAttribute('list', 'grocery-suggestions');
+        else if (category === 'shopping') addInput.setAttribute('list', 'shopping-suggestions');
+        else addInput.removeAttribute('list');
+    }
+
+    const clearBtn = document.getElementById('clear-checked-btn');
+    if (clearBtn) {
+        clearBtn.style.visibility = category !== 'todo' ? '' : 'hidden';
+        clearBtn.style.pointerEvents = category !== 'todo' ? '' : 'none';
+    }
+
     htmx.ajax('GET', '/todos?category=' + category, '#todo-items');
 }
 
@@ -314,11 +327,25 @@ function initCalendarBtn() {
 }
 
 // --- Archive ---
+function clearChecked() {
+    const category = document.getElementById('add-category').value;
+    htmx.ajax('POST', '/todos/clear-checked', {
+        target: '#todo-items',
+        swap: 'innerHTML',
+        values: { category }
+    });
+}
+
 function showArchive() {
     const cat = document.getElementById('add-category').value;
     htmx.ajax('GET', '/todos/archive?category=' + cat, '#todo-items');
     document.getElementById('add-form').style.display = 'none';
     document.getElementById('archive-btn').classList.add('active');
+    const clearBtn = document.getElementById('clear-checked-btn');
+    if (clearBtn) {
+        clearBtn.style.visibility = 'hidden';
+        clearBtn.style.pointerEvents = 'none';
+    }
 }
 
 function hideArchive() {
@@ -486,6 +513,90 @@ function hideInactivityWarning() {
         inactivityCountdownTimer = null;
     }
 }
+
+// --- Inline todo editing ---
+function startTodoEdit(spanEl) {
+    const originalText = spanEl.textContent.trim();
+    const item = spanEl.closest('.todo-item');
+    if (!item) return;
+    const id = item.querySelector('input[name="id"]').value;
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.value = originalText;
+    input.className = 'todo-edit-input';
+    spanEl.replaceWith(input);
+    input.focus();
+    input.select();
+
+    let done = false;
+    function save() {
+        if (done) return;
+        done = true;
+        const newText = input.value.trim();
+        if (!newText || newText === originalText) { input.replaceWith(spanEl); return; }
+        htmx.ajax('POST', '/todos/edit', {
+            target: '#todo-items',
+            swap: 'innerHTML',
+            values: { id, text: newText }
+        });
+    }
+    function cancel() {
+        if (done) return;
+        done = true;
+        input.replaceWith(spanEl);
+    }
+    input.addEventListener('keydown', e => {
+        if (e.key === 'Enter') { e.preventDefault(); save(); }
+        if (e.key === 'Escape') cancel();
+    });
+    input.addEventListener('blur', save);
+}
+
+function startHabitRename(spanEl) {
+    const originalName = spanEl.textContent.trim();
+    const item = spanEl.closest('.habit-item');
+    if (!item) return;
+    const id = item.querySelector('input[name="id"]').value;
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.value = originalName;
+    input.className = 'todo-edit-input';
+    spanEl.replaceWith(input);
+    input.focus();
+    input.select();
+
+    let done = false;
+    function save() {
+        if (done) return;
+        done = true;
+        const newName = input.value.trim();
+        if (!newName || newName === originalName) { input.replaceWith(spanEl); return; }
+        htmx.ajax('POST', '/habits/rename', {
+            target: '#habits-content',
+            swap: 'innerHTML',
+            values: { id, name: newName }
+        });
+    }
+    function cancel() {
+        if (done) return;
+        done = true;
+        input.replaceWith(spanEl);
+    }
+    input.addEventListener('keydown', e => {
+        if (e.key === 'Enter') { e.preventDefault(); save(); }
+        if (e.key === 'Escape') cancel();
+    });
+    input.addEventListener('blur', save);
+}
+
+document.addEventListener('dblclick', function(e) {
+    const todoSpan = e.target.closest('.todo-text');
+    if (todoSpan) { startTodoEdit(todoSpan); return; }
+    const habitSpan = e.target.closest('.habit-name');
+    if (habitSpan) startHabitRename(habitSpan);
+});
 
 document.addEventListener('DOMContentLoaded', function() {
     initNoteEditor();
