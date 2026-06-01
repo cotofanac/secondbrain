@@ -325,7 +325,7 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 			http.Redirect(w, r, "/", http.StatusSeeOther)
 			return
 		}
-		renderTemplate(w,"login.html", nil)
+		renderTemplate(w, "login.html", nil)
 		return
 	}
 
@@ -343,7 +343,7 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("HX-Reswap", "innerHTML")
 				fmt.Fprint(w, "Wrong passcode")
 			} else {
-				renderTemplate(w,"login.html", "Wrong passcode")
+				renderTemplate(w, "login.html", "Wrong passcode")
 			}
 			return
 		}
@@ -462,7 +462,7 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 		ShoppingSuggestions:      loadSuggestions("shopping"),
 	}
 
-	renderTemplate(w,"index.html", data)
+	renderTemplate(w, "index.html", data)
 }
 
 // --- Todos ---
@@ -503,7 +503,7 @@ func handleTodos(w http.ResponseWriter, r *http.Request) {
 		Todos    []Todo
 	}{category, todos}
 
-	renderTemplate(w,"todo-list.html", data)
+	renderTemplate(w, "todo-list.html", data)
 }
 
 func handleAddTodo(w http.ResponseWriter, r *http.Request) {
@@ -715,7 +715,7 @@ func handleArchiveTodos(w http.ResponseWriter, r *http.Request) {
 		Todos    []Todo
 	}{category, todos}
 
-	renderTemplate(w,"todo-archive.html", data)
+	renderTemplate(w, "todo-archive.html", data)
 }
 
 func handleRestoreTodo(w http.ResponseWriter, r *http.Request) {
@@ -845,7 +845,7 @@ func handleNotes(w http.ResponseWriter, r *http.Request) {
 		CurrentNote Note
 	}{notesList, currentNote}
 
-	renderTemplate(w,"notes.html", data)
+	renderTemplate(w, "notes.html", data)
 }
 
 func handleSaveNote(w http.ResponseWriter, r *http.Request) {
@@ -991,7 +991,7 @@ func handleArchiveNotes(w http.ResponseWriter, r *http.Request) {
 		notes = append(notes, n)
 	}
 
-	renderTemplate(w,"notes-archive.html", notes)
+	renderTemplate(w, "notes-archive.html", notes)
 }
 
 func handleRestoreNote(w http.ResponseWriter, r *http.Request) {
@@ -1094,7 +1094,7 @@ func loadHabits() []Habit {
 
 func handleHabits(w http.ResponseWriter, r *http.Request) {
 	habits := loadHabits()
-	renderTemplate(w,"habits.html", habits)
+	renderTemplate(w, "habits.html", habits)
 }
 
 func handleAddHabit(w http.ResponseWriter, r *http.Request) {
@@ -1226,7 +1226,7 @@ func handleArchiveHabits(w http.ResponseWriter, r *http.Request) {
 		habits = append(habits, h)
 	}
 
-	renderTemplate(w,"habits-archive.html", habits)
+	renderTemplate(w, "habits-archive.html", habits)
 }
 
 func handleRestoreHabit(w http.ResponseWriter, r *http.Request) {
