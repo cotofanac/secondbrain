@@ -205,19 +205,25 @@ function saveCurrentNote() {
 
     const id = editor.dataset.noteId;
     const content = editor.value;
+    const updatedAt = editor.dataset.updatedAt || '';
 
     fetch('/notes/save', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: 'id=' + encodeURIComponent(id) + '&content=' + encodeURIComponent(content)
-    }).then(r => {
-        if (r.ok) {
+        body: 'id=' + encodeURIComponent(id)
+            + '&content=' + encodeURIComponent(content)
+            + '&updated_at=' + encodeURIComponent(updatedAt)
+    }).then(r => r.json()).then(data => {
+        if (data.status === 'saved') {
+            editor.dataset.updatedAt = data.updated_at || updatedAt;
             showNoteStatus('Saved');
             setTimeout(() => showNoteStatus(''), 2000);
+        } else if (data.status === 'conflict') {
+            showNoteStatus('Conflict — edited on another device. Reload to see latest.');
         } else {
             showNoteStatus('Error saving');
         }
-    }).catch(() => showNoteStatus('Offline - not saved'));
+    }).catch(() => showNoteStatus('Offline — not saved'));
 }
 
 function showNoteStatus(msg) {
@@ -225,13 +231,43 @@ function showNoteStatus(msg) {
     if (el) el.textContent = msg;
 }
 
-function loadNote(id) {
-    const select = document.getElementById('note-select');
-    if (select) select.blur();
+function toggleNotePicker() {
+    const panel = document.getElementById('note-picker-panel');
+    const search = document.getElementById('note-picker-search');
+    if (!panel) return;
+    const opening = panel.hidden;
+    panel.hidden = !opening;
+    if (opening && search) {
+        search.value = '';
+        filterNotes('');
+        search.focus();
+    }
+}
 
-    setTimeout(() => {
-        htmx.ajax('GET', '/notes?id=' + id, '#notes-content');
-    }, 0);
+function filterNotes(query) {
+    const q = query.toLowerCase().trim();
+    document.querySelectorAll('.note-picker-item').forEach(item => {
+        item.hidden = q !== '' && !item.dataset.title.toLowerCase().includes(q);
+    });
+}
+
+function selectNote(id) {
+    const panel = document.getElementById('note-picker-panel');
+    if (panel) panel.hidden = true;
+    htmx.ajax('GET', '/notes?id=' + id, '#notes-content');
+}
+
+document.addEventListener('click', function(e) {
+    const picker = document.getElementById('note-picker');
+    if (picker && !picker.contains(e.target)) {
+        const panel = document.getElementById('note-picker-panel');
+        if (panel) panel.hidden = true;
+    }
+});
+
+
+function loadNote(id) {
+    htmx.ajax('GET', '/notes?id=' + id, '#notes-content');
 }
 
 function createNote() {
@@ -255,8 +291,8 @@ function deleteNote() {
 function renameNote() {
     const editor = document.getElementById('note-editor');
     if (!editor) return;
-    const select = document.getElementById('note-select');
-    const current = select.options[select.selectedIndex].text;
+    const label = document.querySelector('.note-picker-label');
+    const current = label ? label.textContent.trim() : '';
     const title = prompt('New name:', current);
     if (!title || !title.trim() || title.trim() === current) return;
     htmx.ajax('POST', '/notes/rename', {
@@ -597,6 +633,71 @@ document.addEventListener('dblclick', function(e) {
     const habitSpan = e.target.closest('.habit-name');
     if (habitSpan) startHabitRename(habitSpan);
 });
+
+// --- Global search ---
+function openSearch() {
+    const overlay = document.getElementById('search-overlay');
+    if (overlay) overlay.classList.add('visible');
+    const input = document.getElementById('search-input');
+    if (input) { input.value = ''; input.focus(); }
+    const results = document.getElementById('search-results');
+    if (results) results.innerHTML = '';
+}
+
+function closeSearch() {
+    const overlay = document.getElementById('search-overlay');
+    if (overlay) overlay.classList.remove('visible');
+    const input = document.getElementById('search-input');
+    if (input) input.value = '';
+    const results = document.getElementById('search-results');
+    if (results) results.innerHTML = '';
+}
+
+// "/" key on desktop
+document.addEventListener('keydown', function(e) {
+    const tag = document.activeElement.tagName;
+    if (e.key === '/' && tag !== 'INPUT' && tag !== 'TEXTAREA') {
+        e.preventDefault();
+        openSearch();
+    }
+});
+
+// Pull-down-from-top on mobile
+(function() {
+    let touchStartY = 0;
+    let triggered = false;
+    document.addEventListener('touchstart', function(e) {
+        touchStartY = e.touches[0].clientY;
+        triggered = false;
+    }, { passive: true });
+    document.addEventListener('touchmove', function(e) {
+        if (triggered || window.scrollY > 0) return;
+        if (e.touches[0].clientY - touchStartY > 60) {
+            triggered = true;
+            openSearch();
+        }
+    }, { passive: true });
+})();
+
+function openNoteResult(id) {
+    closeSearch();
+    switchMode('notes');
+    htmx.ajax('GET', '/notes?id=' + id, '#notes-content');
+}
+
+function openTodoResult(category) {
+    closeSearch();
+    switchMode('todos');
+    switchTab(category, document.querySelector('[data-cat="' + category + '"]'));
+}
+
+document.addEventListener('keydown', function(e) {
+    if (e.key !== 'Escape') return;
+    closeSearch();
+    const pickerPanel = document.getElementById('note-picker-panel');
+    if (pickerPanel) pickerPanel.hidden = true;
+});
+
 
 document.addEventListener('DOMContentLoaded', function() {
     initNoteEditor();

@@ -1,9 +1,21 @@
 <div class="notes-toolbar">
-    <select id="note-select" class="note-select" onchange="loadNote(this.value)">
-        {{range .Notes}}
-        <option value="{{.ID}}" {{if eq .ID $.CurrentNote.ID}}selected{{end}}>{{.Title}}</option>
-        {{end}}
-    </select>
+    <div class="note-picker" id="note-picker">
+        <button type="button" class="note-picker-btn" onclick="toggleNotePicker()">
+            <span class="note-picker-label">{{.CurrentNote.Title}}</span>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+        </button>
+        <div class="note-picker-panel" id="note-picker-panel" hidden>
+            <input type="text" class="note-picker-search" id="note-picker-search"
+                   placeholder="Filter notes..." autocomplete="off"
+                   oninput="filterNotes(this.value)">
+            <div class="note-picker-list">
+                {{range .Notes}}
+                <button type="button" class="note-picker-item {{if eq .ID $.CurrentNote.ID}}active{{end}}"
+                        data-title="{{.Title}}" onclick="selectNote({{.ID}})">{{.Title}}</button>
+                {{end}}
+            </div>
+        </div>
+    </div>
     <div class="notes-actions">
         <button class="btn btn-icon" onclick="createNote()" title="New note">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
@@ -23,7 +35,8 @@
     <span id="note-status" class="note-status"></span>
     {{if .CurrentNote.UpdatedAt}}<span class="note-updated">{{formatUpdated .CurrentNote.UpdatedAt}}</span>{{end}}
 </div>
-<textarea id="note-editor" class="note-editor" 
+<textarea id="note-editor" class="note-editor"
           data-note-id="{{.CurrentNote.ID}}"
+          data-updated-at="{{.CurrentNote.UpdatedAt}}"
           placeholder="Start typing... 1. list, *bold*, _italic_, [] checkbox">{{.CurrentNote.Content}}</textarea>
 <script>initNoteEditor();</script>

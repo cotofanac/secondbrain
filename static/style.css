@@ -222,6 +222,103 @@ html, body {
     opacity: 1;
 }
 
+/* Search */
+.search-overlay {
+    overflow: hidden;
+    max-height: 0;
+    transition: max-height 0.2s ease;
+    background: var(--bg);
+    border-bottom: 1px solid transparent;
+}
+
+.search-overlay.visible {
+    max-height: 20rem;
+    border-bottom-color: var(--border);
+}
+
+.search-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.6rem 1rem;
+}
+
+.search-icon {
+    color: var(--text-dim);
+    flex-shrink: 0;
+    opacity: 0.5;
+}
+
+.search-input {
+    flex: 1;
+    background: none;
+    border: none;
+    color: var(--text);
+    font-family: inherit;
+    font-size: 0.95rem;
+    outline: none;
+}
+
+.search-input::placeholder {
+    color: var(--text-dim);
+    opacity: 0.5;
+}
+
+.search-close {
+    background: none;
+    border: none;
+    flex-shrink: 0;
+}
+
+.search-results {
+    max-height: 60vh;
+    overflow-y: auto;
+}
+
+.search-section-label {
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--text-dim);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 0.5rem 1rem 0.25rem;
+    opacity: 0.6;
+}
+
+.search-result-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    background: none;
+    border: none;
+    border-top: 1px solid rgba(255, 255, 255, 0.04);
+    color: var(--text);
+    font-family: inherit;
+    font-size: 0.9rem;
+    padding: 0.7rem 1rem;
+    text-align: left;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    transition: background 0.1s;
+}
+
+.search-result-cat {
+    font-size: 0.72rem;
+    color: var(--text-dim);
+    opacity: 0.6;
+    flex-shrink: 0;
+    margin-left: 0.5rem;
+}
+
+.search-empty {
+    padding: 2rem 1rem;
+    text-align: center;
+    font-size: 0.88rem;
+    color: var(--text-dim);
+    opacity: 0.5;
+}
+
 /* Tab bar */
 .tab-bar {
     display: flex;
@@ -491,8 +588,17 @@ html, body {
     border-bottom: 1px solid rgba(255, 255, 255, 0.04);
 }
 
-.note-select {
+.note-picker {
     flex: 1;
+    position: relative;
+}
+
+.note-picker-btn {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.4rem;
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 8px;
@@ -500,8 +606,72 @@ html, body {
     padding: 0.5rem 0.7rem;
     font-size: 0.88rem;
     font-family: inherit;
+    cursor: pointer;
+    text-align: left;
+    transition: border-color 0.15s;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.note-picker-label {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.note-picker-panel {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    right: 0;
+    z-index: 200;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    overflow: hidden;
+}
+
+.note-picker-search {
+    width: 100%;
+    background: var(--surface2);
+    border: none;
+    border-bottom: 1px solid var(--border);
+    color: var(--text);
+    font-family: inherit;
+    font-size: 0.85rem;
+    padding: 0.6rem 0.8rem;
     outline: none;
-    appearance: auto;
+}
+
+.note-picker-list {
+    max-height: 240px;
+    overflow-y: auto;
+}
+
+.note-picker-item {
+    display: block;
+    width: 100%;
+    background: none;
+    border: none;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+    color: var(--text);
+    font-family: inherit;
+    font-size: 0.88rem;
+    padding: 0.6rem 0.8rem;
+    text-align: left;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    transition: background 0.1s;
+}
+
+.note-picker-item:last-child {
+    border-bottom: none;
+}
+
+.note-picker-item.active {
+    color: var(--accent);
+    font-weight: 500;
 }
 
 .notes-actions {
@@ -854,7 +1024,11 @@ html {
     .logout-btn:hover {
         opacity: 1;
     }
-    .note-select:hover,
+    .search-result-item:hover {
+        background: rgba(255, 255, 255, 0.03);
+    }
+    .note-picker-btn:hover,
+    .note-picker-item:hover,
     .btn-back:hover {
         border-color: var(--text-dim);
         color: var(--text);
