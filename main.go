@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/rand"
 	"crypto/subtle"
 	"database/sql"
@@ -37,6 +38,16 @@ var (
 )
 
 const sessionDuration = 72 * time.Hour
+
+func renderTemplate(w http.ResponseWriter, name string, data any) {
+	var buf bytes.Buffer
+	if err := templates.ExecuteTemplate(&buf, name, data); err != nil {
+		log.Printf("Template error (%s): %v", name, err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+	buf.WriteTo(w)
+}
 
 func securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -111,6 +122,19 @@ func main() {
 				return s
 			}
 			return t.Format("Jan 2")
+		},
+		"formatUpdated": func(s string) string {
+			t, err := time.Parse("2006-01-02 15:04:05", s)
+			if err != nil {
+				return ""
+			}
+			if time.Since(t) < 24*time.Hour {
+				return t.Format("3:04 PM")
+			}
+			if t.Year() == time.Now().Year() {
+				return t.Format("Jan 2")
+			}
+			return t.Format("Jan 2, 2006")
 		},
 		"isOverdue": func(s string) bool {
 			if s == "" {
@@ -301,7 +325,7 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 			http.Redirect(w, r, "/", http.StatusSeeOther)
 			return
 		}
-		templates.ExecuteTemplate(w, "login.html", nil)
+		renderTemplate(w,"login.html", nil)
 		return
 	}
 
@@ -319,7 +343,7 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("HX-Reswap", "innerHTML")
 				fmt.Fprint(w, "Wrong passcode")
 			} else {
-				templates.ExecuteTemplate(w, "login.html", "Wrong passcode")
+				renderTemplate(w,"login.html", "Wrong passcode")
 			}
 			return
 		}
@@ -415,7 +439,7 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 	if len(notesList) > 0 {
 		currentNote.ID = notesList[0].ID
 		currentNote.Title = notesList[0].Title
-		db.QueryRow("SELECT content FROM notes WHERE id = ?", currentNote.ID).Scan(&currentNote.Content)
+		db.QueryRow("SELECT content, updated_at FROM notes WHERE id = ?", currentNote.ID).Scan(&currentNote.Content, &currentNote.UpdatedAt)
 	}
 
 	habits := loadHabits()
@@ -438,7 +462,7 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 		ShoppingSuggestions:      loadSuggestions("shopping"),
 	}
 
-	templates.ExecuteTemplate(w, "index.html", data)
+	renderTemplate(w,"index.html", data)
 }
 
 // --- Todos ---
@@ -479,7 +503,7 @@ func handleTodos(w http.ResponseWriter, r *http.Request) {
 		Todos    []Todo
 	}{category, todos}
 
-	templates.ExecuteTemplate(w, "todo-list.html", data)
+	renderTemplate(w,"todo-list.html", data)
 }
 
 func handleAddTodo(w http.ResponseWriter, r *http.Request) {
@@ -691,7 +715,7 @@ func handleArchiveTodos(w http.ResponseWriter, r *http.Request) {
 		Todos    []Todo
 	}{category, todos}
 
-	templates.ExecuteTemplate(w, "todo-archive.html", data)
+	renderTemplate(w,"todo-archive.html", data)
 }
 
 func handleRestoreTodo(w http.ResponseWriter, r *http.Request) {
@@ -806,14 +830,14 @@ func handleNotes(w http.ResponseWriter, r *http.Request) {
 	var currentNote Note
 	if noteIDStr != "" {
 		noteID, _ := strconv.Atoi(noteIDStr)
-		db.QueryRow("SELECT id, title, content FROM notes WHERE id = ?", noteID).Scan(
-			&currentNote.ID, &currentNote.Title, &currentNote.Content,
+		db.QueryRow("SELECT id, title, content, updated_at FROM notes WHERE id = ?", noteID).Scan(
+			&currentNote.ID, &currentNote.Title, &currentNote.Content, &currentNote.UpdatedAt,
 		)
 	}
 	if currentNote.ID == 0 {
 		currentNote.ID = notesList[0].ID
 		currentNote.Title = notesList[0].Title
-		db.QueryRow("SELECT content FROM notes WHERE id = ?", currentNote.ID).Scan(&currentNote.Content)
+		db.QueryRow("SELECT content, updated_at FROM notes WHERE id = ?", currentNote.ID).Scan(&currentNote.Content, &currentNote.UpdatedAt)
 	}
 
 	data := struct {
@@ -821,7 +845,7 @@ func handleNotes(w http.ResponseWriter, r *http.Request) {
 		CurrentNote Note
 	}{notesList, currentNote}
 
-	templates.ExecuteTemplate(w, "notes.html", data)
+	renderTemplate(w,"notes.html", data)
 }
 
 func handleSaveNote(w http.ResponseWriter, r *http.Request) {
@@ -967,7 +991,7 @@ func handleArchiveNotes(w http.ResponseWriter, r *http.Request) {
 		notes = append(notes, n)
 	}
 
-	templates.ExecuteTemplate(w, "notes-archive.html", notes)
+	renderTemplate(w,"notes-archive.html", notes)
 }
 
 func handleRestoreNote(w http.ResponseWriter, r *http.Request) {
@@ -1070,7 +1094,7 @@ func loadHabits() []Habit {
 
 func handleHabits(w http.ResponseWriter, r *http.Request) {
 	habits := loadHabits()
-	templates.ExecuteTemplate(w, "habits.html", habits)
+	renderTemplate(w,"habits.html", habits)
 }
 
 func handleAddHabit(w http.ResponseWriter, r *http.Request) {
@@ -1202,7 +1226,7 @@ func handleArchiveHabits(w http.ResponseWriter, r *http.Request) {
 		habits = append(habits, h)
 	}
 
-	templates.ExecuteTemplate(w, "habits-archive.html", habits)
+	renderTemplate(w,"habits-archive.html", habits)
 }
 
 func handleRestoreHabit(w http.ResponseWriter, r *http.Request) {
