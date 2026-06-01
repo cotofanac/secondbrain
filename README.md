@@ -1,6 +1,6 @@
 # SecondBrain
 
-Minimalist self-hosted to-do list + notes PWA. Built with Go, HTMX, and SQLite.
+Minimalist self-hosted PWA for tasks, notes, and habits. Built with Go, HTMX, and SQLite.
 
 ## Quick Start
 
@@ -8,7 +8,7 @@ Minimalist self-hosted to-do list + notes PWA. Built with Go, HTMX, and SQLite.
 # 1. Create .env with your 8-digit passcode
 echo "PASSCODE=12345678" > .env
 
-# 2. Build and run
+# 2. Pull and run (image hosted on Docker Hub)
 docker compose up -d
 
 # 3. Open http://localhost:8080
@@ -16,12 +16,14 @@ docker compose up -d
 
 ## Features
 
-- **Tasks**: Shopping List + To-Do tabs with due dates
-- **Notes**: Multiple files, auto-save
-- **PWA**: Install on mobile, works from home screen
+- **Groceries & Buys**: Reusable checklists — re-adding an item unchecks it instead of duplicating
+- **Tasks**: To-do list with optional due dates and overdue highlighting
+- **Notes**: Multiple notes, auto-save, last-edited timestamp
+- **Habits**: Daily tracking with streak counter
+- **PWA**: Install on mobile or desktop, works from home screen
 - **Secure**: 8-digit passcode, HttpOnly cookies, constant-time comparison
 - **Minimal**: Single Go binary, SQLite, HTMX — no JS frameworks
-- **Collapsible UI**: Tabs hide on scroll for focus
+- **Collapsible UI**: Tabs and add form hide on scroll for focus
 
 ## Configuration
 
