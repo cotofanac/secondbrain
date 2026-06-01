@@ -154,6 +154,7 @@ func main() {
 	http.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticFS))))
 
 	http.HandleFunc("/health", handleHealth)
+	http.HandleFunc("/search", authMiddleware(handleSearch))
 	http.HandleFunc("/", authMiddleware(handleIndex))
 	http.HandleFunc("/login", handleLogin)
 	http.HandleFunc("/logout", handleLogout)
@@ -866,6 +867,20 @@ func handleSaveNote(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Optimistic concurrency: if the client sends the timestamp it loaded,
+	// reject the save if another device already wrote a newer version.
+	clientUpdatedAt := r.FormValue("updated_at")
+	if clientUpdatedAt != "" {
+		var currentUpdatedAt string
+		db.QueryRow("SELECT updated_at FROM notes WHERE id = ?", id).Scan(&currentUpdatedAt)
+		if currentUpdatedAt != clientUpdatedAt {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusConflict)
+			json.NewEncoder(w).Encode(map[string]string{"status": "conflict"})
+			return
+		}
+	}
+
 	_, err = db.Exec("UPDATE notes SET content = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", content, id)
 	if err != nil {
 		http.Error(w, "DB error", http.StatusInternalServerError)
@@ -873,8 +888,11 @@ func handleSaveNote(w http.ResponseWriter, r *http.Request) {
 	}
 	log.Printf("Note saved: id=%d (%d bytes)", id, len(content))
 
+	var newUpdatedAt string
+	db.QueryRow("SELECT updated_at FROM notes WHERE id = ?", id).Scan(&newUpdatedAt)
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "saved"})
+	json.NewEncoder(w).Encode(map[string]string{"status": "saved", "updated_at": newUpdatedAt})
 }
 
 func handleCreateNote(w http.ResponseWriter, r *http.Request) {
@@ -974,6 +992,52 @@ func handleRenameNote(w http.ResponseWriter, r *http.Request) {
 
 	r.URL.RawQuery = "id=" + strconv.Itoa(id)
 	handleNotes(w, r)
+}
+
+type SearchResultData struct {
+	Query string
+	Notes []Note
+	Todos []Todo
+}
+
+func handleSearch(w http.ResponseWriter, r *http.Request) {
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	if q == "" {
+		w.Write([]byte(""))
+		return
+	}
+
+	pattern := "%" + q + "%"
+
+	noteRows, err := db.Query(
+		"SELECT id, title FROM notes WHERE archived = 0 AND (title LIKE ? OR content LIKE ?) ORDER BY updated_at DESC LIMIT 10",
+		pattern, pattern,
+	)
+	var notes []Note
+	if err == nil {
+		defer noteRows.Close()
+		for noteRows.Next() {
+			var n Note
+			noteRows.Scan(&n.ID, &n.Title)
+			notes = append(notes, n)
+		}
+	}
+
+	todoRows, err := db.Query(
+		"SELECT id, category, text FROM todos WHERE archived = 0 AND done = 0 AND text LIKE ? ORDER BY created_at DESC LIMIT 10",
+		pattern,
+	)
+	var todos []Todo
+	if err == nil {
+		defer todoRows.Close()
+		for todoRows.Next() {
+			var t Todo
+			todoRows.Scan(&t.ID, &t.Category, &t.Text)
+			todos = append(todos, t)
+		}
+	}
+
+	renderTemplate(w, "search.html", SearchResultData{Query: q, Notes: notes, Todos: todos})
 }
 
 func handleArchiveNotes(w http.ResponseWriter, r *http.Request) {

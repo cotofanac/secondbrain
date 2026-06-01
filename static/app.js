@@ -1,16 +1,53 @@
 // --- Mode switching (Tasks / Notes / Habits) ---
+const MODE_TITLES = { todos: 'Tasks', notes: 'Notes', habits: 'Habits' };
+
 function switchMode(mode) {
-    document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
-    document.querySelector(`[data-mode="${mode}"]`).classList.add('active');
+    document.querySelectorAll('.bottom-nav-btn').forEach(b => b.classList.remove('active'));
+    document.querySelector(`.bottom-nav-btn[data-mode="${mode}"]`).classList.add('active');
 
     document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
     document.getElementById(mode + '-view').classList.add('active');
+
+    const titleEl = document.getElementById('topbar-title');
+    if (titleEl) titleEl.textContent = MODE_TITLES[mode] || mode;
 
     if (mode === 'notes') {
         const editor = document.getElementById('note-editor');
         if (editor) editor.focus();
     }
+
+    updateTopbarStat();
 }
+
+function updateTopbarStat() {
+    const stat = document.getElementById('topbar-stat');
+    if (!stat) return;
+
+    const now = new Date();
+    const date = now.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+
+    const activeMode = document.querySelector('.bottom-nav-btn.active')?.dataset.mode;
+    let count = '';
+
+    if (activeMode === 'todos') {
+        const archiveOpen = document.getElementById('archive-btn')?.classList.contains('active');
+        if (!archiveOpen) {
+            const pending = document.querySelectorAll('#todo-items .todo-item:not(.done):not(.archived-item)').length;
+            if (pending > 0) count = pending + ' left';
+        }
+    } else if (activeMode === 'habits') {
+        const total = document.querySelectorAll('#habits-content .habit-item').length;
+        const done = document.querySelectorAll('#habits-content .habit-item.done').length;
+        if (total > 0) count = done + '/' + total;
+    }
+
+    stat.textContent = count ? date + ' · ' + count : date;
+}
+
+document.body.addEventListener('htmx:afterSwap', function(e) {
+    const id = e.detail.target?.id;
+    if (id === 'todo-items' || id === 'habits-content') updateTopbarStat();
+});
 
 // --- Tab switching (Shopping List / To-Do / Groceries Checklist) ---
 function switchTab(category, el) {
@@ -91,8 +128,30 @@ function initNoteEditor() {
         saveTimer = setTimeout(() => saveCurrentNote(), 800);
     });
 
+    // Click/tap within the checkbox marker area to toggle
+    editor.addEventListener('click', function() {
+        const pos = editor.selectionStart;
+        const line = getCurrentLine(editor.value, pos);
+        if (pos - line.start <= 6) toggleCheckboxLine(editor);
+    });
+
     autoResize(editor);
     editor.addEventListener('input', () => autoResize(editor));
+}
+
+function toggleCheckboxLine(editor) {
+    const pos = editor.selectionStart;
+    const line = getCurrentLine(editor.value, pos);
+    let newLineText = null;
+    if (/^(\s*)- \[ \] /.test(line.text)) {
+        newLineText = line.text.replace('- [ ] ', '- [x] ');
+    } else if (/^(\s*)- \[x\] /i.test(line.text)) {
+        newLineText = line.text.replace(/- \[x\] /i, '- [ ] ');
+    }
+    if (!newLineText) return;
+    editor.value = editor.value.slice(0, line.start) + newLineText + editor.value.slice(line.end);
+    editor.setSelectionRange(pos, pos);
+    editor.dispatchEvent(new Event('input', { bubbles: true }));
 }
 
 function handleNoteEditorKeydown(e, editor) {
@@ -105,6 +164,11 @@ function handleNoteEditorKeydown(e, editor) {
     if (isMod && !e.shiftKey && (e.key === 'i' || e.key === 'I')) {
         e.preventDefault();
         toggleWrappedSelection(editor, '_');
+        return;
+    }
+    if (isMod && e.key === 'Enter') {
+        e.preventDefault();
+        toggleCheckboxLine(editor);
         return;
     }
 
@@ -205,19 +269,25 @@ function saveCurrentNote() {
 
     const id = editor.dataset.noteId;
     const content = editor.value;
+    const updatedAt = editor.dataset.updatedAt || '';
 
     fetch('/notes/save', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: 'id=' + encodeURIComponent(id) + '&content=' + encodeURIComponent(content)
-    }).then(r => {
-        if (r.ok) {
+        body: 'id=' + encodeURIComponent(id)
+            + '&content=' + encodeURIComponent(content)
+            + '&updated_at=' + encodeURIComponent(updatedAt)
+    }).then(r => r.json()).then(data => {
+        if (data.status === 'saved') {
+            editor.dataset.updatedAt = data.updated_at || updatedAt;
             showNoteStatus('Saved');
             setTimeout(() => showNoteStatus(''), 2000);
+        } else if (data.status === 'conflict') {
+            showNoteStatus('Conflict — edited on another device. Reload to see latest.');
         } else {
             showNoteStatus('Error saving');
         }
-    }).catch(() => showNoteStatus('Offline - not saved'));
+    }).catch(() => showNoteStatus('Offline — not saved'));
 }
 
 function showNoteStatus(msg) {
@@ -225,21 +295,90 @@ function showNoteStatus(msg) {
     if (el) el.textContent = msg;
 }
 
-function loadNote(id) {
-    const select = document.getElementById('note-select');
-    if (select) select.blur();
-
-    setTimeout(() => {
-        htmx.ajax('GET', '/notes?id=' + id, '#notes-content');
-    }, 0);
+function toggleNotePicker() {
+    const panel = document.getElementById('note-picker-panel');
+    const search = document.getElementById('note-picker-search');
+    if (!panel) return;
+    const opening = panel.hidden;
+    panel.hidden = !opening;
+    if (opening && search) {
+        search.value = '';
+        filterNotes('');
+        search.focus();
+    }
 }
 
-function createNote() {
-    const title = prompt('Note name:');
-    if (!title || !title.trim()) return;
+function filterNotes(query) {
+    const q = query.toLowerCase().trim();
+    document.querySelectorAll('.note-picker-item').forEach(item => {
+        item.hidden = q !== '' && !item.dataset.title.toLowerCase().includes(q);
+    });
+}
+
+function selectNote(id) {
+    const panel = document.getElementById('note-picker-panel');
+    if (panel) panel.hidden = true;
+    htmx.ajax('GET', '/notes?id=' + id, '#notes-content');
+}
+
+document.addEventListener('click', function(e) {
+    const picker = document.getElementById('note-picker');
+    if (picker && !picker.contains(e.target)) {
+        const panel = document.getElementById('note-picker-panel');
+        if (panel) panel.hidden = true;
+    }
+});
+
+
+function loadNote(id) {
+    htmx.ajax('GET', '/notes?id=' + id, '#notes-content');
+}
+
+function showPrompt(label, defaultValue = '') {
+    return new Promise(resolve => {
+        const dialog = document.getElementById('custom-dialog');
+        const labelEl = document.getElementById('custom-dialog-label');
+        const input = document.getElementById('custom-dialog-input');
+        const confirmBtn = document.getElementById('custom-dialog-confirm');
+        const cancelBtn = document.getElementById('custom-dialog-cancel');
+
+        labelEl.textContent = label;
+        input.value = defaultValue;
+        dialog.hidden = false;
+        setTimeout(() => { input.focus(); input.select(); }, 50);
+
+        function submit() {
+            const val = input.value.trim();
+            cleanup();
+            resolve(val || null);
+        }
+        function dismiss() { cleanup(); resolve(null); }
+        function cleanup() {
+            dialog.hidden = true;
+            confirmBtn.removeEventListener('click', submit);
+            cancelBtn.removeEventListener('click', dismiss);
+            input.removeEventListener('keydown', onKey);
+            dialog.removeEventListener('click', onBackdrop);
+        }
+        function onKey(e) {
+            if (e.key === 'Enter') { e.preventDefault(); submit(); }
+            if (e.key === 'Escape') dismiss();
+        }
+        function onBackdrop(e) { if (e.target === dialog) dismiss(); }
+
+        confirmBtn.addEventListener('click', submit);
+        cancelBtn.addEventListener('click', dismiss);
+        input.addEventListener('keydown', onKey);
+        dialog.addEventListener('click', onBackdrop);
+    });
+}
+
+async function createNote() {
+    const title = await showPrompt('Note name');
+    if (!title) return;
     htmx.ajax('POST', '/notes/create', {
         target: '#notes-content',
-        values: { title: title.trim() }
+        values: { title }
     });
 }
 
@@ -252,21 +391,21 @@ function deleteNote() {
     });
 }
 
-function renameNote() {
+async function renameNote() {
     const editor = document.getElementById('note-editor');
     if (!editor) return;
-    const select = document.getElementById('note-select');
-    const current = select.options[select.selectedIndex].text;
-    const title = prompt('New name:', current);
-    if (!title || !title.trim() || title.trim() === current) return;
+    const label = document.querySelector('.note-picker-label');
+    const current = label ? label.textContent.trim() : '';
+    const title = await showPrompt('Rename note', current);
+    if (!title || title === current) return;
     htmx.ajax('POST', '/notes/rename', {
         target: '#notes-content',
-        values: { id: editor.dataset.noteId, title: title.trim() }
+        values: { id: editor.dataset.noteId, title }
     });
 }
 
 if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('/static/sw.js?v=20260528b');
+    navigator.serviceWorker.register('/static/sw.js', { updateViaCache: 'none' });
 }
 
 // --- Calendar button for todo due date ---
@@ -363,12 +502,12 @@ function hideNotesArchive() {
     htmx.ajax('GET', '/notes', '#notes-content');
 }
 
-function addHabit() {
-    const name = prompt('Habit name:');
-    if (!name || !name.trim()) return;
+async function addHabit() {
+    const name = await showPrompt('Habit name');
+    if (!name) return;
     htmx.ajax('POST', '/habits/add', {
         target: '#habits-content',
-        values: { name: name.trim() }
+        values: { name }
     });
 }
 
@@ -598,8 +737,74 @@ document.addEventListener('dblclick', function(e) {
     if (habitSpan) startHabitRename(habitSpan);
 });
 
+// --- Global search ---
+function openSearch() {
+    const overlay = document.getElementById('search-overlay');
+    if (overlay) overlay.classList.add('visible');
+    const input = document.getElementById('search-input');
+    if (input) { input.value = ''; input.focus(); }
+    const results = document.getElementById('search-results');
+    if (results) results.innerHTML = '';
+}
+
+function closeSearch() {
+    const overlay = document.getElementById('search-overlay');
+    if (overlay) overlay.classList.remove('visible');
+    const input = document.getElementById('search-input');
+    if (input) input.value = '';
+    const results = document.getElementById('search-results');
+    if (results) results.innerHTML = '';
+}
+
+// "/" key on desktop
+document.addEventListener('keydown', function(e) {
+    const tag = document.activeElement.tagName;
+    if (e.key === '/' && tag !== 'INPUT' && tag !== 'TEXTAREA') {
+        e.preventDefault();
+        openSearch();
+    }
+});
+
+// Pull-down-from-top on mobile
+(function() {
+    let touchStartY = 0;
+    let triggered = false;
+    document.addEventListener('touchstart', function(e) {
+        touchStartY = e.touches[0].clientY;
+        triggered = false;
+    }, { passive: true });
+    document.addEventListener('touchmove', function(e) {
+        if (triggered || window.scrollY > 0) return;
+        if (e.touches[0].clientY - touchStartY > 60) {
+            triggered = true;
+            openSearch();
+        }
+    }, { passive: true });
+})();
+
+function openNoteResult(id) {
+    closeSearch();
+    switchMode('notes');
+    htmx.ajax('GET', '/notes?id=' + id, '#notes-content');
+}
+
+function openTodoResult(category) {
+    closeSearch();
+    switchMode('todos');
+    switchTab(category, document.querySelector('[data-cat="' + category + '"]'));
+}
+
+document.addEventListener('keydown', function(e) {
+    if (e.key !== 'Escape') return;
+    closeSearch();
+    const pickerPanel = document.getElementById('note-picker-panel');
+    if (pickerPanel) pickerPanel.hidden = true;
+});
+
+
 document.addEventListener('DOMContentLoaded', function() {
     initNoteEditor();
     initCalendarBtn();
     setupInactivityLogout();
+    updateTopbarStat();
 });

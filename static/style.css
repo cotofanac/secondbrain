@@ -170,40 +170,58 @@ html, body {
     background: rgba(15, 15, 15, 0.85);
 }
 
-.mode-switch {
-    display: flex;
-    gap: 0;
-    background: var(--surface);
-    border-radius: var(--radius);
-    overflow: hidden;
-    border: 1px solid var(--border);
+.topbar-title {
+    font-size: 1rem;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    color: var(--text);
 }
 
-.mode-btn {
-    background: transparent;
+.topbar-stat {
+    flex: 1;
+    text-align: center;
+    font-size: 0.75rem;
+    color: var(--text-dim);
+    opacity: 0.65;
+    letter-spacing: 0.01em;
+    white-space: nowrap;
+}
+
+/* Bottom navigation */
+.bottom-nav {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 100;
+    background: rgba(15, 15, 15, 0.92);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border-top: 1px solid var(--border);
+    display: flex;
+    padding-bottom: var(--safe-bottom);
+}
+
+.bottom-nav-btn {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.2rem;
+    padding: 0.55rem 0.5rem;
+    background: none;
     border: none;
     color: var(--text-dim);
-    padding: 0.45rem 0.85rem;
-    font-size: 0.82rem;
+    font-family: inherit;
+    font-size: 0.7rem;
     cursor: pointer;
-    transition: all 0.15s;
     -webkit-tap-highlight-color: transparent;
-    display: flex;
-    align-items: center;
-    gap: 0.35rem;
+    transition: color 0.15s;
+    opacity: 0.5;
 }
 
-.mode-btn svg {
-    opacity: 0.6;
-}
-
-.mode-btn.active {
-    background: var(--accent);
-    color: #000;
-    font-weight: 600;
-}
-
-.mode-btn.active svg {
+.bottom-nav-btn.active {
+    color: var(--accent);
     opacity: 1;
 }
 
@@ -220,6 +238,103 @@ html, body {
 
 .logout-btn:active {
     opacity: 1;
+}
+
+/* Search */
+.search-overlay {
+    overflow: hidden;
+    max-height: 0;
+    transition: max-height 0.2s ease;
+    background: var(--bg);
+    border-bottom: 1px solid transparent;
+}
+
+.search-overlay.visible {
+    max-height: 20rem;
+    border-bottom-color: var(--border);
+}
+
+.search-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.6rem 1rem;
+}
+
+.search-icon {
+    color: var(--text-dim);
+    flex-shrink: 0;
+    opacity: 0.5;
+}
+
+.search-input {
+    flex: 1;
+    background: none;
+    border: none;
+    color: var(--text);
+    font-family: inherit;
+    font-size: 0.95rem;
+    outline: none;
+}
+
+.search-input::placeholder {
+    color: var(--text-dim);
+    opacity: 0.5;
+}
+
+.search-close {
+    background: none;
+    border: none;
+    flex-shrink: 0;
+}
+
+.search-results {
+    max-height: 60vh;
+    overflow-y: auto;
+}
+
+.search-section-label {
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--text-dim);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 0.5rem 1rem 0.25rem;
+    opacity: 0.6;
+}
+
+.search-result-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    background: none;
+    border: none;
+    border-top: 1px solid rgba(255, 255, 255, 0.04);
+    color: var(--text);
+    font-family: inherit;
+    font-size: 0.9rem;
+    padding: 0.7rem 1rem;
+    text-align: left;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    transition: background 0.1s;
+}
+
+.search-result-cat {
+    font-size: 0.72rem;
+    color: var(--text-dim);
+    opacity: 0.6;
+    flex-shrink: 0;
+    margin-left: 0.5rem;
+}
+
+.search-empty {
+    padding: 2rem 1rem;
+    text-align: center;
+    font-size: 0.88rem;
+    color: var(--text-dim);
+    opacity: 0.5;
 }
 
 /* Tab bar */
@@ -491,8 +606,17 @@ html, body {
     border-bottom: 1px solid rgba(255, 255, 255, 0.04);
 }
 
-.note-select {
+.note-picker {
     flex: 1;
+    position: relative;
+}
+
+.note-picker-btn {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.4rem;
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 8px;
@@ -500,8 +624,72 @@ html, body {
     padding: 0.5rem 0.7rem;
     font-size: 0.88rem;
     font-family: inherit;
+    cursor: pointer;
+    text-align: left;
+    transition: border-color 0.15s;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.note-picker-label {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.note-picker-panel {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    right: 0;
+    z-index: 200;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    overflow: hidden;
+}
+
+.note-picker-search {
+    width: 100%;
+    background: var(--surface2);
+    border: none;
+    border-bottom: 1px solid var(--border);
+    color: var(--text);
+    font-family: inherit;
+    font-size: 0.85rem;
+    padding: 0.6rem 0.8rem;
     outline: none;
-    appearance: auto;
+}
+
+.note-picker-list {
+    max-height: 240px;
+    overflow-y: auto;
+}
+
+.note-picker-item {
+    display: block;
+    width: 100%;
+    background: none;
+    border: none;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+    color: var(--text);
+    font-family: inherit;
+    font-size: 0.88rem;
+    padding: 0.6rem 0.8rem;
+    text-align: left;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    transition: background 0.1s;
+}
+
+.note-picker-item:last-child {
+    border-bottom: none;
+}
+
+.note-picker-item.active {
+    color: var(--accent);
+    font-weight: 500;
 }
 
 .notes-actions {
@@ -565,12 +753,6 @@ html, body {
 }
 
 /* Very small screens */
-@media (max-width: 360px) {
-    .mode-btn {
-        padding: 0.4rem 0.8rem;
-        font-size: 0.8rem;
-    }
-}
 
 /* Archive */
 .archive-header {
@@ -746,6 +928,65 @@ html, body {
     display: none !important;
 }
 
+/* Custom dialog */
+.custom-dialog {
+    position: fixed;
+    inset: 0;
+    z-index: 1300;
+    background: rgba(0, 0, 0, 0.55);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+}
+
+.custom-dialog[hidden] {
+    display: none !important;
+}
+
+.custom-dialog-sheet {
+    width: 100%;
+    max-width: 480px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 1.1rem 1rem 1rem;
+    box-shadow: 0 10px 35px rgba(0, 0, 0, 0.5);
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.custom-dialog-label {
+    font-size: 0.88rem;
+    color: var(--text-dim);
+    font-weight: 500;
+}
+
+.custom-dialog-input {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    color: var(--text);
+    font-family: inherit;
+    font-size: 0.95rem;
+    padding: 0.65rem 0.8rem;
+    outline: none;
+    width: 100%;
+    transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.custom-dialog-input:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(122, 158, 245, 0.1);
+}
+
+.custom-dialog-actions {
+    display: flex;
+    gap: 0.5rem;
+    justify-content: flex-end;
+}
+
 .inactivity-sheet {
     width: 100%;
     max-width: 480px;
@@ -781,6 +1022,7 @@ html {
 
 #app {
     width: 100%;
+    padding-bottom: calc(var(--safe-bottom) + 4rem);
 }
 
 ::selection {
@@ -799,6 +1041,12 @@ html {
         background: var(--bg);
         border-inline: 1px solid var(--border);
     }
+    .bottom-nav {
+        left: 50%;
+        transform: translateX(-50%);
+        width: 720px;
+        border-inline: 1px solid var(--border);
+    }
     .note-editor {
         min-height: calc(100vh - 11rem);
         max-width: 65ch;
@@ -811,13 +1059,12 @@ html {
 
 /* Mouse / trackpad hover affordances (skipped on touch devices) */
 @media (hover: hover) {
-    .mode-btn:hover {
+    .bottom-nav-btn:hover {
+        opacity: 0.8;
         color: var(--text);
-        background: rgba(255, 255, 255, 0.05);
     }
-    .mode-btn.active:hover {
-        background: var(--accent);
-        color: #000;
+    .bottom-nav-btn.active:hover {
+        opacity: 1;
     }
     .tab:hover {
         color: var(--text);
@@ -854,7 +1101,11 @@ html {
     .logout-btn:hover {
         opacity: 1;
     }
-    .note-select:hover,
+    .search-result-item:hover {
+        background: rgba(255, 255, 255, 0.03);
+    }
+    .note-picker-btn:hover,
+    .note-picker-item:hover,
     .btn-back:hover {
         border-color: var(--text-dim);
         color: var(--text);

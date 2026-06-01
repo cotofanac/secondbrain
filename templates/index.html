@@ -7,33 +7,37 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <title>SecondBrain</title>
-    <link rel="manifest" href="/static/manifest.json?v=20260528b">
+    <link rel="manifest" href="/static/manifest.json">
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
     <link rel="apple-touch-icon" href="/static/icon-192.svg">
-    <link rel="stylesheet" href="/static/style.css?v=20260528b">
+    <link rel="stylesheet" href="/static/style.css">
 </head>
 <body data-inactivity-timeout-seconds="{{.InactivityTimeoutSeconds}}">
     <div id="app">
     <!-- Top nav: mode switcher -->
     <header class="topbar" id="topbar">
-        <nav class="mode-switch">
-            <button class="mode-btn active" data-mode="todos" onclick="switchMode('todos')">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
-                Tasks
-            </button>
-            <button class="mode-btn" data-mode="notes" onclick="switchMode('notes')">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
-                Notes
-            </button>
-            <button class="mode-btn" data-mode="habits" onclick="switchMode('habits')">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
-                Habits
-            </button>
-        </nav>
+        <span class="topbar-title" id="topbar-title">Tasks</span>
+        <span class="topbar-stat" id="topbar-stat"></span>
         <a href="/logout" class="logout-btn" title="Logout">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
         </a>
     </header>
+
+    <!-- Search overlay -->
+    <div id="search-overlay" class="search-overlay">
+        <div class="search-bar">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="search-icon"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <input type="text" id="search-input" class="search-input"
+                   placeholder="Search notes and tasks..."
+                   hx-get="/search" hx-trigger="input changed delay:200ms"
+                   hx-target="#search-results" hx-swap="innerHTML"
+                   name="q" autocomplete="off">
+            <button type="button" class="btn-icon search-close" onclick="closeSearch()">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+        </div>
+        <div id="search-results" class="search-results"></div>
+    </div>
 
     <!-- Todos view -->
     <main id="todos-view" class="view active">
@@ -50,7 +54,7 @@
                 </button>
                 <button class="tab" data-cat="todo" onclick="switchTab('todo', this)">
                     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
-                    Tasks
+                    To-Do
                 </button>
             </div>
             <button class="btn-icon tab-archive" id="clear-checked-btn" onclick="clearChecked()" title="Reset list">
@@ -119,11 +123,23 @@
     <main id="notes-view" class="view">
         <div id="notes-content">
             <div class="notes-toolbar">
-                <select id="note-select" class="note-select" onchange="loadNote(this.value)">
-                    {{range .Notes}}
-                    <option value="{{.ID}}" {{if eq .ID $.CurrentNote.ID}}selected{{end}}>{{.Title}}</option>
-                    {{end}}
-                </select>
+                <div class="note-picker" id="note-picker">
+                    <button type="button" class="note-picker-btn" onclick="toggleNotePicker()">
+                        <span class="note-picker-label">{{.CurrentNote.Title}}</span>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+                    </button>
+                    <div class="note-picker-panel" id="note-picker-panel" hidden>
+                        <input type="text" class="note-picker-search" id="note-picker-search"
+                               placeholder="Filter notes..." autocomplete="off"
+                               oninput="filterNotes(this.value)">
+                        <div class="note-picker-list">
+                            {{range .Notes}}
+                            <button type="button" class="note-picker-item {{if eq .ID $.CurrentNote.ID}}active{{end}}"
+                                    data-title="{{.Title}}" onclick="selectNote({{.ID}})">{{.Title}}</button>
+                            {{end}}
+                        </div>
+                    </div>
+                </div>
                 <div class="notes-actions">
                     <button class="btn btn-icon" onclick="createNote()" title="New note">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
@@ -139,9 +155,13 @@
                     </button>
                 </div>
             </div>
-            <div class="note-status" id="note-status"></div>
-            <textarea id="note-editor" class="note-editor" 
+            <div class="note-meta">
+                <span id="note-status" class="note-status"></span>
+                {{if .CurrentNote.UpdatedAt}}<span class="note-updated">{{formatUpdated .CurrentNote.UpdatedAt}}</span>{{end}}
+            </div>
+            <textarea id="note-editor" class="note-editor"
                       data-note-id="{{.CurrentNote.ID}}"
+                      data-updated-at="{{.CurrentNote.UpdatedAt}}"
                       placeholder="Start typing... 1. list, *bold*, _italic_, [] checkbox">{{.CurrentNote.Content}}</textarea>
         </div>
     </main>
@@ -165,7 +185,8 @@
                 <form hx-post="/habits/toggle" hx-target="#habits-content" hx-swap="innerHTML" class="habit-check-form">
                     <input type="hidden" name="id" value="{{.ID}}">
                     <button type="submit" class="habit-check {{if .DoneToday}}checked{{end}}">
-                        {{if .DoneToday}}✓{{else}}○{{end}}
+                        <svg class="icon-unchecked" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="12" cy="12" r="9"/></svg>
+                        <svg class="icon-checked" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
                     </button>
                 </form>
                 <span class="habit-name">{{.Name}}</span>
@@ -197,7 +218,33 @@
         </div>
     </div>
 
+    <div id="custom-dialog" class="custom-dialog" hidden aria-modal="true" role="dialog">
+        <div class="custom-dialog-sheet">
+            <p class="custom-dialog-label" id="custom-dialog-label"></p>
+            <input type="text" class="custom-dialog-input" id="custom-dialog-input" autocomplete="off">
+            <div class="custom-dialog-actions">
+                <button class="btn" id="custom-dialog-cancel" type="button">Cancel</button>
+                <button class="btn btn-primary" id="custom-dialog-confirm" type="button">OK</button>
+            </div>
+        </div>
+    </div>
+
+    <nav class="bottom-nav" id="bottom-nav">
+        <button class="bottom-nav-btn active" data-mode="todos" onclick="switchMode('todos')">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+            <span>Tasks</span>
+        </button>
+        <button class="bottom-nav-btn" data-mode="notes" onclick="switchMode('notes')">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+            <span>Notes</span>
+        </button>
+        <button class="bottom-nav-btn" data-mode="habits" onclick="switchMode('habits')">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+            <span>Habits</span>
+        </button>
+    </nav>
+
     <script src="/static/htmx.min.js"></script>
-    <script src="/static/app.js?v=20260528b"></script>
+    <script src="/static/app.js"></script>
 </body>
 </html>
