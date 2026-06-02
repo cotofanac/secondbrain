@@ -8,6 +8,7 @@
 {{range .Todos}}
 <div class="todo-item archived-item">
     <span class="todo-text">{{.Text}}</span>
+    {{$ago := todoArchivedAgo .ArchivedAt}}{{if $ago}}<span class="archived-ago">{{$ago}}</span>{{end}}
     {{if .DueDate}}
     <span class="todo-date">{{formatDate .DueDate}}</span>
     {{end}}
