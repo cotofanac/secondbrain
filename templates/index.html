@@ -67,8 +67,7 @@
 
         <!-- Add form -->
         <div class="add-form" id="add-form">
-            <form hx-post="/todos/add" hx-target="#todo-items" hx-swap="innerHTML"
-                  hx-on::after-request="this.reset(); this.querySelector('[name=text]').focus()" class="add-row">
+            <form hx-post="/todos/add" hx-target="#todo-items" hx-swap="innerHTML" class="add-row">
                 <input type="hidden" name="category" id="add-category" value="groceries">
                 <input type="text" name="text" placeholder="Add item..." class="add-input" list="grocery-suggestions" autocomplete="off" required>
                 <div class="calendar-wrap" id="calendar-wrap" style="display:none">
@@ -239,7 +238,10 @@
             <span>Notes</span>
         </button>
         <button class="bottom-nav-btn" data-mode="habits" onclick="switchMode('habits')">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+            <span class="nav-btn-icon-wrap">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                <span class="nav-badge" id="habits-badge" hidden></span>
+            </span>
             <span>Habits</span>
         </button>
     </nav>

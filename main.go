@@ -94,6 +94,22 @@ func (rw *responseWriter) WriteHeader(code int) {
 	rw.ResponseWriter.WriteHeader(code)
 }
 
+func startAutoArchiveTodos() {
+	go func() {
+		for {
+			res, err := db.Exec(
+				"UPDATE todos SET archived = 1, archived_at = CURRENT_TIMESTAMP WHERE category = 'todo' AND archived = 0 AND created_at <= datetime('now', '-7 days')",
+			)
+			if err == nil {
+				if n, _ := res.RowsAffected(); n > 0 {
+					log.Printf("Auto-archived %d todo items", n)
+				}
+			}
+			time.Sleep(1 * time.Hour)
+		}
+	}()
+}
+
 func main() {
 	passcode = os.Getenv("PASSCODE")
 	if len(passcode) != 8 || !regexp.MustCompile(`^\d{8}$`).MatchString(passcode) {
@@ -146,6 +162,52 @@ func main() {
 			}
 			return t.Before(time.Now().Truncate(24 * time.Hour))
 		},
+		"todoArchiveHint": func(createdAt string) string {
+			if createdAt == "" {
+				return ""
+			}
+			t, err := time.Parse("2006-01-02 15:04:05", createdAt)
+			if err != nil {
+				return ""
+			}
+			ageHours := int(time.Since(t).Hours())
+			hoursLeft := 7*24 - ageHours
+			if hoursLeft < 0 || hoursLeft >= 3*24 {
+				return ""
+			}
+			if hoursLeft < 1 {
+				return "Archives soon"
+			}
+			if hoursLeft < 24 {
+				return fmt.Sprintf("Archives in %dh", hoursLeft)
+			}
+			daysLeft := (hoursLeft + 23) / 24
+			if daysLeft == 1 {
+				return "Archives in 1 day"
+			}
+			return fmt.Sprintf("Archives in %d days", daysLeft)
+		},
+		"todoArchivedAgo": func(archivedAt string) string {
+			if archivedAt == "" {
+				return ""
+			}
+			t, err := time.Parse("2006-01-02 15:04:05", archivedAt)
+			if err != nil {
+				return ""
+			}
+			hours := int(time.Since(t).Hours())
+			if hours < 1 {
+				return "Archived just now"
+			}
+			if hours < 24 {
+				return fmt.Sprintf("Archived %dh ago", hours)
+			}
+			days := hours / 24
+			if days == 1 {
+				return "Archived 1 day ago"
+			}
+			return fmt.Sprintf("Archived %d days ago", days)
+		},
 	}
 	templates = template.Must(template.New("").Funcs(funcMap).ParseFS(templateFiles, "templates/*.html"))
 	log.Printf("Templates loaded")
@@ -189,6 +251,8 @@ func main() {
 	http.HandleFunc("/habits/archive", authMiddleware(handleArchiveHabits))
 	http.HandleFunc("/habits/restore", authMiddleware(handleRestoreHabit))
 	http.HandleFunc("/habits/permanent-delete", authMiddleware(handlePermanentDeleteHabit))
+
+	startAutoArchiveTodos()
 
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -257,6 +321,7 @@ func initDB() {
 	}
 
 	db.Exec("DELETE FROM sessions WHERE expires_at <= datetime('now')")
+	db.Exec("ALTER TABLE todos ADD COLUMN archived_at DATETIME DEFAULT NULL")
 
 	// Seed a default note if none exist
 	var count int
@@ -469,11 +534,13 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 // --- Todos ---
 
 type Todo struct {
-	ID       int
-	Category string
-	Text     string
-	DueDate  string
-	Done     bool
+	ID         int
+	Category   string
+	Text       string
+	DueDate    string
+	Done       bool
+	CreatedAt  string
+	ArchivedAt string
 }
 
 func handleTodos(w http.ResponseWriter, r *http.Request) {
@@ -483,7 +550,7 @@ func handleTodos(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rows, err := db.Query(
-		"SELECT id, category, text, due_date, done FROM todos WHERE category = ? AND archived = 0 ORDER BY done ASC, position ASC, created_at DESC",
+		"SELECT id, category, text, due_date, done, created_at FROM todos WHERE category = ? AND archived = 0 ORDER BY done ASC, position ASC, created_at DESC",
 		category,
 	)
 	if err != nil {
@@ -495,7 +562,7 @@ func handleTodos(w http.ResponseWriter, r *http.Request) {
 	var todos []Todo
 	for rows.Next() {
 		var t Todo
-		rows.Scan(&t.ID, &t.Category, &t.Text, &t.DueDate, &t.Done)
+		rows.Scan(&t.ID, &t.Category, &t.Text, &t.DueDate, &t.Done, &t.CreatedAt)
 		todos = append(todos, t)
 	}
 
@@ -663,7 +730,7 @@ func handleDeleteTodo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	db.Exec("UPDATE todos SET archived = 1 WHERE id = ?", id)
+	db.Exec("UPDATE todos SET archived = 1, archived_at = CURRENT_TIMESTAMP WHERE id = ?", id)
 	log.Printf("Todo archived: id=%d [%s]", id, category)
 
 	r.URL.RawQuery = "category=" + category
@@ -695,7 +762,7 @@ func handleArchiveTodos(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rows, err := db.Query(
-		"SELECT id, category, text, due_date, done FROM todos WHERE category = ? AND archived = 1 ORDER BY created_at DESC",
+		"SELECT id, category, text, due_date, done, COALESCE(archived_at, '') FROM todos WHERE category = ? AND archived = 1 ORDER BY COALESCE(archived_at, created_at) DESC",
 		category,
 	)
 	if err != nil {
@@ -707,7 +774,7 @@ func handleArchiveTodos(w http.ResponseWriter, r *http.Request) {
 	var todos []Todo
 	for rows.Next() {
 		var t Todo
-		rows.Scan(&t.ID, &t.Category, &t.Text, &t.DueDate, &t.Done)
+		rows.Scan(&t.ID, &t.Category, &t.Text, &t.DueDate, &t.Done, &t.ArchivedAt)
 		todos = append(todos, t)
 	}
 

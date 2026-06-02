@@ -225,6 +225,24 @@ html, body {
     opacity: 1;
 }
 
+.nav-btn-icon-wrap {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.nav-badge {
+    position: absolute;
+    top: -3px;
+    right: -5px;
+    background: var(--accent-dim);
+    border-radius: 50%;
+    width: 8px;
+    height: 8px;
+    pointer-events: none;
+}
+
 .logout-btn {
     color: var(--text-dim);
     text-decoration: none;
@@ -543,6 +561,21 @@ html, body {
 
 .todo-date.overdue {
     color: var(--danger);
+}
+
+.archive-hint {
+    font-size: 0.7rem;
+    color: #c89a30;
+    white-space: nowrap;
+    flex-shrink: 0;
+    opacity: 0.85;
+}
+
+.archived-ago {
+    font-size: 0.7rem;
+    color: var(--text-dim);
+    white-space: nowrap;
+    flex-shrink: 0;
 }
 
 .todo-edit-input {

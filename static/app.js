@@ -1,7 +1,19 @@
 // --- Mode switching (Tasks / Notes / Habits) ---
 const MODE_TITLES = { todos: 'Tasks', notes: 'Notes', habits: 'Habits' };
 
+const TAB_CYCLE = ['groceries', 'shopping', 'todo'];
+
 function switchMode(mode) {
+    const currentMode = document.querySelector('.bottom-nav-btn.active')?.dataset.mode;
+
+    if (mode === 'todos' && currentMode === 'todos') {
+        const activeCat = document.querySelector('#tab-bar .tab.active')?.dataset.cat || 'groceries';
+        const idx = TAB_CYCLE.indexOf(activeCat);
+        const nextCat = TAB_CYCLE[(idx + 1) % TAB_CYCLE.length];
+        switchTab(nextCat, document.querySelector(`[data-cat="${nextCat}"]`));
+        return;
+    }
+
     document.querySelectorAll('.bottom-nav-btn').forEach(b => b.classList.remove('active'));
     document.querySelector(`.bottom-nav-btn[data-mode="${mode}"]`).classList.add('active');
 
@@ -44,9 +56,37 @@ function updateTopbarStat() {
     stat.textContent = count ? date + ' · ' + count : date;
 }
 
+function updateHabitsBadge() {
+    const badge = document.getElementById('habits-badge');
+    if (!badge) return;
+    const items = document.querySelectorAll('#habits-content .habit-item');
+    if (items.length === 0) { badge.hidden = true; return; }
+    const undone = document.querySelectorAll('#habits-content .habit-item:not(.done)').length;
+    if (undone > 0) {
+        badge.textContent = '';
+        badge.hidden = false;
+    } else {
+        badge.hidden = true;
+    }
+}
+
 document.body.addEventListener('htmx:afterSwap', function(e) {
     const id = e.detail.target?.id;
     if (id === 'todo-items' || id === 'habits-content') updateTopbarStat();
+    if (id === 'habits-content') updateHabitsBadge();
+});
+
+document.body.addEventListener('htmx:afterRequest', function(e) {
+    if (!e.detail.successful) return;
+    const form = e.detail.elt;
+    if (!form || !form.closest('#add-form')) return;
+    const textInput = form.querySelector('[name=text]');
+    const dateInput = form.querySelector('[name=due_date]');
+    if (textInput) { textInput.value = ''; textInput.focus(); }
+    if (dateInput && dateInput.value) {
+        dateInput.value = '';
+        updateCalendarBtn(dateInput, document.getElementById('calendar-btn'));
+    }
 });
 
 // --- Tab switching (Shopping List / To-Do / Groceries Checklist) ---
@@ -382,9 +422,48 @@ async function createNote() {
     });
 }
 
-function deleteNote() {
+function showConfirm(message) {
+    return new Promise(resolve => {
+        const dialog = document.getElementById('custom-dialog');
+        const labelEl = document.getElementById('custom-dialog-label');
+        const input = document.getElementById('custom-dialog-input');
+        const confirmBtn = document.getElementById('custom-dialog-confirm');
+        const cancelBtn = document.getElementById('custom-dialog-cancel');
+
+        labelEl.textContent = message;
+        input.hidden = true;
+        dialog.hidden = false;
+        setTimeout(() => confirmBtn.focus(), 50);
+
+        function finish(result) {
+            dialog.hidden = true;
+            input.hidden = false;
+            confirmBtn.removeEventListener('click', onConfirm);
+            cancelBtn.removeEventListener('click', onCancel);
+            document.removeEventListener('keydown', onKey);
+            dialog.removeEventListener('click', onBackdrop);
+            resolve(result);
+        }
+        function onConfirm() { finish(true); }
+        function onCancel() { finish(false); }
+        function onKey(e) {
+            if (e.key === 'Enter') { e.preventDefault(); finish(true); }
+            if (e.key === 'Escape') finish(false);
+        }
+        function onBackdrop(e) { if (e.target === dialog) finish(false); }
+
+        confirmBtn.addEventListener('click', onConfirm);
+        cancelBtn.addEventListener('click', onCancel);
+        document.addEventListener('keydown', onKey);
+        dialog.addEventListener('click', onBackdrop);
+    });
+}
+
+async function deleteNote() {
     const editor = document.getElementById('note-editor');
     if (!editor) return;
+    const ok = await showConfirm('Archive this note?');
+    if (!ok) return;
     htmx.ajax('POST', '/notes/delete', {
         target: '#notes-content',
         values: { id: editor.dataset.noteId }
@@ -765,16 +844,18 @@ document.addEventListener('keydown', function(e) {
     }
 });
 
-// Pull-down-from-top on mobile
+// Pull-down-from-top on mobile — only when touch STARTED at the very top
 (function() {
     let touchStartY = 0;
     let triggered = false;
+    let startedAtTop = false;
     document.addEventListener('touchstart', function(e) {
         touchStartY = e.touches[0].clientY;
         triggered = false;
+        startedAtTop = window.scrollY === 0;
     }, { passive: true });
     document.addEventListener('touchmove', function(e) {
-        if (triggered || window.scrollY > 0) return;
+        if (triggered || !startedAtTop) return;
         if (e.touches[0].clientY - touchStartY > 60) {
             triggered = true;
             openSearch();
@@ -807,4 +888,5 @@ document.addEventListener('DOMContentLoaded', function() {
     initCalendarBtn();
     setupInactivityLogout();
     updateTopbarStat();
+    updateHabitsBadge();
 });
