@@ -15,17 +15,71 @@
 <body class="login-body">
     <div class="login-container">
         <h1 class="login-title">SecondBrain</h1>
+
+        {{if .ProfilesEnabled}}
+        <p class="login-subtitle" id="login-subtitle">Choose a profile</p>
+        <div id="profile-select" class="profile-grid">
+            {{range .Profiles}}
+            <button type="button" class="profile-card" data-id="{{.ID}}" data-name="{{.Name}}"
+                    onclick="selectProfile(this)">
+                <span class="profile-avatar">{{initial .Name}}</span>
+                <span class="profile-card-name">{{.Name}}</span>
+            </button>
+            {{end}}
+        </div>
+        <form id="passcode-form" action="/login" method="post" hx-post="/login" hx-target="body"
+              class="login-form" style="display:none">
+            <button type="button" class="profile-back" onclick="backToProfiles()">
+                &larr; <span id="selected-name"></span>
+            </button>
+            <input type="hidden" name="profile_id" id="profile_id" value="">
+            <input type="password" name="passcode" inputmode="numeric" pattern="\d{8}"
+                   maxlength="8" placeholder="&bull; &bull; &bull; &bull; &bull; &bull; &bull; &bull;"
+                   autocomplete="off" class="passcode-input" id="passcode-input">
+            <div id="error" class="error-msg">{{if .Error}}{{.Error}}{{end}}</div>
+        </form>
+        {{else}}
         <form action="/login" method="post" hx-post="/login" hx-target="body" class="login-form">
             <input type="password" name="passcode" inputmode="numeric" pattern="\d{8}"
-                   maxlength="8" placeholder="• • • • • • • •" autocomplete="off"
-                   class="passcode-input" autofocus required>
-            <div id="error" class="error-msg">{{if .}}{{.}}{{end}}</div>
+                   maxlength="8" placeholder="&bull; &bull; &bull; &bull; &bull; &bull; &bull; &bull;"
+                   autocomplete="off" class="passcode-input" autofocus required>
+            <div id="error" class="error-msg">{{if .Error}}{{.Error}}{{end}}</div>
         </form>
+        {{end}}
     </div>
+
     <script>
-        document.querySelector('.passcode-input').addEventListener('input', function() {
-            if (this.value.length === 8) this.closest('form').requestSubmit();
-        });
+        function autoSubmit(input) {
+            input.addEventListener('input', function () {
+                if (this.value.length === 8) this.closest('form').requestSubmit();
+            });
+        }
+
+        var single = document.querySelector('.login-form:not(#passcode-form) .passcode-input');
+        if (single) autoSubmit(single);
+
+        function selectProfile(btn) {
+            document.getElementById('profile_id').value = btn.dataset.id;
+            document.getElementById('selected-name').textContent = btn.dataset.name;
+            document.getElementById('profile-select').style.display = 'none';
+            document.getElementById('login-subtitle').style.display = 'none';
+            var form = document.getElementById('passcode-form');
+            form.style.display = 'flex';
+            var input = document.getElementById('passcode-input');
+            input.value = '';
+            document.getElementById('error').textContent = '';
+            input.focus();
+        }
+
+        function backToProfiles() {
+            document.getElementById('passcode-form').style.display = 'none';
+            document.getElementById('profile-select').style.display = '';
+            document.getElementById('login-subtitle').style.display = '';
+            document.getElementById('error').textContent = '';
+        }
+
+        var pcInput = document.getElementById('passcode-input');
+        if (pcInput) autoSubmit(pcInput);
     </script>
     <script src="/static/htmx.min.js"></script>
 </body>

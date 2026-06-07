@@ -890,3 +890,16 @@ document.addEventListener('DOMContentLoaded', function() {
     updateTopbarStat();
     updateHabitsBadge();
 });
+
+// ── Profiles overlay ──────────────────────────────────────────
+function openProfiles() {
+    var ov = document.getElementById('profile-overlay');
+    if (ov) ov.classList.add('open');
+}
+function closeProfiles() {
+    var ov = document.getElementById('profile-overlay');
+    if (ov) ov.classList.remove('open');
+}
+document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') closeProfiles();
+});

@@ -1,0 +1,44 @@
+<div class="profile-panel-inner">
+    <div class="profile-panel-header">
+        <h2 class="profile-panel-title">Profiles</h2>
+        <button type="button" class="btn-icon" onclick="closeProfiles()" aria-label="Close">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+    </div>
+
+    {{if .Error}}<div class="profile-error">{{.Error}}</div>{{end}}
+
+    <ul class="profile-list">
+        {{range .Profiles}}
+        <li class="profile-row {{if eq .ID $.CurrentID}}current{{end}}">
+            <span class="profile-avatar small">{{initial .Name}}</span>
+            <span class="profile-row-name">{{.Name}}</span>
+            {{if eq .ID $.CurrentID}}<span class="profile-badge">Current</span>{{end}}
+            {{if .IsPrimary}}<span class="profile-badge primary">Primary</span>{{end}}
+            {{if and $.AllowCreation (not .IsPrimary) (ne .ID $.CurrentID)}}
+            <button type="button" class="profile-del" title="Delete profile"
+                    hx-post="/profiles/delete" hx-vals='{"id": "{{.ID}}"}'
+                    hx-target="#profile-panel" hx-confirm="Delete profile '{{.Name}}' and all its data? This cannot be undone.">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+            </button>
+            {{end}}
+        </li>
+        {{end}}
+    </ul>
+
+    <button type="button" class="btn profile-switch-btn"
+            hx-post="/profiles/switch" hx-target="body">
+        Switch profile
+    </button>
+
+    {{if .AllowCreation}}
+    <form class="profile-create-form" hx-post="/profiles/create" hx-target="#profile-panel">
+        <p class="profile-create-label">Add a profile</p>
+        <input type="text" name="name" placeholder="Name" maxlength="60" autocomplete="off"
+               class="custom-dialog-input" required>
+        <input type="password" name="passcode" inputmode="numeric" pattern="\d{8}" maxlength="8"
+               placeholder="8-digit passcode" autocomplete="off" class="custom-dialog-input" required>
+        <button type="submit" class="btn btn-primary">Create</button>
+    </form>
+    {{end}}
+</div>
