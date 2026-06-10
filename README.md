@@ -26,7 +26,7 @@ docker compose up -d
 - **Notes**: Multiple notes, auto-save, last-edited timestamp
 - **Habits**: Daily tracking with streak counter
 - **PWA**: Install on mobile or desktop, works from home screen
-- **Secure**: 8-digit passcode, HttpOnly cookies, constant-time comparison, session persistence
+- **Secure**: 8-digit passcode, HttpOnly cookies, constant-time comparison, login lockout after repeated failures, session persistence
 - **Minimal**: Single Go binary, SQLite, HTMX — no JS frameworks
 - **Collapsible UI**: Tabs and add form hide on scroll for focus
 

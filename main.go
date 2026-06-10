@@ -2,21 +2,26 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"crypto/subtle"
 	"database/sql"
 	"embed"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html/template"
 	"io/fs"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
+	"syscall"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -34,7 +39,20 @@ var (
 	passcode                 string
 	inactivityTimeoutMinutes = 45
 	validNameRe              = regexp.MustCompile(`^[^\x00-\x1f\x7f]+$`)
+)
 
+// Login lockout: after maxLoginFailures consecutive failures, logins are
+// blocked entirely for loginLockout. Global (not per-IP) since this is a
+// single-user app and per-IP state is defeated by proxies anyway.
+const (
+	maxLoginFailures = 5
+	loginLockout     = 1 * time.Minute
+)
+
+var (
+	loginMu       sync.Mutex
+	loginFailures int
+	loginBlocked  time.Time
 )
 
 const sessionDuration = 72 * time.Hour
@@ -156,11 +174,9 @@ func main() {
 			if s == "" {
 				return false
 			}
-			t, err := time.Parse("2006-01-02", s)
-			if err != nil {
-				return false
-			}
-			return t.Before(time.Now().Truncate(24 * time.Hour))
+			// Compare ISO date strings so "today" follows the local timezone;
+			// time.Truncate works in UTC and flips dates a few hours early/late.
+			return s < time.Now().Format("2006-01-02")
 		},
 		"todoArchiveHint": func(createdAt string) string {
 			if createdAt == "" {
@@ -213,7 +229,12 @@ func main() {
 	log.Printf("Templates loaded")
 
 	staticFS, _ := fs.Sub(staticFiles, "static")
-	http.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticFS))))
+	staticHandler := http.StripPrefix("/static/", http.FileServer(http.FS(staticFS)))
+	http.Handle("/static/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Assets are cache-busted with ?v= query params, so a day of caching is safe.
+		w.Header().Set("Cache-Control", "public, max-age=86400")
+		staticHandler.ServeHTTP(w, r)
+	}))
 
 	http.HandleFunc("/health", handleHealth)
 	http.HandleFunc("/search", authMiddleware(handleSearch))
@@ -258,8 +279,33 @@ func main() {
 	if port == "" {
 		port = "8080"
 	}
+
+	server := &http.Server{
+		Addr:              ":" + port,
+		Handler:           loggingMiddleware(securityHeaders(http.DefaultServeMux)),
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       2 * time.Minute,
+	}
+
+	// Graceful shutdown: finish in-flight requests and close the DB cleanly
+	// (checkpoints the SQLite WAL) when Docker sends SIGTERM.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	go func() {
+		<-ctx.Done()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		server.Shutdown(shutdownCtx)
+	}()
+
 	log.Printf("SecondBrain listening on :%s (inactivity timeout: %d min)", port, inactivityTimeoutMinutes)
-	log.Fatal(http.ListenAndServe(":"+port, loggingMiddleware(securityHeaders(http.DefaultServeMux))))
+	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		log.Fatal(err)
+	}
+	log.Printf("Shutting down")
 }
 
 func initDB() {
@@ -272,10 +318,13 @@ func initDB() {
 	dbPath := dataDir + "/secondbrain.db"
 	log.Printf("Opening database: %s", dbPath)
 	var err error
-	db, err = sql.Open("sqlite3", dbPath+"?_journal_mode=WAL&_busy_timeout=5000")
+	db, err = sql.Open("sqlite3", dbPath+"?_journal_mode=WAL&_busy_timeout=5000&_foreign_keys=on")
 	if err != nil {
 		log.Fatal(err)
 	}
+	// SQLite allows one writer at a time; a single connection serializes all
+	// access and eliminates "database is locked" errors at this scale.
+	db.SetMaxOpenConns(1)
 
 	schema := []string{
 		`CREATE TABLE IF NOT EXISTS todos (
@@ -322,6 +371,10 @@ func initDB() {
 
 	db.Exec("DELETE FROM sessions WHERE expires_at <= datetime('now')")
 	db.Exec("ALTER TABLE todos ADD COLUMN archived_at DATETIME DEFAULT NULL")
+	// Foreign keys were historically off, so habit deletes may have left
+	// orphaned logs behind; clean them up once at startup.
+	db.Exec("DELETE FROM habit_logs WHERE habit_id NOT IN (SELECT id FROM habits)")
+	db.Exec("CREATE INDEX IF NOT EXISTS idx_todos_category_archived ON todos(category, archived)")
 
 	// Seed a default note if none exist
 	var count int
@@ -342,6 +395,7 @@ func generateToken() string {
 }
 
 func createSession() string {
+	db.Exec("DELETE FROM sessions WHERE expires_at <= datetime('now')")
 	token := generateToken()
 	expiry := time.Now().UTC().Add(sessionDuration).Format(time.RFC3339)
 	db.Exec("INSERT INTO sessions (token, expires_at) VALUES (?, ?)", token, expiry)
@@ -384,6 +438,22 @@ func authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+// isHTTPS reports whether the request arrived over TLS, directly or via a
+// reverse proxy, so the session cookie can be marked Secure when possible.
+func isHTTPS(r *http.Request) bool {
+	return r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
+}
+
+func loginError(w http.ResponseWriter, isHTMX bool, msg string) {
+	if isHTMX {
+		w.Header().Set("HX-Retarget", "#error")
+		w.Header().Set("HX-Reswap", "innerHTML")
+		fmt.Fprint(w, msg)
+		return
+	}
+	renderTemplate(w, "login.html", msg)
+}
+
 func handleLogin(w http.ResponseWriter, r *http.Request) {
 	if r.Method == "GET" {
 		// If already logged in, redirect
@@ -402,17 +472,32 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 		submitted := r.FormValue("passcode")
 		isHTMX := r.Header.Get("HX-Request") == "true"
 
-		if len(submitted) != 8 || subtle.ConstantTimeCompare([]byte(submitted), []byte(passcode)) != 1 {
-			log.Printf("Failed login attempt from %s", r.RemoteAddr)
-			if isHTMX {
-				w.Header().Set("HX-Retarget", "#error")
-				w.Header().Set("HX-Reswap", "innerHTML")
-				fmt.Fprint(w, "Wrong passcode")
-			} else {
-				renderTemplate(w, "login.html", "Wrong passcode")
-			}
+		loginMu.Lock()
+		blocked := time.Now().Before(loginBlocked)
+		loginMu.Unlock()
+		if blocked {
+			log.Printf("Login blocked (lockout active) from %s", r.RemoteAddr)
+			loginError(w, isHTMX, "Too many attempts — try again in a minute")
 			return
 		}
+
+		if len(submitted) != 8 || subtle.ConstantTimeCompare([]byte(submitted), []byte(passcode)) != 1 {
+			loginMu.Lock()
+			loginFailures++
+			if loginFailures >= maxLoginFailures {
+				loginBlocked = time.Now().Add(loginLockout)
+				loginFailures = 0
+				log.Printf("Login lockout engaged for %s after repeated failures", loginLockout)
+			}
+			loginMu.Unlock()
+			log.Printf("Failed login attempt from %s", r.RemoteAddr)
+			loginError(w, isHTMX, "Wrong passcode")
+			return
+		}
+
+		loginMu.Lock()
+		loginFailures = 0
+		loginMu.Unlock()
 
 		log.Printf("Successful login from %s", r.RemoteAddr)
 		token := createSession()
@@ -421,6 +506,7 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 			Value:    token,
 			Path:     "/",
 			HttpOnly: true,
+			Secure:   isHTTPS(r),
 			SameSite: http.SameSiteStrictMode,
 			MaxAge:   int(sessionDuration.Seconds()),
 		})
