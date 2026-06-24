@@ -659,13 +659,32 @@ function bindInactivityActions(timeoutMs) {
         if (!document.hidden) {
             hideInactivityWarning();
             startInactivityTimers(timeoutMs);
+            refreshCurrentView();
         }
+    });
+
+    // Re-fetch current view data when restored from bfcache
+    window.addEventListener('pageshow', function(e) {
+        if (e.persisted) refreshCurrentView();
     });
 
     document.body.addEventListener('htmx:afterRequest', function() {
         hideInactivityWarning();
         startInactivityTimers(timeoutMs);
     });
+}
+
+function refreshCurrentView() {
+    const activeMode = document.querySelector('.bottom-nav-btn.active')?.dataset.mode || 'todos';
+    if (activeMode === 'todos') {
+        const activeCat = document.querySelector('#tab-bar .tab.active')?.dataset.cat || 'groceries';
+        switchTab(activeCat, document.querySelector(`[data-cat="${activeCat}"]`));
+    } else if (activeMode === 'notes') {
+        const noteId = document.getElementById('note-editor')?.dataset.noteId;
+        if (noteId) loadNote(noteId);
+    } else if (activeMode === 'habits') {
+        htmx.ajax('GET', '/habits', '#habits-content');
+    }
 }
 
 function startInactivityTimers(timeoutMs) {

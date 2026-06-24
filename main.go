@@ -561,6 +561,8 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	w.Header().Set("Cache-Control", "no-store")
+
 	// Fetch initial groceries for server-side render
 	rows, err := db.Query(
 		"SELECT id, category, text, due_date, done FROM todos WHERE category = 'groceries' AND archived = 0 ORDER BY done ASC, position ASC, created_at DESC",
