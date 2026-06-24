@@ -89,6 +89,39 @@ document.body.addEventListener('htmx:afterRequest', function(e) {
     }
 });
 
+// Surface otherwise-silent HTMX failures (server error or no connection).
+document.body.addEventListener('htmx:responseError', function() {
+    showToast('Something went wrong — try again');
+});
+document.body.addEventListener('htmx:sendError', function() {
+    showToast('You appear to be offline');
+});
+
+let toastTimer;
+function showToast(msg) {
+    const el = document.getElementById('toast');
+    if (!el) return;
+    el.textContent = msg;
+    el.hidden = false;
+    // Reflow so re-triggering the animation works on a visible element.
+    void el.offsetWidth;
+    el.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => {
+        el.classList.remove('show');
+        setTimeout(() => { el.hidden = true; }, 300);
+    }, 3000);
+}
+
+// /logout is POST-only, so submit a form rather than navigating (a GET).
+function doLogout() {
+    const f = document.createElement('form');
+    f.method = 'POST';
+    f.action = '/logout';
+    document.body.appendChild(f);
+    f.submit();
+}
+
 // --- Tab switching (Shopping List / To-Do / Groceries Checklist) ---
 function switchTab(category, el) {
     document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
@@ -631,7 +664,7 @@ function bindInactivityActions(timeoutMs) {
 
     if (logoutBtn) {
         logoutBtn.addEventListener('click', function() {
-            window.location.href = '/logout';
+            doLogout();
         });
     }
 
@@ -659,13 +692,32 @@ function bindInactivityActions(timeoutMs) {
         if (!document.hidden) {
             hideInactivityWarning();
             startInactivityTimers(timeoutMs);
+            refreshCurrentView();
         }
+    });
+
+    // Re-fetch current view data when restored from bfcache
+    window.addEventListener('pageshow', function(e) {
+        if (e.persisted) refreshCurrentView();
     });
 
     document.body.addEventListener('htmx:afterRequest', function() {
         hideInactivityWarning();
         startInactivityTimers(timeoutMs);
     });
+}
+
+function refreshCurrentView() {
+    const activeMode = document.querySelector('.bottom-nav-btn.active')?.dataset.mode || 'todos';
+    if (activeMode === 'todos') {
+        const activeCat = document.querySelector('#tab-bar .tab.active')?.dataset.cat || 'groceries';
+        switchTab(activeCat, document.querySelector(`[data-cat="${activeCat}"]`));
+    } else if (activeMode === 'notes') {
+        const noteId = document.getElementById('note-editor')?.dataset.noteId;
+        if (noteId) loadNote(noteId);
+    } else if (activeMode === 'habits') {
+        htmx.ajax('GET', '/habits', '#habits-content');
+    }
 }
 
 function startInactivityTimers(timeoutMs) {
@@ -684,7 +736,7 @@ function startInactivityTimers(timeoutMs) {
     }, warningDelayMs);
 
     inactivityLogoutTimer = setTimeout(function() {
-        window.location.href = '/logout';
+        doLogout();
     }, timeoutMs);
 }
 

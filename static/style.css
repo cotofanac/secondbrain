@@ -243,6 +243,10 @@ html, body {
     pointer-events: none;
 }
 
+.logout-form {
+    display: flex;
+}
+
 .logout-btn {
     color: var(--text-dim);
     text-decoration: none;
@@ -252,6 +256,9 @@ html, body {
     opacity: 0.5;
     transition: opacity 0.15s;
     -webkit-tap-highlight-color: transparent;
+    background: none;
+    border: none;
+    cursor: pointer;
 }
 
 .logout-btn:active {
@@ -1151,6 +1158,37 @@ a:focus-visible,
 select:focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: 2px;
+}
+
+/* Toast: transient feedback for otherwise-silent failures.
+   Sits above the bottom nav (z-index 100) but below the modal dialogs (1200+). */
+.toast {
+    position: fixed;
+    left: 50%;
+    bottom: calc(var(--safe-bottom) + 5rem);
+    transform: translate(-50%, 1rem);
+    z-index: 1100;
+    max-width: calc(100% - 2rem);
+    padding: 0.65rem 1rem;
+    background: var(--surface2);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
+    font-size: 0.875rem;
+    text-align: center;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.25s ease, transform 0.25s ease;
+}
+
+.toast.show {
+    opacity: 1;
+    transform: translate(-50%, 0);
+}
+
+.toast[hidden] {
+    display: none;
 }
 
 /* Respect reduced-motion preferences */

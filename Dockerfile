@@ -10,9 +10,8 @@ RUN go mod download
 
 COPY . .
 
-# Download HTMX during build
-RUN go run cmd/fetch_htmx.go
-
+# HTMX is vendored at static/htmx.min.js and embedded into the binary, so the
+# build needs no network access. Run cmd/fetch_htmx.go manually to bump versions.
 RUN CGO_ENABLED=1 GOOS=linux go build -ldflags="-s -w" -o secondbrain .
 
 # Runtime stage

@@ -10,7 +10,7 @@
     <link rel="manifest" href="/static/manifest.json">
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
     <link rel="apple-touch-icon" href="/static/icon-192.svg">
-    <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="/static/style.css?v={{assetVersion}}">
 </head>
 <body class="login-body">
     <div class="login-container">
@@ -27,6 +27,6 @@
             if (this.value.length === 8) this.closest('form').requestSubmit();
         });
     </script>
-    <script src="/static/htmx.min.js"></script>
+    <script src="/static/htmx.min.js?v={{assetVersion}}"></script>
 </body>
 </html>

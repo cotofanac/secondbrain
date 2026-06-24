@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/subtle"
 	"database/sql"
 	"embed"
@@ -39,7 +40,26 @@ var (
 	passcode                 string
 	inactivityTimeoutMinutes = 45
 	validNameRe              = regexp.MustCompile(`^[^\x00-\x1f\x7f]+$`)
+	// assetVersion is a short content hash of the code assets, appended as
+	// ?v= to asset URLs and baked into the service-worker cache name so a
+	// deploy invalidates stale JS/CSS instead of serving it for up to a day.
+	assetVersion string
 )
+
+// computeAssetVersion hashes the code assets so the version changes only when
+// one of them changes.
+func computeAssetVersion() string {
+	h := sha256.New()
+	for _, name := range []string{"static/app.js", "static/style.css", "static/htmx.min.js"} {
+		b, err := staticFiles.ReadFile(name)
+		if err != nil {
+			// Fall back to a build-time value so the app still boots.
+			return strconv.FormatInt(time.Now().Unix(), 16)
+		}
+		h.Write(b)
+	}
+	return hex.EncodeToString(h.Sum(nil))[:8]
+}
 
 // Login lockout: after maxLoginFailures consecutive failures, logins are
 // blocked entirely for loginLockout. Global (not per-IP) since this is a
@@ -73,6 +93,10 @@ func securityHeaders(next http.Handler) http.Handler {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
 		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:")
+		// Only advertise HSTS over HTTPS so plain-HTTP local runs still work.
+		if isHTTPS(r) {
+			w.Header().Set("Strict-Transport-Security", "max-age=63072000; includeSubDomains")
+		}
 		next.ServeHTTP(w, r)
 	})
 }
@@ -133,6 +157,9 @@ func main() {
 	if len(passcode) != 8 || !regexp.MustCompile(`^\d{8}$`).MatchString(passcode) {
 		log.Fatal("PASSCODE env must be exactly 8 digits")
 	}
+
+	assetVersion = computeAssetVersion()
+	log.Printf("Asset version: %s", assetVersion)
 
 	if raw := os.Getenv("INACTIVITY_LOGOUT_MINUTES"); raw != "" {
 		mins, err := strconv.Atoi(raw)
@@ -224,6 +251,7 @@ func main() {
 			}
 			return fmt.Sprintf("Archived %d days ago", days)
 		},
+		"assetVersion": func() string { return assetVersion },
 	}
 	templates = template.Must(template.New("").Funcs(funcMap).ParseFS(templateFiles, "templates/*.html"))
 	log.Printf("Templates loaded")
@@ -231,10 +259,22 @@ func main() {
 	staticFS, _ := fs.Sub(staticFiles, "static")
 	staticHandler := http.StripPrefix("/static/", http.FileServer(http.FS(staticFS)))
 	http.Handle("/static/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Assets are cache-busted with ?v= query params, so a day of caching is safe.
+		// Code assets are cache-busted with ?v= query params, so a day of caching is safe.
 		w.Header().Set("Cache-Control", "public, max-age=86400")
 		staticHandler.ServeHTTP(w, r)
 	}))
+
+	// Serve the service worker with the current asset version injected, so its
+	// cache name changes on every deploy and the browser installs the new SW
+	// (which purges the old cache on activate). The exact path wins over the
+	// "/static/" subtree handler above.
+	swSource, _ := staticFiles.ReadFile("static/sw.js")
+	swBody := bytes.ReplaceAll(swSource, []byte("__ASSET_VERSION__"), []byte(assetVersion))
+	http.HandleFunc("/static/sw.js", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/javascript")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Write(swBody)
+	})
 
 	http.HandleFunc("/health", handleHealth)
 	http.HandleFunc("/search", authMiddleware(handleSearch))
@@ -390,7 +430,10 @@ func initDB() {
 
 func generateToken() string {
 	b := make([]byte, 32)
-	rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		// A predictable (all-zero) token would be a critical auth flaw; fail loud.
+		panic(fmt.Sprintf("crypto/rand failed: %v", err))
+	}
 	return hex.EncodeToString(b)
 }
 
@@ -520,6 +563,10 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleLogout(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
 	token := getSessionToken(r)
 	if token != "" {
 		db.Exec("DELETE FROM sessions WHERE token = ?", token)
@@ -560,6 +607,8 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+
+	w.Header().Set("Cache-Control", "no-store")
 
 	// Fetch initial groceries for server-side render
 	rows, err := db.Query(
@@ -1270,9 +1319,12 @@ func loadHabits() []Habit {
 		return habits
 	}
 
+	// Only the recent unbroken run matters for streaks; a one-year floor keeps
+	// this read bounded as habit_logs grows indefinitely over time.
 	logRows, err := db.Query(`
 		SELECT habit_id, date FROM habit_logs
 		WHERE habit_id IN (SELECT id FROM habits WHERE archived = 0)
+		  AND date >= date('now', '-365 days')
 		ORDER BY habit_id ASC, date DESC
 	`)
 	if err != nil {

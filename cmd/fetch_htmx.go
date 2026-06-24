@@ -1,5 +1,9 @@
 //go:build ignore
 
+// fetch_htmx.go vendors HTMX into static/htmx.min.js. The vendored file is
+// committed and embedded into the binary, so this is NOT part of the build —
+// run it manually only when bumping the pinned HTMX version, then review and
+// commit the resulting diff.
 package main
 
 import (
