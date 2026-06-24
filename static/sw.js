@@ -1,8 +1,10 @@
-const CACHE_NAME = 'secondbrain-v3';
+// __ASSET_VERSION__ is replaced at request time by the Go server (see the
+// /static/sw.js handler) so a deploy changes the cache name and SW bytes.
+const CACHE_NAME = 'secondbrain-__ASSET_VERSION__';
 const PRECACHE = [
-    '/static/style.css',
-    '/static/app.js',
-    '/static/htmx.min.js',
+    '/static/style.css?v=__ASSET_VERSION__',
+    '/static/app.js?v=__ASSET_VERSION__',
+    '/static/htmx.min.js?v=__ASSET_VERSION__',
     '/static/manifest.json'
 ];
 
@@ -33,7 +35,7 @@ self.addEventListener('fetch', event => {
                     caches.open(CACHE_NAME).then(cache => cache.put(event.request, clone));
                     return response;
                 })
-                .catch(() => caches.match(event.request, { ignoreSearch: true }))
+                .catch(() => caches.match(event.request))
         );
     }
 });
