@@ -9,6 +9,9 @@ services:
       - PASSCODE=${PASSCODE}
       - PORT=8080
       - DATA_DIR=/app/data
+      # Set TZ to your local zone (e.g. Europe/Bucharest) so dates, "today" for
+      # habits, and note timestamps match your wall clock. Defaults to UTC.
+      - TZ=${TZ:-UTC}
     volumes:
       # Bind mount: the SQLite database is persisted on the host.
       # The container runs as appuser (UID 1000), so the host directory must be

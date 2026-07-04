@@ -16,6 +16,7 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"regexp"
@@ -77,6 +78,19 @@ var (
 
 const sessionDuration = 72 * time.Hour
 
+// parseDBTime parses a timestamp string as returned by go-sqlite3. Directly
+// selected DATETIME columns come back as RFC3339 ("2006-01-02T15:04:05Z"),
+// while values wrapped in an expression such as a COALESCE around archived_at
+// come back in SQLite's plain "2006-01-02 15:04:05" form. Both represent UTC.
+func parseDBTime(s string) (time.Time, bool) {
+	for _, layout := range []string{time.RFC3339, "2006-01-02 15:04:05"} {
+		if t, err := time.ParseInLocation(layout, s, time.UTC); err == nil {
+			return t.UTC(), true
+		}
+	}
+	return time.Time{}, false
+}
+
 func renderTemplate(w http.ResponseWriter, name string, data any) {
 	var buf bytes.Buffer
 	if err := templates.ExecuteTemplate(&buf, name, data); err != nil {
@@ -89,16 +103,41 @@ func renderTemplate(w http.ResponseWriter, name string, data any) {
 
 func securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// CSRF defense-in-depth on top of the SameSite=Strict cookie: reject
+		// state-changing requests whose Origin doesn't match this host. A
+		// missing Origin (non-browser clients, some same-origin GETs) is allowed.
+		if r.Method != http.MethodGet && r.Method != http.MethodHead && !sameOrigin(r) {
+			http.Error(w, "cross-origin request forbidden", http.StatusForbidden)
+			return
+		}
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
 		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:")
+		// Default to no-store; the static and service-worker handlers override
+		// this with their own cache policy. Keeps user data (notes, tasks) out
+		// of shared/intermediary caches.
+		w.Header().Set("Cache-Control", "no-store")
 		// Only advertise HSTS over HTTPS so plain-HTTP local runs still work.
 		if isHTTPS(r) {
 			w.Header().Set("Strict-Transport-Security", "max-age=63072000; includeSubDomains")
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// sameOrigin reports whether a state-changing request originated from this same
+// host. Requests without an Origin header pass (curl, older same-origin flows).
+func sameOrigin(r *http.Request) bool {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return true
+	}
+	u, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+	return u.Host == r.Host
 }
 
 func handleHealth(w http.ResponseWriter, _ *http.Request) {
@@ -139,8 +178,10 @@ func (rw *responseWriter) WriteHeader(code int) {
 func startAutoArchiveTodos() {
 	go func() {
 		for {
+			// Don't archive a task that's still upcoming: keep it until its due
+			// date has passed (or it has no due date at all).
 			res, err := db.Exec(
-				"UPDATE todos SET archived = 1, archived_at = CURRENT_TIMESTAMP WHERE category = 'todo' AND archived = 0 AND created_at <= datetime('now', '-7 days')",
+				"UPDATE todos SET archived = 1, archived_at = CURRENT_TIMESTAMP WHERE category = 'todo' AND archived = 0 AND created_at <= datetime('now', '-7 days') AND (due_date = '' OR due_date < date('now'))",
 			)
 			if err == nil {
 				if n, _ := res.RowsAffected(); n > 0 {
@@ -185,10 +226,13 @@ func main() {
 			return t.Format("Jan 2")
 		},
 		"formatUpdated": func(s string) string {
-			t, err := time.Parse("2006-01-02 15:04:05", s)
-			if err != nil {
+			// Stored timestamps are UTC; display them in the server's local zone
+			// (set via TZ) so the wall clock is right.
+			t, ok := parseDBTime(s)
+			if !ok {
 				return ""
 			}
+			t = t.In(time.Local)
 			if time.Since(t) < 24*time.Hour {
 				return t.Format("3:04 PM")
 			}
@@ -205,12 +249,17 @@ func main() {
 			// time.Truncate works in UTC and flips dates a few hours early/late.
 			return s < time.Now().Format("2006-01-02")
 		},
-		"todoArchiveHint": func(createdAt string) string {
+		"todoArchiveHint": func(createdAt, dueDate string) string {
 			if createdAt == "" {
 				return ""
 			}
-			t, err := time.Parse("2006-01-02 15:04:05", createdAt)
-			if err != nil {
+			// A task due today or later isn't eligible for auto-archive yet,
+			// so don't tease an archive countdown for it.
+			if dueDate != "" && dueDate >= time.Now().Format("2006-01-02") {
+				return ""
+			}
+			t, ok := parseDBTime(createdAt)
+			if !ok {
 				return ""
 			}
 			ageHours := int(time.Since(t).Hours())
@@ -234,8 +283,8 @@ func main() {
 			if archivedAt == "" {
 				return ""
 			}
-			t, err := time.Parse("2006-01-02 15:04:05", archivedAt)
-			if err != nil {
+			t, ok := parseDBTime(archivedAt)
+			if !ok {
 				return ""
 			}
 			hours := int(time.Since(t).Hours())
@@ -409,6 +458,14 @@ func initDB() {
 		}
 	}
 
+	// Older sessions stored expires_at as RFC3339 ("...T...Z"), which sorts
+	// wrong against SQLite's datetime('now') ("... ...") in string comparisons
+	// and let tokens live up to ~24h past expiry. Normalize to the SQLite format.
+	db.Exec("UPDATE sessions SET expires_at = replace(replace(expires_at, 'T', ' '), 'Z', '') WHERE expires_at LIKE '%T%'")
+	// Server-side idle expiry: track when each session was last used so a stolen
+	// token can't outlive the inactivity window even with JS disabled.
+	db.Exec("ALTER TABLE sessions ADD COLUMN last_seen TEXT NOT NULL DEFAULT ''")
+	db.Exec("UPDATE sessions SET last_seen = datetime('now') WHERE last_seen = ''")
 	db.Exec("DELETE FROM sessions WHERE expires_at <= datetime('now')")
 	db.Exec("ALTER TABLE todos ADD COLUMN archived_at DATETIME DEFAULT NULL")
 	// Foreign keys were historically off, so habit deletes may have left
@@ -440,8 +497,10 @@ func generateToken() string {
 func createSession() string {
 	db.Exec("DELETE FROM sessions WHERE expires_at <= datetime('now')")
 	token := generateToken()
-	expiry := time.Now().UTC().Add(sessionDuration).Format(time.RFC3339)
-	db.Exec("INSERT INTO sessions (token, expires_at) VALUES (?, ?)", token, expiry)
+	// Store in SQLite's datetime format so string comparison against
+	// datetime('now') is correct (see the migration note in initDB).
+	expiry := time.Now().UTC().Add(sessionDuration).Format("2006-01-02 15:04:05")
+	db.Exec("INSERT INTO sessions (token, expires_at, last_seen) VALUES (?, ?, datetime('now'))", token, expiry)
 	return token
 }
 
@@ -449,12 +508,38 @@ func validSession(token string) bool {
 	if token == "" {
 		return false
 	}
-	var count int
+	var lastSeen string
 	err := db.QueryRow(
-		"SELECT COUNT(*) FROM sessions WHERE token = ? AND expires_at > datetime('now')",
+		"SELECT last_seen FROM sessions WHERE token = ? AND expires_at > datetime('now')",
 		token,
-	).Scan(&count)
-	return err == nil && count > 0
+	).Scan(&lastSeen)
+	if err != nil {
+		return false
+	}
+	// Server-side idle expiry: a session unused for longer than twice the
+	// client inactivity window is dead, even if the token/cookie persists.
+	// The 2x margin lets the client-side warning fire first under normal use.
+	if lastSeen != "" {
+		if seen, perr := time.Parse("2006-01-02 15:04:05", lastSeen); perr == nil {
+			idleLimit := 2 * time.Duration(inactivityTimeoutMinutes) * time.Minute
+			if time.Since(seen) > idleLimit {
+				return false
+			}
+		}
+	}
+	touchSession(token, lastSeen)
+	return true
+}
+
+// touchSession refreshes last_seen, but at most once a minute to bound writes
+// on a single-connection SQLite database.
+func touchSession(token, lastSeen string) {
+	if lastSeen != "" {
+		if seen, err := time.Parse("2006-01-02 15:04:05", lastSeen); err == nil && time.Since(seen) < time.Minute {
+			return
+		}
+	}
+	db.Exec("UPDATE sessions SET last_seen = datetime('now') WHERE token = ?", token)
 }
 
 func getSessionToken(r *http.Request) string {
@@ -607,8 +692,6 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-
-	w.Header().Set("Cache-Control", "no-store")
 
 	// Fetch initial groceries for server-side render
 	rows, err := db.Query(
@@ -821,25 +904,26 @@ func handleEditTodo(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleToggleTodo(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "POST" {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	if !requirePost(w, r) {
 		return
 	}
 
-	id, err := strconv.Atoi(r.FormValue("id"))
-	if err != nil {
-		http.Error(w, "Invalid ID", http.StatusBadRequest)
+	id, ok := parseID(w, r)
+	if !ok {
 		return
 	}
 
 	var category string
-	err = db.QueryRow("SELECT category FROM todos WHERE id = ?", id).Scan(&category)
+	err := db.QueryRow("SELECT category FROM todos WHERE id = ?", id).Scan(&category)
 	if err != nil {
 		http.Error(w, "Not found", http.StatusNotFound)
 		return
 	}
 
-	db.Exec("UPDATE todos SET done = CASE WHEN done = 0 THEN 1 ELSE 0 END WHERE id = ?", id)
+	if _, err := db.Exec("UPDATE todos SET done = CASE WHEN done = 0 THEN 1 ELSE 0 END WHERE id = ?", id); err != nil {
+		http.Error(w, "DB error", http.StatusInternalServerError)
+		return
+	}
 	log.Printf("Todo toggled: id=%d [%s]", id, category)
 
 	r.URL.RawQuery = "category=" + category
@@ -847,25 +931,26 @@ func handleToggleTodo(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleDeleteTodo(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "POST" {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	if !requirePost(w, r) {
 		return
 	}
 
-	id, err := strconv.Atoi(r.FormValue("id"))
-	if err != nil {
-		http.Error(w, "Invalid ID", http.StatusBadRequest)
+	id, ok := parseID(w, r)
+	if !ok {
 		return
 	}
 
 	var category string
-	err = db.QueryRow("SELECT category FROM todos WHERE id = ?", id).Scan(&category)
+	err := db.QueryRow("SELECT category FROM todos WHERE id = ?", id).Scan(&category)
 	if err != nil {
 		http.Error(w, "Not found", http.StatusNotFound)
 		return
 	}
 
-	db.Exec("UPDATE todos SET archived = 1, archived_at = CURRENT_TIMESTAMP WHERE id = ?", id)
+	if _, err := db.Exec("UPDATE todos SET archived = 1, archived_at = CURRENT_TIMESTAMP WHERE id = ?", id); err != nil {
+		http.Error(w, "DB error", http.StatusInternalServerError)
+		return
+	}
 	log.Printf("Todo archived: id=%d [%s]", id, category)
 
 	r.URL.RawQuery = "category=" + category
@@ -883,7 +968,10 @@ func handleClearChecked(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	db.Exec("UPDATE todos SET done = 0 WHERE category = ? AND archived = 0 AND done = 1", category)
+	if _, err := db.Exec("UPDATE todos SET done = 0 WHERE category = ? AND archived = 0 AND done = 1", category); err != nil {
+		http.Error(w, "DB error", http.StatusInternalServerError)
+		return
+	}
 	log.Printf("Cleared checked items: [%s]", category)
 
 	r.URL.RawQuery = "category=" + category
@@ -922,25 +1010,26 @@ func handleArchiveTodos(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleRestoreTodo(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "POST" {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	if !requirePost(w, r) {
 		return
 	}
 
-	id, err := strconv.Atoi(r.FormValue("id"))
-	if err != nil {
-		http.Error(w, "Invalid ID", http.StatusBadRequest)
+	id, ok := parseID(w, r)
+	if !ok {
 		return
 	}
 
 	var category string
-	err = db.QueryRow("SELECT category FROM todos WHERE id = ?", id).Scan(&category)
+	err := db.QueryRow("SELECT category FROM todos WHERE id = ?", id).Scan(&category)
 	if err != nil {
 		http.Error(w, "Not found", http.StatusNotFound)
 		return
 	}
 
-	db.Exec("UPDATE todos SET archived = 0 WHERE id = ?", id)
+	if _, err := db.Exec("UPDATE todos SET archived = 0 WHERE id = ?", id); err != nil {
+		http.Error(w, "DB error", http.StatusInternalServerError)
+		return
+	}
 	log.Printf("Todo restored: id=%d [%s]", id, category)
 
 	r.URL.RawQuery = "category=" + category
@@ -948,25 +1037,26 @@ func handleRestoreTodo(w http.ResponseWriter, r *http.Request) {
 }
 
 func handlePermanentDeleteTodo(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "POST" {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	if !requirePost(w, r) {
 		return
 	}
 
-	id, err := strconv.Atoi(r.FormValue("id"))
-	if err != nil {
-		http.Error(w, "Invalid ID", http.StatusBadRequest)
+	id, ok := parseID(w, r)
+	if !ok {
 		return
 	}
 
 	var category string
-	err = db.QueryRow("SELECT category FROM todos WHERE id = ?", id).Scan(&category)
+	err := db.QueryRow("SELECT category FROM todos WHERE id = ?", id).Scan(&category)
 	if err != nil {
 		http.Error(w, "Not found", http.StatusNotFound)
 		return
 	}
 
-	db.Exec("DELETE FROM todos WHERE id = ?", id)
+	if _, err := db.Exec("DELETE FROM todos WHERE id = ?", id); err != nil {
+		http.Error(w, "DB error", http.StatusInternalServerError)
+		return
+	}
 	log.Printf("Todo permanently deleted: id=%d [%s]", id, category)
 
 	r.URL.RawQuery = "category=" + category
@@ -1033,7 +1123,7 @@ func handleNotes(w http.ResponseWriter, r *http.Request) {
 	var currentNote Note
 	if noteIDStr != "" {
 		noteID, _ := strconv.Atoi(noteIDStr)
-		db.QueryRow("SELECT id, title, content, updated_at FROM notes WHERE id = ?", noteID).Scan(
+		db.QueryRow("SELECT id, title, content, updated_at FROM notes WHERE id = ? AND archived = 0", noteID).Scan(
 			&currentNote.ID, &currentNote.Title, &currentNote.Content, &currentNote.UpdatedAt,
 		)
 	}
@@ -1261,34 +1351,36 @@ func handleArchiveNotes(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleRestoreNote(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "POST" {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	if !requirePost(w, r) {
 		return
 	}
 
-	id, err := strconv.Atoi(r.FormValue("id"))
-	if err != nil {
-		http.Error(w, "Invalid ID", http.StatusBadRequest)
+	id, ok := parseID(w, r)
+	if !ok {
 		return
 	}
 
-	db.Exec("UPDATE notes SET archived = 0 WHERE id = ?", id)
+	if _, err := db.Exec("UPDATE notes SET archived = 0 WHERE id = ?", id); err != nil {
+		http.Error(w, "DB error", http.StatusInternalServerError)
+		return
+	}
 	handleArchiveNotes(w, r)
 }
 
 func handlePermanentDeleteNote(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "POST" {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	if !requirePost(w, r) {
 		return
 	}
 
-	id, err := strconv.Atoi(r.FormValue("id"))
-	if err != nil {
-		http.Error(w, "Invalid ID", http.StatusBadRequest)
+	id, ok := parseID(w, r)
+	if !ok {
 		return
 	}
 
-	db.Exec("DELETE FROM notes WHERE id = ?", id)
+	if _, err := db.Exec("DELETE FROM notes WHERE id = ?", id); err != nil {
+		http.Error(w, "DB error", http.StatusInternalServerError)
+		return
+	}
 	handleArchiveNotes(w, r)
 }
 
