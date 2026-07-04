@@ -89,6 +89,16 @@ document.body.addEventListener('htmx:afterRequest', function(e) {
     }
 });
 
+// Route hx-confirm through the app's custom dialog instead of window.confirm,
+// so destructive actions (permanent delete) get a real confirmation step.
+document.body.addEventListener('htmx:confirm', function(e) {
+    if (!e.detail.question) return; // no hx-confirm on this element — proceed
+    e.preventDefault();
+    showConfirm(e.detail.question).then(function(ok) {
+        if (ok) e.detail.issueRequest(true);
+    });
+});
+
 // Surface otherwise-silent HTMX failures (server error or no connection).
 document.body.addEventListener('htmx:responseError', function() {
     showToast('Something went wrong — try again');
@@ -347,6 +357,7 @@ function saveCurrentNote() {
     fetch('/notes/save', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        keepalive: true, // let the save complete even if the page is closing
         body: 'id=' + encodeURIComponent(id)
             + '&content=' + encodeURIComponent(content)
             + '&updated_at=' + encodeURIComponent(updatedAt)
@@ -367,6 +378,19 @@ function showNoteStatus(msg) {
     const el = document.getElementById('note-status');
     if (el) el.textContent = msg;
 }
+
+// If the tab is being hidden or closed with an edit still in the debounce
+// window, save it now (keepalive on the fetch lets it finish during unload).
+function flushPendingNoteSave() {
+    if (!saveTimer) return;
+    clearTimeout(saveTimer);
+    saveTimer = null;
+    saveCurrentNote();
+}
+document.addEventListener('visibilitychange', function() {
+    if (document.hidden) flushPendingNoteSave();
+});
+window.addEventListener('pagehide', flushPendingNoteSave);
 
 function toggleNotePicker() {
     const panel = document.getElementById('note-picker-panel');
