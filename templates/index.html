@@ -170,38 +170,7 @@
     <!-- Habits view -->
     <main id="habits-view" class="view">
         <div id="habits-content">
-            <div class="habits-toolbar">
-                <span class="habits-title">Today</span>
-                <div class="habits-actions">
-                    <button class="btn btn-icon" onclick="addHabit()" title="New habit">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-                    </button>
-                    <button class="btn btn-icon" onclick="showHabitsArchive()" title="Archive">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
-                    </button>
-                </div>
-            </div>
-            {{range .Habits}}
-            <div class="habit-item {{if .DoneToday}}done{{end}}">
-                <form hx-post="/habits/toggle" hx-target="#habits-content" hx-swap="innerHTML" class="habit-check-form">
-                    <input type="hidden" name="id" value="{{.ID}}">
-                    <button type="submit" class="habit-check {{if .DoneToday}}checked{{end}}" aria-label="Toggle habit">
-                        <svg class="icon-unchecked" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="12" cy="12" r="9"/></svg>
-                        <svg class="icon-checked" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
-                    </button>
-                </form>
-                <span class="habit-name">{{.Name}}</span>
-                {{if gt .Streak 0}}
-                <span class="habit-streak">{{.Streak}}d</span>
-                {{end}}
-                <form hx-post="/habits/delete" hx-target="#habits-content" hx-swap="innerHTML" class="habit-del-form">
-                    <input type="hidden" name="id" value="{{.ID}}">
-                    <button type="submit" class="del-btn" aria-label="Delete habit"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
-                </form>
-            </div>
-            {{else}}
-            <div class="empty-state">No habits yet — tap + to add one</div>
-            {{end}}
+            {{template "habit-list" .Habits}}
         </div>
     </main>
     </div><!-- #app -->
@@ -225,6 +194,15 @@
         <div class="custom-dialog-sheet">
             <p class="custom-dialog-label" id="custom-dialog-label"></p>
             <input type="text" class="custom-dialog-input" id="custom-dialog-input" autocomplete="off">
+            <div class="custom-dialog-extra" id="custom-dialog-extra" hidden>
+                <div class="chip-row" id="custom-dialog-period" role="group" aria-label="How often">
+                    <button type="button" class="chip active" data-period="day">Daily</button>
+                    <button type="button" class="chip" data-period="week">Weekly</button>
+                    <button type="button" class="chip" data-period="month">Monthly</button>
+                    <button type="button" class="chip" data-period="year">Yearly</button>
+                </div>
+                <input type="number" class="custom-dialog-input" id="custom-dialog-target" min="1" max="1000" value="1" inputmode="numeric" aria-label="Target" hidden>
+            </div>
             <div class="custom-dialog-actions">
                 <button class="btn" id="custom-dialog-cancel" type="button">Cancel</button>
                 <button class="btn btn-primary" id="custom-dialog-confirm" type="button">OK</button>

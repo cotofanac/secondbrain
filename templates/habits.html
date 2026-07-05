@@ -1,5 +1,6 @@
+{{define "habit-list"}}
 <div class="habits-toolbar">
-    <span class="habits-title">Today</span>
+    <span class="habits-title">{{if .Daily}}Today{{else}}Habits{{end}}</span>
     <div class="habits-actions">
         <button class="btn btn-icon" onclick="addHabit()" title="New habit">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
@@ -9,24 +10,74 @@
         </button>
     </div>
 </div>
-{{range .}}
-<div class="habit-item {{if .DoneToday}}done{{end}}">
-    <form hx-post="/habits/toggle" hx-target="#habits-content" hx-swap="innerHTML" class="habit-check-form">
+{{if .Daily}}
+<div class="habit-section" data-period="day">
+    {{range .Daily}}
+    <div class="habit-item {{if .Done}}done{{end}}">
+        <form hx-post="/habits/toggle" hx-target="#habits-content" hx-swap="innerHTML" class="habit-check-form">
+            <input type="hidden" name="id" value="{{.ID}}">
+            <button type="submit" class="habit-check {{if .Done}}checked{{end}}" aria-label="Toggle habit">
+                <svg class="icon-unchecked" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="12" cy="12" r="9"/></svg>
+                <svg class="icon-checked" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+            </button>
+        </form>
+        <span class="habit-name">{{.Name}}</span>
+        {{if .StreakLabel}}<span class="habit-streak">{{.StreakLabel}}</span>{{end}}
+        <form hx-post="/habits/delete" hx-target="#habits-content" hx-swap="innerHTML" class="habit-del-form">
+            <input type="hidden" name="id" value="{{.ID}}">
+            <button type="submit" class="del-btn" aria-label="Delete habit"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+        </form>
+    </div>
+    {{end}}
+</div>
+{{end}}
+{{if .Weekly}}
+<div class="habit-section" data-period="week">
+    <div class="habit-section-header">This Week</div>
+    {{range .Weekly}}{{template "habit-goal" .}}{{end}}
+</div>
+{{end}}
+{{if .Monthly}}
+<div class="habit-section" data-period="month">
+    <div class="habit-section-header">This Month</div>
+    {{range .Monthly}}{{template "habit-goal" .}}{{end}}
+</div>
+{{end}}
+{{if .Yearly}}
+<div class="habit-section" data-period="year">
+    <div class="habit-section-header">This Year</div>
+    {{range .Yearly}}{{template "habit-goal" .}}{{end}}
+</div>
+{{end}}
+{{if and (not .Daily) (not .Weekly) (not .Monthly) (not .Yearly)}}
+<div class="empty-state">No habits yet — tap + to add one</div>
+{{end}}
+{{end}}
+
+{{define "habit-goal"}}
+<div class="habit-item habit-goal {{if .Done}}done{{end}}">
+    <form hx-post="/habits/increment" hx-target="#habits-content" hx-swap="innerHTML" class="habit-check-form">
         <input type="hidden" name="id" value="{{.ID}}">
-        <button type="submit" class="habit-check {{if .DoneToday}}checked{{end}}" aria-label="Toggle habit">
-            <svg class="icon-unchecked" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="12" cy="12" r="9"/></svg>
+        <button type="submit" class="habit-check {{if .Done}}checked{{end}}" aria-label="Add progress">
+            <svg class="icon-unchecked" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><line x1="12" y1="8.5" x2="12" y2="15.5"/><line x1="8.5" y1="12" x2="15.5" y2="12"/></svg>
             <svg class="icon-checked" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
         </button>
     </form>
-    <span class="habit-name">{{.Name}}</span>
-    {{if gt .Streak 0}}
-    <span class="habit-streak">{{.Streak}}d</span>
+    <div class="habit-goal-body">
+        <span class="habit-name">{{.Name}}</span>
+        <div class="habit-progress"><div class="habit-progress-fill" style="width: {{.Percent}}%"></div></div>
+    </div>
+    <span class="habit-count">{{.Progress}}/{{.Target}}</span>
+    {{if .StreakLabel}}<span class="habit-streak">{{.StreakLabel}}</span>{{end}}
+    {{if gt .Progress 0}}
+    <form hx-post="/habits/decrement" hx-target="#habits-content" hx-swap="innerHTML" class="habit-del-form">
+        <input type="hidden" name="id" value="{{.ID}}">
+        <button type="submit" class="habit-minus" aria-label="Undo progress"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="5" y1="12" x2="19" y2="12"/></svg></button>
+    </form>
     {{end}}
     <form hx-post="/habits/delete" hx-target="#habits-content" hx-swap="innerHTML" class="habit-del-form">
         <input type="hidden" name="id" value="{{.ID}}">
         <button type="submit" class="del-btn" aria-label="Delete habit"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
     </form>
 </div>
-{{else}}
-<div class="empty-state">No habits yet - tap + to add one</div>
 {{end}}

@@ -9,6 +9,11 @@
 {{range .}}
 <div class="archive-note-item archived-item">
     <span class="archive-note-title">{{.Name}}</span>
+    {{if eq .Period "day"}}
+    {{if gt .Total 0}}<span class="archive-habit-count">{{.Total}}d</span>{{end}}
+    {{else}}
+    <span class="archive-habit-count">{{.Total}}/{{.Target}}</span>
+    {{end}}
     <div class="archive-note-actions">
         <form hx-post="/habits/restore" hx-target="#habits-content" hx-swap="innerHTML" class="inline-form">
             <input type="hidden" name="id" value="{{.ID}}">

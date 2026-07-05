@@ -48,8 +48,11 @@ function updateTopbarStat() {
             if (pending > 0) count = pending + ' left';
         }
     } else if (activeMode === 'habits') {
-        const total = document.querySelectorAll('#habits-content .habit-item').length;
-        const done = document.querySelectorAll('#habits-content .habit-item.done').length;
+        // Only daily habits feed the "done/total" stat; periodic goals track
+        // their own per-period progress.
+        const daily = '#habits-content .habit-section[data-period="day"] .habit-item';
+        const total = document.querySelectorAll(daily).length;
+        const done = document.querySelectorAll(daily + '.done').length;
         if (total > 0) count = done + '/' + total;
     }
 
@@ -59,9 +62,11 @@ function updateTopbarStat() {
 function updateHabitsBadge() {
     const badge = document.getElementById('habits-badge');
     if (!badge) return;
-    const items = document.querySelectorAll('#habits-content .habit-item');
+    // The nav dot reflects unfinished daily habits only, not periodic goals.
+    const daily = '#habits-content .habit-section[data-period="day"] .habit-item';
+    const items = document.querySelectorAll(daily);
     if (items.length === 0) { badge.hidden = true; return; }
-    const undone = document.querySelectorAll('#habits-content .habit-item:not(.done)').length;
+    const undone = document.querySelectorAll(daily + ':not(.done)').length;
     if (undone > 0) {
         badge.textContent = '';
         badge.hidden = false;
@@ -638,12 +643,85 @@ function hideNotesArchive() {
     htmx.ajax('GET', '/notes', '#notes-content');
 }
 
+// Habit creation dialog: name plus an optional period + target for goals.
+// Reuses the shared #custom-dialog sheet, unhiding the extra fields and
+// restoring their hidden state on cleanup so plain showPrompt() stays pristine.
+function showHabitDialog() {
+    return new Promise(resolve => {
+        const dialog = document.getElementById('custom-dialog');
+        const labelEl = document.getElementById('custom-dialog-label');
+        const input = document.getElementById('custom-dialog-input');
+        const extra = document.getElementById('custom-dialog-extra');
+        const periodGroup = document.getElementById('custom-dialog-period');
+        const chips = periodGroup.querySelectorAll('.chip');
+        const targetInput = document.getElementById('custom-dialog-target');
+        const confirmBtn = document.getElementById('custom-dialog-confirm');
+        const cancelBtn = document.getElementById('custom-dialog-cancel');
+
+        function selectPeriod(p) {
+            chips.forEach(c => c.classList.toggle('active', c.dataset.period === p));
+            targetInput.hidden = p === 'day'; // target only applies to periodic goals
+        }
+        function currentPeriod() {
+            const active = periodGroup.querySelector('.chip.active');
+            return active ? active.dataset.period : 'day';
+        }
+
+        labelEl.textContent = 'New habit';
+        input.value = '';
+        targetInput.value = '1';
+        selectPeriod('day');
+        extra.hidden = false;
+        dialog.hidden = false;
+        setTimeout(() => { input.focus(); input.select(); }, 50);
+
+        function onChipClick(e) {
+            const chip = e.target.closest('.chip');
+            if (chip) selectPeriod(chip.dataset.period);
+        }
+        function submit() {
+            const name = input.value.trim();
+            if (!name) { cleanup(); resolve(null); return; }
+            const period = currentPeriod();
+            let target = 1;
+            if (period !== 'day') {
+                target = parseInt(targetInput.value, 10);
+                if (!Number.isFinite(target) || target < 1) target = 1;
+            }
+            cleanup();
+            resolve({ name, period, target: String(target) });
+        }
+        function dismiss() { cleanup(); resolve(null); }
+        function cleanup() {
+            dialog.hidden = true;
+            extra.hidden = true;
+            selectPeriod('day');
+            confirmBtn.removeEventListener('click', submit);
+            cancelBtn.removeEventListener('click', dismiss);
+            input.removeEventListener('keydown', onKey);
+            periodGroup.removeEventListener('click', onChipClick);
+            dialog.removeEventListener('click', onBackdrop);
+        }
+        function onKey(e) {
+            if (e.key === 'Enter') { e.preventDefault(); submit(); }
+            if (e.key === 'Escape') dismiss();
+        }
+        function onBackdrop(e) { if (e.target === dialog) dismiss(); }
+
+        confirmBtn.addEventListener('click', submit);
+        cancelBtn.addEventListener('click', dismiss);
+        input.addEventListener('keydown', onKey);
+        periodGroup.addEventListener('click', onChipClick);
+        dialog.addEventListener('click', onBackdrop);
+    });
+}
+
 async function addHabit() {
-    const name = await showPrompt('Habit name');
-    if (!name) return;
+    const goal = await showHabitDialog();
+    if (!goal) return;
     htmx.ajax('POST', '/habits/add', {
         target: '#habits-content',
-        values: { name }
+        values: goal
     });
 }
 

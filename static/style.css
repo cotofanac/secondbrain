@@ -880,6 +880,13 @@ html, body {
     gap: 0.25rem;
 }
 
+.archive-habit-count {
+    font-size: 0.8rem;
+    color: var(--text-dim);
+    font-variant-numeric: tabular-nums;
+    flex-shrink: 0;
+}
+
 /* Habits */
 .habits-toolbar {
     display: flex;
@@ -950,6 +957,100 @@ html, body {
     color: rgba(255, 170, 68, 0.65);
     font-weight: 500;
     flex-shrink: 0;
+}
+
+/* Periodic goals (weekly / monthly / yearly) */
+.habit-section-header {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-dim);
+    font-weight: 600;
+    padding: 0.85rem 1rem 0.35rem;
+}
+
+.habit-goal-body {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+}
+
+.habit-goal .habit-name {
+    flex: none;
+}
+
+.habit-progress {
+    height: 3px;
+    background: var(--surface2);
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.habit-progress-fill {
+    height: 100%;
+    background: var(--accent);
+    border-radius: 3px;
+    transition: width 0.2s ease;
+}
+
+.habit-item.done .habit-progress-fill {
+    background: var(--success);
+}
+
+.habit-count {
+    font-size: 0.75rem;
+    color: var(--text-dim);
+    font-variant-numeric: tabular-nums;
+    flex-shrink: 0;
+}
+
+.habit-minus {
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    cursor: pointer;
+    padding: 0.3rem;
+    opacity: 0.5;
+    display: flex;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.habit-minus:hover, .habit-minus:active {
+    color: var(--text);
+    opacity: 1;
+}
+
+.custom-dialog-extra {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+}
+
+.chip-row {
+    display: flex;
+    gap: 0.4rem;
+    flex-wrap: wrap;
+}
+
+.chip {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    border-radius: 999px;
+    padding: 0.4rem 0.8rem;
+    font-family: inherit;
+    font-size: 0.82rem;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.chip.active {
+    background: var(--accent-dim);
+    border-color: var(--accent);
+    color: var(--text);
 }
 
 /* Inactivity warning */
