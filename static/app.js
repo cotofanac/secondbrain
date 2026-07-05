@@ -735,13 +735,26 @@ function refreshCurrentView() {
     const activeMode = document.querySelector('.bottom-nav-btn.active')?.dataset.mode || 'todos';
     if (activeMode === 'todos') {
         const activeCat = document.querySelector('#tab-bar .tab.active')?.dataset.cat || 'groceries';
+        preserveScroll();
         switchTab(activeCat, document.querySelector(`[data-cat="${activeCat}"]`));
     } else if (activeMode === 'notes') {
         const noteId = document.getElementById('note-editor')?.dataset.noteId;
-        if (noteId) loadNote(noteId);
+        if (noteId) { preserveScroll(); loadNote(noteId); }
     } else if (activeMode === 'habits') {
+        preserveScroll();
         htmx.ajax('GET', '/habits', '#habits-content');
     }
+}
+
+// Restore the window scroll position after the next htmx swap settles. Swapping
+// a list's innerHTML clamps the page back to the top, so refreshing the current
+// view (e.g. when the tab is re-focused) would otherwise lose the user's place.
+function preserveScroll() {
+    const scrollY = window.scrollY;
+    if (scrollY === 0) return;
+    document.body.addEventListener('htmx:afterSettle', function restore() {
+        window.scrollTo(0, scrollY);
+    }, { once: true });
 }
 
 function startInactivityTimers(timeoutMs) {
