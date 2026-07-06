@@ -51,6 +51,7 @@ docker compose up -d
 
 **Built like an app**
 - **Installable PWA** — add it to your phone or desktop and launch it from the home screen. A service worker keeps assets fresh across deploys, with cache-busting handled for you.
+- **Push reminders** — an optional daily nudge for unchecked habits and tasks due today, delivered even when the app is closed. One tap on the bell to opt a device in. See [Reminders](#reminders).
 - **Archive, restore, and permanent-delete** for tasks, notes, and habits — nothing is lost by accident.
 
 ## Security
@@ -69,6 +70,18 @@ A single passcode, taken seriously:
 | `PORT` | `8080` | Server port |
 | `DATA_DIR` | `./data` | SQLite database location |
 | `INACTIVITY_LOGOUT_MINUTES` | `45` | Auto-logout timeout after inactivity |
+| `HABIT_REMINDER_TIME` | `20:00` | Daily "habits left" push, in `TZ` local time. `off` to disable |
+| `TASK_REMINDER_TIME` | `09:00` | Daily "tasks due today" push, in `TZ` local time. `off` to disable |
+| `PUSH_SUBJECT` | `mailto:secondbrain@localhost` | VAPID contact sent to push services (optional) |
+
+### Reminders
+
+SecondBrain can send **push notifications** — a nightly nudge when daily habits are still unchecked, and a morning list of tasks due that day. Tap the **bell** in the top bar to turn reminders on for a device; the app remembers the choice per device.
+
+- Notifications are **server-sent Web Push**, so they arrive even when the app is closed. No third-party service or account is needed — the server generates its own VAPID keys on first run (stored in the database).
+- **HTTPS is required** (browsers only allow push over a secure origin). `localhost` counts as secure for development.
+- **On iOS (16.4+)** the app must first be **added to the Home Screen**; the bell only appears once push is available.
+- Reminder times use the container's `TZ`. Set either variable to `off` to disable that reminder.
 
 ## Architecture
 

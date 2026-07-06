@@ -549,6 +549,99 @@ if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('/static/sw.js', { updateViaCache: 'none' });
 }
 
+// --- Push notification reminders ---
+// The bell subscribes/unsubscribes the current device. Push is only offered
+// where the platform supports it — on iOS that means the app must be installed
+// to the Home Screen, which is exactly when PushManager becomes available.
+function pushSupported() {
+    return 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+}
+
+function urlBase64ToUint8Array(base64String) {
+    const padding = '='.repeat((4 - base64String.length % 4) % 4);
+    const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+    const raw = atob(base64);
+    const output = new Uint8Array(raw.length);
+    for (let i = 0; i < raw.length; i++) output[i] = raw.charCodeAt(i);
+    return output;
+}
+
+function setPushBtnState(on) {
+    const btn = document.getElementById('push-toggle-btn');
+    if (!btn) return;
+    btn.classList.toggle('push-on', on);
+    btn.title = on ? 'Reminders on' : 'Reminders off';
+}
+
+async function initPushButton() {
+    const btn = document.getElementById('push-toggle-btn');
+    if (!btn || !pushSupported()) return;
+    btn.hidden = false;
+    try {
+        const reg = await navigator.serviceWorker.ready;
+        const sub = await reg.pushManager.getSubscription();
+        setPushBtnState(!!sub);
+    } catch (e) {
+        setPushBtnState(false);
+    }
+}
+
+async function togglePush() {
+    if (!pushSupported()) return;
+    const reg = await navigator.serviceWorker.ready;
+    const existing = await reg.pushManager.getSubscription();
+
+    // Already on -> turn off.
+    if (existing) {
+        try {
+            await fetch('/push/unsubscribe', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ endpoint: existing.endpoint })
+            });
+            await existing.unsubscribe();
+            setPushBtnState(false);
+            showToast('Reminders off');
+        } catch (e) {
+            showToast('Could not turn off reminders');
+        }
+        return;
+    }
+
+    // Turn on. requestPermission must run inside this click handler (iOS
+    // requires a user gesture), so ask before any awaits that could defer it.
+    let permission;
+    try {
+        permission = await Notification.requestPermission();
+    } catch (e) {
+        permission = Notification.permission;
+    }
+    if (permission !== 'granted') {
+        showToast(permission === 'denied'
+            ? 'Notifications blocked — enable them in your browser settings'
+            : 'Notifications not enabled');
+        return;
+    }
+
+    try {
+        const res = await fetch('/push/public-key');
+        const { key } = await res.json();
+        const sub = await reg.pushManager.subscribe({
+            userVisibleOnly: true,
+            applicationServerKey: urlBase64ToUint8Array(key)
+        });
+        await fetch('/push/subscribe', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(sub)
+        });
+        setPushBtnState(true);
+        showToast('Reminders on');
+    } catch (e) {
+        showToast('Could not enable reminders');
+    }
+}
+
 // --- Calendar button for todo due date ---
 const CALENDAR_ICON = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>`;
 
@@ -1056,4 +1149,5 @@ document.addEventListener('DOMContentLoaded', function() {
     setupInactivityLogout();
     updateTopbarStat();
     updateHabitsBadge();
+    initPushButton();
 });

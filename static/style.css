@@ -265,6 +265,16 @@ html, body {
     opacity: 1;
 }
 
+/* Reminders bell: brighten and fill when the current device is subscribed. */
+.push-toggle-btn.push-on {
+    opacity: 1;
+    color: var(--accent, var(--text));
+}
+
+.push-toggle-btn.push-on svg {
+    fill: currentColor;
+}
+
 /* Search */
 .search-overlay {
     overflow: hidden;

@@ -12,6 +12,11 @@ services:
       # Set TZ to your local zone (e.g. Europe/Bucharest) so dates, "today" for
       # habits, and note timestamps match your wall clock. Defaults to UTC.
       - TZ=${TZ:-UTC}
+      # Daily push-reminder times, in the TZ above (24h HH:MM). Set either to
+      # "off" to disable that reminder. Requires HTTPS and, on iOS, installing
+      # the app to the Home Screen; see the README "Reminders" section.
+      - HABIT_REMINDER_TIME=${HABIT_REMINDER_TIME:-20:00}
+      - TASK_REMINDER_TIME=${TASK_REMINDER_TIME:-09:00}
     volumes:
       # Bind mount: the SQLite database is persisted on the host.
       # The container runs as appuser (UID 1000), so the host directory must be

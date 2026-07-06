@@ -211,8 +211,12 @@ func main() {
 		log.Printf("Inactivity logout set to %d minutes", inactivityTimeoutMinutes)
 	}
 
+	configurePushReminders()
+
 	initDB()
 	defer db.Close()
+
+	initPush()
 
 	funcMap := template.FuncMap{
 		"formatDate": func(s string) string {
@@ -364,7 +368,14 @@ func main() {
 	http.HandleFunc("/habits/restore", authMiddleware(handleRestoreHabit))
 	http.HandleFunc("/habits/permanent-delete", authMiddleware(handlePermanentDeleteHabit))
 
+	// Push notifications
+	http.HandleFunc("/push/public-key", authMiddleware(handlePushPublicKey))
+	http.HandleFunc("/push/subscribe", authMiddleware(handlePushSubscribe))
+	http.HandleFunc("/push/unsubscribe", authMiddleware(handlePushUnsubscribe))
+	http.HandleFunc("/push/test", authMiddleware(handlePushTest))
+
 	startAutoArchiveTodos()
+	startPushReminders()
 
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -455,6 +466,20 @@ func initDB() {
 		`CREATE TABLE IF NOT EXISTS sessions (
 			token TEXT PRIMARY KEY,
 			expires_at TEXT NOT NULL
+		)`,
+		// Web Push subscriptions, one row per installed device/browser. The
+		// endpoint is the push service URL and is unique per subscription.
+		`CREATE TABLE IF NOT EXISTS push_subscriptions (
+			endpoint TEXT PRIMARY KEY,
+			p256dh TEXT NOT NULL,
+			auth TEXT NOT NULL,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)`,
+		// Generic key/value store: holds the generated VAPID key pair and the
+		// per-reminder "last sent" date markers used to send at most once a day.
+		`CREATE TABLE IF NOT EXISTS settings (
+			key TEXT PRIMARY KEY,
+			value TEXT NOT NULL
 		)`,
 	}
 	for _, stmt := range schema {
