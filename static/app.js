@@ -4,6 +4,8 @@ const MODE_TITLES = { todos: 'Tasks', notes: 'Notes', habits: 'Habits' };
 const TAB_CYCLE = ['groceries', 'shopping', 'todo'];
 
 function switchMode(mode) {
+    // A pending undo refers to the view being left, so retire it on navigation.
+    hideToast();
     const currentMode = document.querySelector('.bottom-nav-btn.active')?.dataset.mode;
 
     if (mode === 'todos' && currentMode === 'todos') {
@@ -105,27 +107,110 @@ document.body.addEventListener('htmx:confirm', function(e) {
 });
 
 // Surface otherwise-silent HTMX failures (server error or no connection).
-document.body.addEventListener('htmx:responseError', function() {
-    showToast('Something went wrong — try again');
+// htmx never swaps a non-2xx response, so without this the specific reason a
+// request was rejected ("Habit already exists", "Cannot delete the last note")
+// would be discarded. 4xx bodies are our own http.Error text and are meant for
+// the user; 5xx bodies are not, so those keep the generic message.
+document.body.addEventListener('htmx:responseError', function(e) {
+    const xhr = e.detail.xhr;
+    // An expired session responds 401 + HX-Redirect; we're already navigating
+    // to /login, so a toast would just be noise.
+    if (xhr && xhr.getResponseHeader('HX-Redirect')) return;
+    let msg = '';
+    if (xhr && xhr.status >= 400 && xhr.status < 500) {
+        msg = (xhr.responseText || '').trim();
+        // Guard against an unexpectedly long or HTML body reaching the toast.
+        if (msg.length > 120 || msg.indexOf('<') === 0) msg = '';
+    }
+    showToast(msg || 'Something went wrong — try again');
 });
 document.body.addEventListener('htmx:sendError', function() {
     showToast('You appear to be offline');
 });
 
 let toastTimer;
-function showToast(msg) {
+const TOAST_MS = 3000;
+// An actionable toast stays up longer: it is only useful while it is on screen.
+const TOAST_ACTION_MS = 7000;
+
+// action is optional: { label, onClick }. The content is assembled as DOM nodes
+// rather than markup so a message can never be interpreted as HTML.
+function showToast(msg, action) {
     const el = document.getElementById('toast');
     if (!el) return;
-    el.textContent = msg;
+
+    el.textContent = '';
+    const label = document.createElement('span');
+    label.textContent = msg;
+    el.appendChild(label);
+
+    const actionable = !!(action && action.label && typeof action.onClick === 'function');
+    if (actionable) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'toast-action';
+        btn.textContent = action.label;
+        btn.addEventListener('click', function() {
+            hideToast();
+            action.onClick();
+        });
+        el.appendChild(btn);
+    }
+    // The toast is pointer-transparent by default so it never blocks the list
+    // underneath; it only becomes clickable when it actually offers an action.
+    el.classList.toggle('has-action', actionable);
+
     el.hidden = false;
     // Reflow so re-triggering the animation works on a visible element.
     void el.offsetWidth;
     el.classList.add('show');
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => {
-        el.classList.remove('show');
-        setTimeout(() => { el.hidden = true; }, 300);
-    }, 3000);
+    toastTimer = setTimeout(hideToast, actionable ? TOAST_ACTION_MS : TOAST_MS);
+}
+
+function hideToast() {
+    const el = document.getElementById('toast');
+    if (!el || el.hidden) return;
+    clearTimeout(toastTimer);
+    el.classList.remove('show');
+    setTimeout(() => { el.hidden = true; }, 300);
+}
+
+// --- Undo for one-tap archiving ---
+// The server answers an archive with an sbUndo trigger; the toast turns that
+// into a reversal the user can take without hunting through the archive view.
+document.body.addEventListener('sbUndo', function(e) {
+    const d = e.detail || {};
+    if (!d.id) return;
+    const isHabit = d.kind === 'habit';
+    showToast(isHabit ? 'Habit archived' : 'Task archived', {
+        label: 'Undo',
+        onClick: function() { undoArchive(d.kind, d.id); }
+    });
+});
+
+// Plain confirmations (e.g. a name collision resolved by reviving an archived item).
+document.body.addEventListener('sbNotice', function(e) {
+    const d = e.detail || {};
+    if (d.message) showToast(d.message);
+});
+
+function undoArchive(kind, id) {
+    // return=list asks the restore handler for the live list rather than the
+    // archive view it would normally re-render.
+    if (kind === 'habit') {
+        htmx.ajax('POST', '/habits/restore', {
+            target: '#habits-content',
+            swap: 'innerHTML',
+            values: { id: id, return: 'list' }
+        });
+    } else {
+        htmx.ajax('POST', '/todos/restore', {
+            target: '#todo-items',
+            swap: 'innerHTML',
+            values: { id: id, return: 'list' }
+        });
+    }
 }
 
 // /logout is POST-only, so submit a form rather than navigating (a GET).
@@ -139,6 +224,7 @@ function doLogout() {
 
 // --- Tab switching (Shopping List / To-Do / Groceries Checklist) ---
 function switchTab(category, el) {
+    hideToast(); // see switchMode
     document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
     const target = el || document.querySelector(`[data-cat="${category}"]`);
     if (target) target.classList.add('active');
@@ -710,6 +796,7 @@ function clearChecked() {
 }
 
 function showArchive() {
+    hideToast(); // an undo would render the live list back over the archive
     const cat = document.getElementById('add-category').value;
     htmx.ajax('GET', '/todos/archive?category=' + cat, '#todo-items');
     document.getElementById('add-form').style.display = 'none';
@@ -819,6 +906,7 @@ async function addHabit() {
 }
 
 function showHabitsArchive() {
+    hideToast(); // see showArchive
     htmx.ajax('GET', '/habits/archive', '#habits-content');
 }
 
@@ -993,10 +1081,12 @@ function hideInactivityWarning() {
 }
 
 // --- Inline todo editing ---
+// Returns the edit input so a touch caller can re-focus it from inside a real
+// user gesture (see the long-press handler).
 function startTodoEdit(spanEl) {
     const originalText = spanEl.textContent.trim();
     const item = spanEl.closest('.todo-item');
-    if (!item) return;
+    if (!item) return null;
     const id = item.querySelector('input[name="id"]').value;
 
     const input = document.createElement('input');
@@ -1029,12 +1119,13 @@ function startTodoEdit(spanEl) {
         if (e.key === 'Escape') cancel();
     });
     input.addEventListener('blur', save);
+    return input;
 }
 
 function startHabitRename(spanEl) {
     const originalName = spanEl.textContent.trim();
     const item = spanEl.closest('.habit-item');
-    if (!item) return;
+    if (!item) return null;
     const id = item.querySelector('input[name="id"]').value;
 
     const input = document.createElement('input');
@@ -1067,14 +1158,107 @@ function startHabitRename(spanEl) {
         if (e.key === 'Escape') cancel();
     });
     input.addEventListener('blur', save);
+    return input;
+}
+
+// Inline edit is reachable two ways: double-click with a mouse, press-and-hold
+// on touch. iOS has no usable dblclick — double-tap is the zoom gesture — so
+// without the long press this feature was desktop-only on a phone-first app.
+const LONG_PRESS_MS = 500;
+const LONG_PRESS_SLOP_PX = 10;
+
+// Resolves an event target to the editable label of a live (non-archived) row.
+// Archived rows render the same .todo-text but have no edit endpoint: posting
+// to /todos/edit for one 404s, since that query requires archived = 0.
+function editableLabel(target) {
+    if (!target || typeof target.closest !== 'function') return null;
+    const label = target.closest('.todo-text, .habit-name');
+    if (!label) return null;
+    const row = label.closest('.todo-item, .habit-item');
+    if (!row || row.classList.contains('archived-item')) return null;
+    return label;
+}
+
+function beginInlineEdit(label) {
+    return label.classList.contains('todo-text')
+        ? startTodoEdit(label)
+        : startHabitRename(label);
 }
 
 document.addEventListener('dblclick', function(e) {
-    const todoSpan = e.target.closest('.todo-text');
-    if (todoSpan) { startTodoEdit(todoSpan); return; }
-    const habitSpan = e.target.closest('.habit-name');
-    if (habitSpan) startHabitRename(habitSpan);
+    const label = editableLabel(e.target);
+    if (label) beginInlineEdit(label);
 });
+
+(function() {
+    let timer = null;
+    let startX = 0, startY = 0;
+    let pendingInput = null;
+    let justFired = false;
+
+    function cancelPress() {
+        if (timer) { clearTimeout(timer); timer = null; }
+    }
+
+    document.addEventListener('pointerdown', function(e) {
+        // Mouse keeps dblclick; a 500ms hold with a mouse is not an edit intent.
+        if (e.pointerType === 'mouse' || !e.isPrimary) return;
+        // Reset before the label check: if a previous long press never produced
+        // the click we expected to swallow, a stale flag here would eat the
+        // user's next unrelated tap.
+        cancelPress();
+        justFired = false;
+        pendingInput = null;
+        const label = editableLabel(e.target);
+        if (!label) return;
+        startX = e.clientX;
+        startY = e.clientY;
+        timer = setTimeout(function() {
+            timer = null;
+            justFired = true;
+            // Swap now so the hold gives immediate visual feedback. focus() from
+            // a timer doesn't open the iOS keyboard (not a user gesture), so the
+            // input is re-focused on pointerup below, which is one.
+            pendingInput = beginInlineEdit(label);
+        }, LONG_PRESS_MS);
+    }, { passive: true });
+
+    document.addEventListener('pointermove', function(e) {
+        if (!timer) return;
+        if (Math.abs(e.clientX - startX) > LONG_PRESS_SLOP_PX ||
+            Math.abs(e.clientY - startY) > LONG_PRESS_SLOP_PX) cancelPress();
+    }, { passive: true });
+
+    document.addEventListener('pointerup', function() {
+        cancelPress();
+        if (pendingInput) {
+            pendingInput.focus();
+            pendingInput.select();
+            pendingInput = null;
+        }
+    }, { passive: true });
+
+    document.addEventListener('pointercancel', function() {
+        cancelPress();
+        pendingInput = null;
+    }, { passive: true });
+
+    window.addEventListener('scroll', cancelPress, { passive: true });
+
+    // Swallow the click synthesized at the end of a long press so it can't also
+    // trigger whatever now sits under the finger.
+    document.addEventListener('click', function(e) {
+        if (!justFired) return;
+        justFired = false;
+        e.preventDefault();
+        e.stopPropagation();
+    }, true);
+
+    // Suppress the iOS callout / context menu on labels we handle ourselves.
+    document.addEventListener('contextmenu', function(e) {
+        if (editableLabel(e.target)) e.preventDefault();
+    });
+})();
 
 // --- Global search ---
 function openSearch() {

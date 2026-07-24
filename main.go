@@ -20,6 +20,7 @@ import (
 	"os"
 	"os/signal"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -40,7 +41,12 @@ var (
 	templates                *template.Template
 	passcode                 string
 	inactivityTimeoutMinutes = 45
-	validNameRe              = regexp.MustCompile(`^[^\x00-\x1f\x7f]+$`)
+	// validNameRe guards note titles and habit names. It is deliberately
+	// permissive: anything except C0/C7F control characters is allowed, so
+	// punctuation, accents and emoji all pass. It is not an XSS defence —
+	// html/template escapes every value by context at render time — it only
+	// keeps control characters out of stored names and log lines.
+	validNameRe = regexp.MustCompile(`^[^\x00-\x1f\x7f]+$`)
 	// assetVersion is a short content hash of the code assets, appended as
 	// ?v= to asset URLs and baked into the service-worker cache name so a
 	// deploy invalidates stale JS/CSS instead of serving it for up to a day.
@@ -113,7 +119,20 @@ func securityHeaders(next http.Handler) http.Handler {
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
-		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:")
+		// 'unsafe-inline' for script-src is still required by the inline onclick
+		// handlers and the two inline <script> blocks in the templates; every
+		// dynamic value reaches the page through html/template's contextual
+		// escaper, so that is defence-in-depth rather than the primary control.
+		// The remaining directives cost nothing here and close the gaps that
+		// remain useful even if HTML injection were ever found: base-uri stops a
+		// planted <base> from re-pointing every relative URL, form-action stops
+		// a planted form from posting the passcode off-origin, object-src blocks
+		// plugin content, and frame-ancestors is the modern X-Frame-Options.
+		w.Header().Set("Content-Security-Policy",
+			"default-src 'self'; script-src 'self' 'unsafe-inline'; "+
+				"style-src 'self' 'unsafe-inline'; img-src 'self' data:; "+
+				"base-uri 'self'; form-action 'self'; object-src 'none'; "+
+				"frame-ancestors 'none'")
 		// Default to no-store; the static and service-worker handlers override
 		// this with their own cache policy. Keeps user data (notes, tasks) out
 		// of shared/intermediary caches.
@@ -175,18 +194,39 @@ func (rw *responseWriter) WriteHeader(code int) {
 	rw.ResponseWriter.WriteHeader(code)
 }
 
+// archiveStaleTodos files away to-dos that are over a week old and no longer
+// upcoming: a task keeps its place until its due date has passed (or it never
+// had one).
+//
+// today must be the *local* date. due_date stores the calendar date the user
+// picked, so comparing it against SQLite's date('now') — which is UTC — archives
+// a task on the evening of the very day it is due for any timezone behind UTC.
+// The age test stays in SQLite because created_at is a UTC CURRENT_TIMESTAMP,
+// so both sides of that comparison are already UTC. Same reasoning as the
+// habit-log floor in loadHabits.
+func archiveStaleTodos(today time.Time) (int64, error) {
+	res, err := db.Exec(`
+		UPDATE todos SET archived = 1, archived_at = CURRENT_TIMESTAMP
+		WHERE category = 'todo'
+		  AND archived = 0
+		  AND created_at <= datetime('now', '-7 days')
+		  AND (due_date = '' OR due_date < ?)`,
+		today.Format("2006-01-02"),
+	)
+	if err != nil {
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+	return n, nil
+}
+
 func startAutoArchiveTodos() {
 	go func() {
 		for {
-			// Don't archive a task that's still upcoming: keep it until its due
-			// date has passed (or it has no due date at all).
-			res, err := db.Exec(
-				"UPDATE todos SET archived = 1, archived_at = CURRENT_TIMESTAMP WHERE category = 'todo' AND archived = 0 AND created_at <= datetime('now', '-7 days') AND (due_date = '' OR due_date < date('now'))",
-			)
-			if err == nil {
-				if n, _ := res.RowsAffected(); n > 0 {
-					log.Printf("Auto-archived %d todo items", n)
-				}
+			if n, err := archiveStaleTodos(time.Now()); err != nil {
+				log.Printf("Auto-archive failed: %v", err)
+			} else if n > 0 {
+				log.Printf("Auto-archived %d todo items", n)
 			}
 			time.Sleep(1 * time.Hour)
 		}
@@ -707,10 +747,20 @@ func handleLogout(w http.ResponseWriter, r *http.Request) {
 
 // --- Pages ---
 
+// maxSuggestions bounds the autocomplete list. Both datalists are inlined into
+// the page on every load, so this query must not grow with the table. In
+// practice the reuse logic in handleAddTodo keeps the row count near the number
+// of distinct items the user actually buys, but nothing enforced that.
+const maxSuggestions = 200
+
+// loadSuggestions returns autocomplete entries for a checklist category, newest
+// first (a recently used item is the likeliest next entry) and then sorted for
+// a stable, scannable datalist.
 func loadSuggestions(category string) []string {
 	rows, err := db.Query(
-		"SELECT DISTINCT text FROM todos WHERE category = ? ORDER BY text ASC",
-		category,
+		`SELECT text FROM todos WHERE category = ?
+		 GROUP BY text ORDER BY MAX(created_at) DESC LIMIT ?`,
+		category, maxSuggestions,
 	)
 	if err != nil {
 		return nil
@@ -722,6 +772,9 @@ func loadSuggestions(category string) []string {
 		rows.Scan(&s)
 		items = append(items, s)
 	}
+	// The query orders by recency to pick *which* entries survive the limit;
+	// present them alphabetically, as before.
+	sort.Strings(items)
 	return items
 }
 
@@ -861,33 +914,53 @@ func handleAddTodo(w http.ResponseWriter, r *http.Request) {
 
 	// For list-type categories, reuse an existing item (active or archived) rather than
 	// creating a duplicate. This keeps recurring items (e.g. "potatoes") as a single row.
+	//
+	// The lookup and the write run in one transaction: SetMaxOpenConns(1)
+	// serializes individual statements but not a read-then-write pair, so a
+	// double submit (easy to do on a phone) could otherwise interleave between
+	// the SELECT and the INSERT and create the duplicate this branch exists to
+	// prevent. todos has no UNIQUE constraint to catch that afterwards.
 	var action string
 	if category == "groceries" || category == "shopping" {
+		tx, err := db.Begin()
+		if err != nil {
+			http.Error(w, "DB error", http.StatusInternalServerError)
+			return
+		}
+		defer tx.Rollback()
+
 		var existingID int
-		err := db.QueryRow(
+		err = tx.QueryRow(
 			"SELECT id FROM todos WHERE category = ? AND text = ? COLLATE NOCASE LIMIT 1",
 			category, text,
 		).Scan(&existingID)
-		if err == nil {
-			_, err = db.Exec(
+		switch {
+		case err == nil:
+			if _, err = tx.Exec(
 				"UPDATE todos SET done = 0, archived = 0, due_date = '' WHERE id = ?",
 				existingID,
-			)
-			if err != nil {
+			); err != nil {
 				http.Error(w, "DB error", http.StatusInternalServerError)
 				return
 			}
 			action = "restored"
-		} else {
-			_, err = db.Exec(
+		case errors.Is(err, sql.ErrNoRows):
+			if _, err = tx.Exec(
 				"INSERT INTO todos (category, text, due_date) VALUES (?, ?, ?)",
 				category, text, dueDate,
-			)
-			if err != nil {
+			); err != nil {
 				http.Error(w, "DB error", http.StatusInternalServerError)
 				return
 			}
 			action = "added"
+		default:
+			http.Error(w, "DB error", http.StatusInternalServerError)
+			return
+		}
+
+		if err := tx.Commit(); err != nil {
+			http.Error(w, "DB error", http.StatusInternalServerError)
+			return
 		}
 	} else {
 		_, err := db.Exec(
@@ -991,6 +1064,10 @@ func handleDeleteTodo(w http.ResponseWriter, r *http.Request) {
 	}
 	log.Printf("Todo archived: id=%d [%s]", id, category)
 
+	// Archiving is a single tap on a small control with no confirmation step,
+	// so offer the reversal rather than making the user go find the archive.
+	hxTrigger(w, "sbUndo", map[string]any{"kind": "todo", "id": id})
+
 	r.URL.RawQuery = "category=" + category
 	handleTodos(w, r)
 }
@@ -1071,6 +1148,13 @@ func handleRestoreTodo(w http.ResponseWriter, r *http.Request) {
 	log.Printf("Todo restored: id=%d [%s]", id, category)
 
 	r.URL.RawQuery = "category=" + category
+	// Restoring normally happens inside the archive view, which should re-render
+	// itself. An undo from the toast is triggered from the main list instead, so
+	// it asks for that view back rather than dropping the user into the archive.
+	if r.FormValue("return") == "list" {
+		handleTodos(w, r)
+		return
+	}
 	handleArchiveTodos(w, r)
 }
 
@@ -1146,6 +1230,37 @@ func groupHabits(hs []Habit) HabitsView {
 		}
 	}
 	return v
+}
+
+// nameConflictMessage says *which* row is holding a name after a UNIQUE
+// violation. Both columns are unique across archived rows, so without this the
+// user can be blocked by an item that appears nowhere in the current view.
+// table and column are compile-time literals from the call sites, never user
+// input, so interpolating them is safe.
+func nameConflictMessage(table, column, value, noun string) string {
+	var archived int
+	err := db.QueryRow(
+		fmt.Sprintf("SELECT archived FROM %s WHERE %s = ?", table, column), value,
+	).Scan(&archived)
+	if err == nil && archived == 1 {
+		return "An archived " + noun + " already uses that name"
+	}
+	return "A " + noun + " with this name already exists"
+}
+
+// hxTrigger asks htmx to dispatch a named client event once the response is
+// swapped in, carrying detail as JSON. encoding/json escapes to ASCII-safe
+// output, which matters because this rides in an HTTP header.
+//
+// Two events are in use: "sbUndo" ({kind, id}) offers to reverse a one-tap
+// archive, and "sbNotice" ({message}) shows a plain confirmation.
+func hxTrigger(w http.ResponseWriter, name string, detail any) {
+	payload, err := json.Marshal(map[string]any{name: detail})
+	if err != nil {
+		log.Printf("hxTrigger %s: %v", name, err)
+		return
+	}
+	w.Header().Set("HX-Trigger", string(payload))
 }
 
 func requirePost(w http.ResponseWriter, r *http.Request) bool {
@@ -1228,24 +1343,42 @@ func handleSaveNote(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Optimistic concurrency: if the client sends the timestamp it loaded,
-	// reject the save if another device already wrote a newer version.
+	// Optimistic concurrency: if the client sends the timestamp it loaded, only
+	// write while the row still carries that timestamp. Testing it in the
+	// UPDATE's own WHERE clause rather than as a separate SELECT closes the
+	// window where two devices both read the same value and both then write.
+	//
+	// The two sides are in different formats and must be normalized: the column
+	// stores SQLite's "2006-01-02 15:04:05", but the value the client echoes
+	// back was produced by scanning that column into a string, which
+	// database/sql renders as RFC3339 ("2006-01-02T15:04:05Z"). Comparing them
+	// raw never matches, so datetime() is applied to both.
 	clientUpdatedAt := r.FormValue("updated_at")
+	var res sql.Result
 	if clientUpdatedAt != "" {
-		var currentUpdatedAt string
-		db.QueryRow("SELECT updated_at FROM notes WHERE id = ?", id).Scan(&currentUpdatedAt)
-		if currentUpdatedAt != clientUpdatedAt {
+		res, err = db.Exec(
+			"UPDATE notes SET content = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND datetime(updated_at) = datetime(?)",
+			content, id, clientUpdatedAt,
+		)
+	} else {
+		res, err = db.Exec(
+			"UPDATE notes SET content = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+			content, id,
+		)
+	}
+	if err != nil {
+		http.Error(w, "DB error", http.StatusInternalServerError)
+		return
+	}
+	if clientUpdatedAt != "" {
+		// Nothing matched: either the note is gone, or another device wrote a
+		// newer version since this client loaded it.
+		if n, rerr := res.RowsAffected(); rerr == nil && n == 0 {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusConflict)
 			json.NewEncoder(w).Encode(map[string]string{"status": "conflict"})
 			return
 		}
-	}
-
-	_, err = db.Exec("UPDATE notes SET content = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", content, id)
-	if err != nil {
-		http.Error(w, "DB error", http.StatusInternalServerError)
-		return
 	}
 	log.Printf("Note saved: id=%d (%d bytes)", id, len(content))
 
@@ -1268,25 +1401,66 @@ func handleCreateNote(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Sanitize: only allow alphanumeric, spaces, hyphens, underscores
+	// Reject control characters; see validNameRe.
 	if !validNameRe.MatchString(title) {
 		http.Error(w, "Invalid characters in title", http.StatusBadRequest)
 		return
 	}
 
-	result, err := db.Exec("INSERT INTO notes (title, content) VALUES (?, ?)", title, "")
+	// title is UNIQUE across archived rows too, so a plain INSERT would refuse
+	// a name whose only other holder is invisible in the UI, with no way for
+	// the user to act on the message. Bring the archived note back instead —
+	// the same "reuse the row" behaviour the checklists already have. Wrapped
+	// in a transaction so the lookup and the write can't interleave.
+	tx, err := db.Begin()
 	if err != nil {
-		if strings.Contains(err.Error(), "UNIQUE") {
-			http.Error(w, "Note with this name already exists", http.StatusConflict)
+		http.Error(w, "DB error", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+
+	var noteID int64
+	var restored bool
+	var existingID int64
+	var archived int
+	err = tx.QueryRow("SELECT id, archived FROM notes WHERE title = ?", title).
+		Scan(&existingID, &archived)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		res, ierr := tx.Exec("INSERT INTO notes (title, content) VALUES (?, ?)", title, "")
+		if ierr != nil {
+			http.Error(w, "DB error", http.StatusInternalServerError)
 			return
 		}
+		noteID, _ = res.LastInsertId()
+	case err != nil:
+		http.Error(w, "DB error", http.StatusInternalServerError)
+		return
+	case archived == 1:
+		if _, uerr := tx.Exec("UPDATE notes SET archived = 0 WHERE id = ?", existingID); uerr != nil {
+			http.Error(w, "DB error", http.StatusInternalServerError)
+			return
+		}
+		noteID, restored = existingID, true
+	default:
+		http.Error(w, "A note with this name already exists", http.StatusConflict)
+		return
+	}
+
+	if err := tx.Commit(); err != nil {
 		http.Error(w, "DB error", http.StatusInternalServerError)
 		return
 	}
 
-	newID, _ := result.LastInsertId()
-	log.Printf("Note created: %q (id=%d)", title, newID)
-	r.URL.RawQuery = "id=" + strconv.FormatInt(newID, 10)
+	if restored {
+		log.Printf("Note restored from archive by name: %q (id=%d)", title, noteID)
+		hxTrigger(w, "sbNotice", map[string]string{
+			"message": "Restored an archived note with that name",
+		})
+	} else {
+		log.Printf("Note created: %q (id=%d)", title, noteID)
+	}
+	r.URL.RawQuery = "id=" + strconv.FormatInt(noteID, 10)
 	handleNotes(w, r)
 }
 
@@ -1343,7 +1517,7 @@ func handleRenameNote(w http.ResponseWriter, r *http.Request) {
 	_, err = db.Exec("UPDATE notes SET title = ? WHERE id = ?", title, id)
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE") {
-			http.Error(w, "A note with this name already exists", http.StatusConflict)
+			http.Error(w, nameConflictMessage("notes", "title", title, "note"), http.StatusConflict)
 			return
 		}
 		http.Error(w, "DB error", http.StatusInternalServerError)
@@ -1688,16 +1862,60 @@ func handleAddHabit(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	_, err := db.Exec("INSERT INTO habits (name, period, target) VALUES (?, ?, ?)", name, period, target)
+	// name is UNIQUE across archived rows too — see the matching comment in
+	// handleCreateNote. Reviving the archived habit also keeps its logged
+	// history, which is what the archive exists to preserve.
+	tx, err := db.Begin()
 	if err != nil {
-		if strings.Contains(err.Error(), "UNIQUE") {
-			http.Error(w, "Habit already exists", http.StatusConflict)
-			return
-		}
 		http.Error(w, "DB error", http.StatusInternalServerError)
 		return
 	}
-	log.Printf("Habit added: %q period=%s target=%d", name, period, target)
+	defer tx.Rollback()
+
+	var existingID int64
+	var archived int
+	var restored bool
+	err = tx.QueryRow("SELECT id, archived FROM habits WHERE name = ?", name).
+		Scan(&existingID, &archived)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		if _, ierr := tx.Exec(
+			"INSERT INTO habits (name, period, target) VALUES (?, ?, ?)", name, period, target,
+		); ierr != nil {
+			http.Error(w, "DB error", http.StatusInternalServerError)
+			return
+		}
+	case err != nil:
+		http.Error(w, "DB error", http.StatusInternalServerError)
+		return
+	case archived == 1:
+		// Adopt the period/target just chosen, so reviving doubles as an edit.
+		if _, uerr := tx.Exec(
+			"UPDATE habits SET archived = 0, period = ?, target = ? WHERE id = ?",
+			period, target, existingID,
+		); uerr != nil {
+			http.Error(w, "DB error", http.StatusInternalServerError)
+			return
+		}
+		restored = true
+	default:
+		http.Error(w, "A habit with this name already exists", http.StatusConflict)
+		return
+	}
+
+	if err := tx.Commit(); err != nil {
+		http.Error(w, "DB error", http.StatusInternalServerError)
+		return
+	}
+
+	if restored {
+		log.Printf("Habit restored from archive by name: %q (id=%d)", name, existingID)
+		hxTrigger(w, "sbNotice", map[string]string{
+			"message": "Restored an archived habit with that name",
+		})
+	} else {
+		log.Printf("Habit added: %q period=%s target=%d", name, period, target)
+	}
 
 	handleHabits(w, r)
 }
@@ -1725,7 +1943,7 @@ func handleRenameHabit(w http.ResponseWriter, r *http.Request) {
 	_, err := db.Exec("UPDATE habits SET name = ? WHERE id = ?", name, id)
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE") {
-			http.Error(w, "Habit already exists", http.StatusConflict)
+			http.Error(w, nameConflictMessage("habits", "name", name, "habit"), http.StatusConflict)
 			return
 		}
 		http.Error(w, "DB error", http.StatusInternalServerError)
@@ -1873,6 +2091,9 @@ func handleDeleteHabit(w http.ResponseWriter, r *http.Request) {
 	}
 	log.Printf("Habit archived: id=%d", id)
 
+	// Same one-tap, no-confirm path as archiving a task.
+	hxTrigger(w, "sbUndo", map[string]any{"kind": "habit", "id": id})
+
 	handleHabits(w, r)
 }
 
@@ -1915,7 +2136,13 @@ func handleRestoreHabit(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "DB error", http.StatusInternalServerError)
 		return
 	}
+	log.Printf("Habit restored: id=%d", id)
 
+	// See handleRestoreTodo: an undo from the toast wants the live list back.
+	if r.FormValue("return") == "list" {
+		handleHabits(w, r)
+		return
+	}
 	handleArchiveHabits(w, r)
 }
 

@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -118,6 +120,71 @@ func initPush() {
 	vapidPrivateKey = priv
 }
 
+// --- endpoint validation ---
+
+// validatePushEndpoint rejects subscription endpoints that would turn the
+// reminder sender into an SSRF probe of whatever network the server sits on.
+// The endpoint is attacker-chosen JSON that we then POST to on a daily timer,
+// so an unvalidated value reaches internal addresses (link-local metadata
+// services, LAN routers) forever. Real push services — FCM, Apple, Mozilla —
+// are always public HTTPS origins, so requiring that costs nothing.
+func validatePushEndpoint(raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("malformed URL")
+	}
+	if u.Scheme != "https" {
+		return fmt.Errorf("scheme must be https, got %q", u.Scheme)
+	}
+	host := u.Hostname()
+	if host == "" {
+		return fmt.Errorf("no host")
+	}
+	// A literal IP skips DNS entirely; otherwise every address the name
+	// resolves to must be public, so a name with one internal A record
+	// can't slip through.
+	if ip := net.ParseIP(host); ip != nil {
+		if !isPublicIP(ip) {
+			return fmt.Errorf("host %s is not a public address", host)
+		}
+		return nil
+	}
+	ips, err := net.LookupIP(host)
+	if err != nil {
+		return fmt.Errorf("host %s does not resolve", host)
+	}
+	if len(ips) == 0 {
+		return fmt.Errorf("host %s resolved to no addresses", host)
+	}
+	for _, ip := range ips {
+		if !isPublicIP(ip) {
+			return fmt.Errorf("host %s resolves to non-public address %s", host, ip)
+		}
+	}
+	return nil
+}
+
+// isPublicIP reports whether ip is routable on the public internet. Everything
+// loopback, private, link-local, multicast, unspecified, CGNAT or reserved is
+// treated as off-limits.
+func isPublicIP(ip net.IP) bool {
+	if ip.IsLoopback() || ip.IsUnspecified() || ip.IsPrivate() ||
+		ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() ||
+		ip.IsInterfaceLocalMulticast() || ip.IsMulticast() {
+		return false
+	}
+	if v4 := ip.To4(); v4 != nil {
+		switch {
+		case v4[0] == 0, // 0.0.0.0/8
+			v4[0] >= 240, // 240.0.0.0/4 reserved
+			v4[0] == 100 && v4[1] >= 64 && v4[1] < 128, // 100.64.0.0/10 CGNAT
+			v4[0] == 192 && v4[1] == 0 && v4[2] == 0:   // 192.0.0.0/24 IETF
+			return false
+		}
+	}
+	return true
+}
+
 // --- subscription storage ---
 
 func saveSubscription(s webpush.Subscription) error {
@@ -173,6 +240,13 @@ func sendPush(p pushPayload) {
 	}
 	for i := range subs {
 		s := subs[i]
+		// Rows stored before endpoint validation existed are still in the
+		// table, so re-check the scheme here. Kept to a parse (no DNS) so a
+		// flaky resolver can't silently drop a legitimate reminder.
+		if u, err := url.Parse(s.Endpoint); err != nil || u.Scheme != "https" {
+			log.Printf("push: skipping non-https endpoint %s", shortEndpoint(s.Endpoint))
+			continue
+		}
 		resp, err := webpush.SendNotification(msg, &s, &webpush.Options{
 			HTTPClient:      pushHTTPClient,
 			Subscriber:      pushSubject,
@@ -331,6 +405,11 @@ func handlePushSubscribe(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(io.LimitReader(r.Body, 8192)).Decode(&sub); err != nil ||
 		sub.Endpoint == "" || sub.Keys.P256dh == "" || sub.Keys.Auth == "" {
 		http.Error(w, "invalid subscription", http.StatusBadRequest)
+		return
+	}
+	if err := validatePushEndpoint(sub.Endpoint); err != nil {
+		log.Printf("push: rejected subscription endpoint: %v", err)
+		http.Error(w, "invalid subscription endpoint", http.StatusBadRequest)
 		return
 	}
 	if err := saveSubscription(sub); err != nil {
