@@ -29,9 +29,10 @@ var (
 
 	vapidPublicKey  string
 	vapidPrivateKey string
-	// pushSubject is the VAPID "sub" claim: a mailto: or https: contact the push
-	// service can reach about the sender. Overridable via PUSH_SUBJECT.
-	pushSubject = "mailto:secondbrain@localhost"
+	// webpush-go adds the mailto: scheme to non-HTTPS subjects itself. Keeping
+	// an email address here avoids producing "mailto:mailto:...", which Apple
+	// rejects as a BadJwtToken.
+	pushSubject = "secondbrain@example.com"
 
 	// Bounded client so a slow push service can't hang a reminder run or the
 	// /push/test request forever.
@@ -70,10 +71,21 @@ func configurePushReminders() {
 	if taskReminder, err = parseReminderTime(os.Getenv("TASK_REMINDER_TIME"), taskReminder); err != nil {
 		log.Fatalf("TASK_REMINDER_TIME: %v", err)
 	}
-	if sub := strings.TrimSpace(os.Getenv("PUSH_SUBJECT")); sub != "" {
+	if sub := normalizePushSubject(os.Getenv("PUSH_SUBJECT")); sub != "" {
 		pushSubject = sub
 	}
 	log.Printf("Reminders: habits %s, tasks %s", reminderDesc(habitReminder), reminderDesc(taskReminder))
+}
+
+// normalizePushSubject accepts the conventional VAPID spelling (mailto:...) as
+// well as the bare-address spelling expected by webpush-go. HTTPS contact URLs
+// pass through unchanged.
+func normalizePushSubject(raw string) string {
+	subject := strings.TrimSpace(raw)
+	if strings.HasPrefix(strings.ToLower(subject), "mailto:") {
+		return strings.TrimSpace(subject[len("mailto:"):])
+	}
+	return subject
 }
 
 func reminderDesc(rt reminderTime) string {

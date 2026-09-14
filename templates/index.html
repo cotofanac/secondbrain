@@ -28,7 +28,7 @@
     </header>
 
     <!-- Search overlay -->
-    <div id="search-overlay" class="search-overlay">
+    <div id="search-overlay" class="search-overlay" aria-hidden="true" inert>
         <div class="search-bar">
             <span class="search-icon">{{template "icon-search"}}</span>
             <input type="text" id="search-input" class="search-input"
@@ -43,7 +43,7 @@
         <div id="search-results" class="search-results"></div>
     </div>
 
-    <main id="todos-view" class="view active"><div class="task-layout"><div id="todo-items">{{template "workspace.html" .Workspace}}</div><aside id="detail-pane" class="detail-pane" aria-label="Details" hidden></aside></div>
+    <main id="todos-view" class="view active"><div class="task-layout"><div id="todo-items">{{template "workspace.html" .Workspace}}</div><aside id="detail-pane" class="detail-pane" aria-label="Details" tabindex="-1" hidden></aside></div>
     <datalist id="grocery-suggestions">{{range .GrocerySuggestions}}<option value="{{.}}">{{end}}</datalist><datalist id="shopping-suggestions">{{range .ShoppingSuggestions}}<option value="{{.}}">{{end}}</datalist></main>
     <main id="settings-view" class="view"><div id="settings-content"></div></main>
     <main id="review-view" class="view"><div id="review-content"></div></main>
@@ -78,7 +78,7 @@
         </div>
     </div>
 
-    <div id="custom-dialog" class="custom-dialog" hidden aria-modal="true" role="dialog">
+    <div id="custom-dialog" class="custom-dialog" hidden aria-modal="true" role="dialog" aria-labelledby="custom-dialog-label">
         <div class="custom-dialog-sheet">
             <p class="custom-dialog-label" id="custom-dialog-label"></p>
             <input type="text" class="custom-dialog-input" id="custom-dialog-input" autocomplete="off">
@@ -118,6 +118,7 @@
 
     <script src="/static/htmx.min.js?v={{assetVersion}}"></script>
     <script src="/static/app.js?v={{assetVersion}}"></script>
+    <script src="/static/notes.js?v={{assetVersion}}"></script>
     <script src="/static/workspace.js?v={{assetVersion}}"></script>
     <script src="/static/push.js?v={{assetVersion}}"></script>
 </body>

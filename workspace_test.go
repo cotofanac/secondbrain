@@ -84,6 +84,46 @@ func TestMigrationPreservesLegacyData(t *testing.T) {
 	if archived != 1 {
 		t.Fatal("archived task restored")
 	}
+	var todoRevision, noteRevision, migrationCount int
+	if err = conn.QueryRow(`SELECT revision FROM todos WHERE id=1`).Scan(&todoRevision); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = conn.Exec(`INSERT INTO notes(id) VALUES(1)`); err != nil {
+		t.Fatal(err)
+	}
+	if err = conn.QueryRow(`SELECT revision FROM notes WHERE id=1`).Scan(&noteRevision); err != nil {
+		t.Fatal(err)
+	}
+	if err = conn.QueryRow(`SELECT count(*) FROM schema_migrations WHERE version IN (1,2)`).Scan(&migrationCount); err != nil {
+		t.Fatal(err)
+	}
+	if todoRevision != 1 || noteRevision != 1 || migrationCount != 2 {
+		t.Fatalf("revision migration not repeatable: todo=%d note=%d migrations=%d", todoRevision, noteRevision, migrationCount)
+	}
+}
+
+func TestTaskTitleRevisionConflict(t *testing.T) {
+	setupWorkspaceDB(t)
+	execSQL(t, `INSERT INTO todos(id,category,text,done,archived,due_date) VALUES(1,'todo','Original',0,0,'')`)
+	first := formRequest(t, handleEditTodo, "/todos/edit", url.Values{"id": {"1"}, "text": {"First client"}, "revision": {"1"}})
+	requireOK(t, first)
+	var saved map[string]any
+	if err := json.Unmarshal(first.Body.Bytes(), &saved); err != nil || saved["revision"] != float64(2) {
+		t.Fatalf("unexpected save response %q: %v", first.Body.String(), err)
+	}
+	stale := formRequest(t, handleEditTodo, "/todos/edit", url.Values{"id": {"1"}, "text": {"Second client"}, "revision": {"1"}})
+	if stale.Code != http.StatusConflict {
+		t.Fatalf("stale task save = %d, want 409: %s", stale.Code, stale.Body.String())
+	}
+	var conflict struct {
+		Task Todo `json:"task"`
+	}
+	if err := json.Unmarshal(stale.Body.Bytes(), &conflict); err != nil {
+		t.Fatal(err)
+	}
+	if conflict.Task.Text != "First client" || conflict.Task.Revision != 2 {
+		t.Fatalf("conflict returned %#v", conflict.Task)
+	}
 }
 
 func TestProjectTasksMembershipAndLifecycle(t *testing.T) {
@@ -98,14 +138,14 @@ func TestProjectTasksMembershipAndLifecycle(t *testing.T) {
 	var id int
 	db.QueryRow(`SELECT id FROM todos WHERE text='Book lessons'`).Scan(&id)
 	requireOK(t, formRequest(t, handleToggleTodo, "/todos/toggle", url.Values{"id": {"1"}}))
-	requireOK(t, formRequest(t, handleTaskSave, "/task/save", url.Values{"id": {"1"}, "text": {"Book lessons"}, "due_date": {"2026-10-01"}, "project_id": {"2"}, "stage_id": {"2"}}))
+	requireOK(t, formRequest(t, handleTaskSave, "/task/save", url.Values{"id": {"1"}, "revision": {"1"}, "text": {"Book lessons"}, "due_date": {"2026-10-01"}, "project_id": {"2"}, "stage_id": {"2"}}))
 	var done, project, stage int
 	var completed string
 	db.QueryRow(`SELECT done,project_id,stage_id,completed_at FROM todos WHERE id=?`, id).Scan(&done, &project, &stage, &completed)
 	if done != 1 || project != 2 || stage != 2 || completed == "" {
 		t.Fatalf("move lost task state %d %d %d %q", done, project, stage, completed)
 	}
-	requireOK(t, formRequest(t, handleTaskSave, "/task/save", url.Values{"id": {"1"}, "text": {"Standalone again"}, "due_date": {""}, "project_id": {"0"}, "stage_id": {"0"}}))
+	requireOK(t, formRequest(t, handleTaskSave, "/task/save", url.Values{"id": {"1"}, "revision": {"2"}, "text": {"Standalone again"}, "due_date": {""}, "project_id": {"0"}, "stage_id": {"0"}}))
 	var standalone bool
 	db.QueryRow(`SELECT project_id IS NULL AND stage_id IS NULL FROM todos WHERE id=1`).Scan(&standalone)
 	if !standalone {

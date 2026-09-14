@@ -17,7 +17,7 @@ services:
       # the app to the Home Screen; see the README "Reminders" section.
       - HABIT_REMINDER_TIME=${HABIT_REMINDER_TIME:-20:00}
       - TASK_REMINDER_TIME=${TASK_REMINDER_TIME:-09:00}
-      - PUSH_SUBJECT=${PUSH_SUBJECT:-mailto:secondbrain@localhost}
+      - PUSH_SUBJECT=${PUSH_SUBJECT:-secondbrain@example.com}
     volumes:
       # Bind mount: the SQLite database is persisted on the host.
       # The container runs as appuser (UID 1000), so the host directory must be

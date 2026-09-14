@@ -32,10 +32,11 @@
     </div>
 </div>
 <div class="note-meta">
-    <span id="note-status" class="note-status"></span>
+    <span id="note-status" class="note-status" role="status" aria-live="polite"></span>
     {{if .CurrentNote.UpdatedAt}}<span class="note-updated">{{formatUpdated .CurrentNote.UpdatedAt}}</span>{{end}}
 </div>
 <textarea id="note-editor" class="note-editor"
           data-note-id="{{.CurrentNote.ID}}"
           data-updated-at="{{.CurrentNote.UpdatedAt}}"
+          data-revision="{{.CurrentNote.Revision}}"
           placeholder="Start typing... 1. list, *bold*, _italic_, [] checkbox">{{.CurrentNote.Content}}</textarea>

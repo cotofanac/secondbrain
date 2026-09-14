@@ -11,6 +11,8 @@
 - `push_deliveries` for per-device results, retry counts, and expiration.
 - `schema_migrations` and indexes for membership, due dates, completion, and pending delivery.
 
+Migration 2 adds `revision INTEGER NOT NULL DEFAULT 1` to `todos` and `notes`. These counters provide atomic conflict detection for direct task-title edits, task details, and note saves; `updated_at` remains display metadata rather than a concurrency token. Migration 2 is also transactional and versioned.
+
 There are no dropped tables or columns, and existing task/note/habit rows are preserved. Existing tasks become standalone. Previously archived tasks remain archived. Existing completed tasks receive a seven-day cleanup window starting at migration; their unknown completion dates remain NULL, so the review does not claim they were completed this week.
 
 The cleanup behavior changes: **unfinished tasks no longer automatically archive**. Completed ordinary tasks archive seven days after completion. Restoring a completed task restarts its cleanup window without changing its completion history. Groceries and Buys remain reusable lists.
@@ -60,7 +62,7 @@ Brave requires **Use Google services for push messaging** under `brave://setting
 
 Local verification passed with `go test -race ./...`, the notification client checks, and the full browser workflow. Automated checks use disposable temporary databases, never `./data/secondbrain.db`:
 
-- Go tests: legacy migration and idempotence, membership validation, reassignment, completion/archival, shared note links, ordering, template rendering/search, weekly snapshots/DST, per-device retry limits, push test targeting, and expired-session errors.
+- Go tests: legacy migration and idempotence, revision conflicts, large-note saves, membership validation, reassignment, completion/archival, shared note links, ordering, template rendering/search, weekly snapshots/DST, per-device retry limits, push test targeting, and expired-session errors.
 - `node scripts/push-smoke.cjs`: direct user activation, denied permission, rejected subscription storage, test status, and expired-subscription renewal.
 - `scripts/ui-smoke.cjs`: real Chromium interactions for tasks/projects/stages, completion, due-date editing, capture/notes preservation including delayed responses and cursor selection, mobile detail panels, larger text, keyboard search, settings, review, root worker readiness, and 320/375/390/430/1024/1440px layouts. Playwright is a development-only tool; it is not added to the application dependencies. See the script for optional `PLAYWRIGHT_MODULE`, `TEST_BROWSER`, `TEST_BASE_URL`, and `TEST_PASSCODE` environment variables. Run it only against a fresh disposable database.
 

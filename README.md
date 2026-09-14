@@ -78,7 +78,7 @@ A single passcode, taken seriously:
 | `INACTIVITY_LOGOUT_MINUTES` | `45` | Auto-logout timeout after inactivity |
 | `HABIT_REMINDER_TIME` | `20:00` | Initial daily habit reminder setting; editable under Notifications → Reminder schedule afterward. `off` to disable initially |
 | `TASK_REMINDER_TIME` | `09:00` | Initial daily task reminder setting; editable under Notifications → Reminder schedule afterward. `off` to disable initially |
-| `PUSH_SUBJECT` | `mailto:secondbrain@localhost` | VAPID contact sent to push services (optional) |
+| `PUSH_SUBJECT` | `secondbrain@example.com` | VAPID contact email or HTTPS URL sent to push services (optional; `mailto:` email values are also accepted) |
 
 ### Reminders
 

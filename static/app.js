@@ -56,6 +56,21 @@ function updateHabitsBadge() {
     }
 }
 
+function setupMobileKeyboard() {
+    const viewport = window.visualViewport;
+    if (!viewport) return;
+    let baseline = Math.max(viewport.height, document.documentElement.clientHeight);
+    const update = function() {
+        if (!document.activeElement?.matches('input:not([type=checkbox]):not([type=radio]), textarea')) baseline = Math.max(baseline, viewport.height);
+        const editingText = document.activeElement?.matches('input:not([type=checkbox]):not([type=radio]), textarea');
+        document.body.classList.toggle('keyboard-open', !!editingText && baseline - viewport.height > 120);
+    };
+    viewport.addEventListener('resize', update);
+    viewport.addEventListener('scroll', update);
+    document.addEventListener('focusin', update);
+    document.addEventListener('focusout', () => setTimeout(update, 0));
+}
+
 document.body.addEventListener('htmx:afterSwap', function(e) {
     const id = e.detail.target?.id;
     if (id === 'todo-items' || id === 'habits-content') updateTopbarStat();
@@ -92,6 +107,7 @@ document.body.addEventListener('htmx:confirm', function(e) {
 // the user; 5xx bodies are not, so those keep the generic message.
 document.body.addEventListener('htmx:responseError', function(e) {
     const xhr = e.detail.xhr;
+    if (xhr?.status === 409 && e.detail.target?.id === 'detail-pane') return;
     // An expired session responds 401 + HX-Redirect; we're already navigating
     // to /login, so a toast would just be noise.
     if (xhr && xhr.getResponseHeader('HX-Redirect')) return;
@@ -200,373 +216,6 @@ function doLogout() {
     f.action = '/logout';
     document.body.appendChild(f);
     f.submit();
-}
-
-// --- Notes ---
-let saveTimer = null;
-
-function initNoteEditor() {
-    const editor = document.getElementById('note-editor');
-    if (!editor || editor.dataset.initialized) return;
-    editor.dataset.initialized="1";
-    restoreNoteDraft(editor);
-
-    editor.addEventListener('keydown', function(e) {
-        handleNoteEditorKeydown(e, editor);
-    });
-
-    editor.addEventListener('input', function() {
-        applyInlineNoteCommands(editor);
-        clearTimeout(saveTimer);
-        editor.dataset.dirty='1';
-        storeNoteDraft(editor);
-        showNoteStatus('Unsaved…');
-        saveTimer = setTimeout(() => saveCurrentNote(), 800);
-    });
-
-    // Click/tap within the checkbox marker area to toggle
-    editor.addEventListener('click', function() {
-        const pos = editor.selectionStart;
-        const line = getCurrentLine(editor.value, pos);
-        if (pos - line.start <= 6) toggleCheckboxLine(editor);
-    });
-
-    autoResize(editor);
-    editor.addEventListener('input', () => autoResize(editor));
-}
-
-function toggleCheckboxLine(editor) {
-    const pos = editor.selectionStart;
-    const line = getCurrentLine(editor.value, pos);
-    let newLineText = null;
-    if (/^(\s*)- \[ \] /.test(line.text)) {
-        newLineText = line.text.replace('- [ ] ', '- [x] ');
-    } else if (/^(\s*)- \[x\] /i.test(line.text)) {
-        newLineText = line.text.replace(/- \[x\] /i, '- [ ] ');
-    }
-    if (!newLineText) return;
-    editor.value = editor.value.slice(0, line.start) + newLineText + editor.value.slice(line.end);
-    editor.setSelectionRange(pos, pos);
-    editor.dispatchEvent(new Event('input', { bubbles: true }));
-}
-
-function handleNoteEditorKeydown(e, editor) {
-    const isMod = e.metaKey || e.ctrlKey;
-    if (isMod && !e.shiftKey && (e.key === 'b' || e.key === 'B')) {
-        e.preventDefault();
-        toggleWrappedSelection(editor, '*');
-        return;
-    }
-    if (isMod && !e.shiftKey && (e.key === 'i' || e.key === 'I')) {
-        e.preventDefault();
-        toggleWrappedSelection(editor, '_');
-        return;
-    }
-    if (isMod && e.key === 'Enter') {
-        e.preventDefault();
-        toggleCheckboxLine(editor);
-        return;
-    }
-
-    if (e.key !== 'Enter' || e.shiftKey || e.altKey || e.ctrlKey || e.metaKey) {
-        return;
-    }
-
-    const selectionStart = editor.selectionStart;
-    const selectionEnd = editor.selectionEnd;
-    if (selectionStart !== selectionEnd) return;
-
-    const line = getCurrentLine(editor.value, selectionStart);
-    const numbered = line.text.match(/^(\s*)(\d+)\.\s+(.*)$/);
-    if (numbered) {
-        e.preventDefault();
-        const next = Number(numbered[2]) + 1;
-        const content = numbered[3].trim();
-        const insertion = content ? `\n${numbered[1]}${next}. ` : '\n';
-        editor.setRangeText(insertion, selectionStart, selectionEnd, 'end');
-        editor.dispatchEvent(new Event('input', { bubbles: true }));
-        return;
-    }
-
-    const checkbox = line.text.match(/^(\s*)-\s\[(?: |x|X)\]\s+(.*)$/);
-    if (checkbox) {
-        e.preventDefault();
-        const content = checkbox[2].trim();
-        const insertion = content ? `\n${checkbox[1]}- [ ] ` : '\n';
-        editor.setRangeText(insertion, selectionStart, selectionEnd, 'end');
-        editor.dispatchEvent(new Event('input', { bubbles: true }));
-    }
-}
-
-function applyInlineNoteCommands(editor) {
-    const selectionStart = editor.selectionStart;
-    const selectionEnd = editor.selectionEnd;
-    if (selectionStart !== selectionEnd) return;
-
-    const line = getCurrentLine(editor.value, selectionStart);
-    const beforeCaret = line.text.slice(0, selectionStart - line.start);
-    const indent = beforeCaret.match(/^\s*/)[0];
-    const replaceFrom = line.start + indent.length;
-
-    if (/^\s*\[(?:\s)?\]\s$/.test(beforeCaret)) {
-        editor.setRangeText('- [ ] ', replaceFrom, selectionStart, 'end');
-        return;
-    }
-
-    if (/^\s*\[(?:x|X)\]\s$/.test(beforeCaret)) {
-        editor.setRangeText('- [x] ', replaceFrom, selectionStart, 'end');
-        return;
-    }
-
-    const numbered = beforeCaret.match(/^(\s*)(\d+)\)\s$/);
-    if (numbered) {
-        const replacement = `${numbered[1]}${numbered[2]}. `;
-        editor.setRangeText(replacement, line.start, selectionStart, 'end');
-    }
-}
-
-function toggleWrappedSelection(editor, marker) {
-    const start = editor.selectionStart;
-    const end = editor.selectionEnd;
-    if (start === end) return;
-
-    const selected = editor.value.slice(start, end);
-    const wrapped = selected.startsWith(marker) && selected.endsWith(marker) && selected.length >= marker.length * 2;
-
-    if (wrapped) {
-        const unwrapped = selected.slice(marker.length, selected.length - marker.length);
-        editor.setRangeText(unwrapped, start, end, 'select');
-    } else {
-        editor.setRangeText(`${marker}${selected}${marker}`, start, end, 'select');
-    }
-
-    editor.dispatchEvent(new Event('input', { bubbles: true }));
-}
-
-function getCurrentLine(text, position) {
-    const start = text.lastIndexOf('\n', position - 1) + 1;
-    const lineEndIndex = text.indexOf('\n', position);
-    const end = lineEndIndex === -1 ? text.length : lineEndIndex;
-    return {
-        start,
-        end,
-        text: text.slice(start, end)
-    };
-}
-
-function autoResize(el) {
-    el.style.height = 'auto';
-    el.style.height = Math.max(el.scrollHeight, window.innerHeight - 160) + 'px';
-}
-
-let noteSavePending = null;
-function storeNoteDraft(editor) {
-    try { sessionStorage.setItem('note-draft-'+editor.dataset.noteId,JSON.stringify({content:editor.value,updatedAt:editor.dataset.updatedAt})); } catch (_) {}
-}
-function restoreNoteDraft(editor) {
-    try { const raw=sessionStorage.getItem('note-draft-'+editor.dataset.noteId); if(raw){const draft=JSON.parse(raw);if(draft.content!==editor.value){editor.value=draft.content;editor.dataset.updatedAt=draft.updatedAt;editor.dataset.dirty='1';showNoteStatus('Unsaved draft restored. Edit to retry saving.');}else sessionStorage.removeItem('note-draft-'+editor.dataset.noteId);} } catch (_) {}
-}
-async function saveCurrentNote() {
-    clearTimeout(saveTimer); saveTimer=null;
-    if(noteSavePending) {
-        if(!await noteSavePending) return false;
-        return saveCurrentNote();
-    }
-    const editor=document.getElementById('note-editor');
-    if(!editor || !editor.dataset.dirty) return true;
-    const content=editor.value, updatedAt=editor.dataset.updatedAt || '';
-    storeNoteDraft(editor);
-    noteSavePending=(async()=>{
-        try {
-            const response=await fetch('/notes/save',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},keepalive:true,body:new URLSearchParams({id:editor.dataset.noteId,content,updated_at:updatedAt})});
-            if(response.redirected) throw new Error('Session expired — sign in to save your draft.');
-            const data=await response.json();
-            if(data.status==='conflict'){showNoteStatus('Edited on another device. Your draft is kept here; copy it before reloading the latest version.');return false;}
-            if(!response.ok||data.status!=='saved') throw new Error('Could not save — your draft is kept here.');
-            editor.dataset.updatedAt=data.updated_at || updatedAt;
-            if(editor.value===content){delete editor.dataset.dirty;try{sessionStorage.removeItem('note-draft-'+editor.dataset.noteId);}catch(_){}showNoteStatus('Saved');}else{storeNoteDraft(editor);}
-            return true;
-        } catch(error){showNoteStatus(error.message || 'Offline — your draft is kept here.');return false;}
-    })();
-    const ok=await noteSavePending;noteSavePending=null;return ok;
-}
-
-function showNoteStatus(msg) {
-    const el = document.getElementById('note-status');
-    if (el) el.textContent = msg;
-}
-
-async function saveBeforeNoteAction() {
-    const saved = await saveCurrentNote();
-    if (!saved || document.getElementById('note-editor')?.dataset.dirty) {
-        showToast('Save or copy your current draft before changing notes.');
-        return false;
-    }
-    return true;
-}
-
-// If the tab is being hidden or closed with an edit still in the debounce
-// window, save it now (keepalive on the fetch lets it finish during unload).
-function flushPendingNoteSave() {
-    if (!saveTimer) return;
-    clearTimeout(saveTimer);
-    saveTimer = null;
-    saveCurrentNote();
-}
-document.addEventListener('visibilitychange', function() {
-    if (document.hidden) flushPendingNoteSave();
-});
-window.addEventListener('pagehide', flushPendingNoteSave);
-
-function toggleNotePicker() {
-    const panel = document.getElementById('note-picker-panel');
-    const search = document.getElementById('note-picker-search');
-    if (!panel) return;
-    const opening = panel.hidden;
-    panel.hidden = !opening;
-    if (opening && search) {
-        search.value = '';
-        filterNotes('');
-        search.focus();
-    }
-}
-
-function filterNotes(query) {
-    const q = query.toLowerCase().trim();
-    document.querySelectorAll('.note-picker-item').forEach(item => {
-        item.hidden = q !== '' && !item.dataset.title.toLowerCase().includes(q);
-    });
-}
-
-async function selectNote(id) {
-    if(!await saveBeforeNoteAction()) return;
-    const panel=document.getElementById('note-picker-panel');if(panel)panel.hidden=true;
-    htmx.ajax('GET','/notes?id='+id,'#notes-content');
-}
-
-document.addEventListener('click', function(e) {
-    const picker = document.getElementById('note-picker');
-    if (picker && !picker.contains(e.target)) {
-        const panel = document.getElementById('note-picker-panel');
-        if (panel) panel.hidden = true;
-    }
-});
-
-
-function loadNote(id) {
-    htmx.ajax('GET', '/notes?id=' + id, '#notes-content');
-}
-
-function showPrompt(label, defaultValue = '') {
-    return new Promise(resolve => {
-        const dialog = document.getElementById('custom-dialog');
-        const labelEl = document.getElementById('custom-dialog-label');
-        const input = document.getElementById('custom-dialog-input');
-        const confirmBtn = document.getElementById('custom-dialog-confirm');
-        const cancelBtn = document.getElementById('custom-dialog-cancel');
-
-        labelEl.textContent = label;
-        input.value = defaultValue;
-        dialog.hidden = false;
-        setTimeout(() => { input.focus(); input.select(); }, 50);
-
-        function submit() {
-            const val = input.value.trim();
-            cleanup();
-            resolve(val || null);
-        }
-        function dismiss() { cleanup(); resolve(null); }
-        function cleanup() {
-            dialog.hidden = true;
-            confirmBtn.removeEventListener('click', submit);
-            cancelBtn.removeEventListener('click', dismiss);
-            input.removeEventListener('keydown', onKey);
-            dialog.removeEventListener('click', onBackdrop);
-        }
-        function onKey(e) {
-            if (e.key === 'Enter') { e.preventDefault(); submit(); }
-            if (e.key === 'Escape') dismiss();
-        }
-        function onBackdrop(e) { if (e.target === dialog) dismiss(); }
-
-        confirmBtn.addEventListener('click', submit);
-        cancelBtn.addEventListener('click', dismiss);
-        input.addEventListener('keydown', onKey);
-        dialog.addEventListener('click', onBackdrop);
-    });
-}
-
-async function createNote() {
-    const title = await showPrompt('Note name');
-    if (!title) return;
-    if (!await saveBeforeNoteAction()) return;
-    htmx.ajax('POST', '/notes/create', {
-        target: '#notes-content',
-        values: { title }
-    });
-}
-
-function showConfirm(message) {
-    return new Promise(resolve => {
-        const dialog = document.getElementById('custom-dialog');
-        const labelEl = document.getElementById('custom-dialog-label');
-        const input = document.getElementById('custom-dialog-input');
-        const confirmBtn = document.getElementById('custom-dialog-confirm');
-        const cancelBtn = document.getElementById('custom-dialog-cancel');
-
-        labelEl.textContent = message;
-        input.hidden = true;
-        dialog.hidden = false;
-        setTimeout(() => confirmBtn.focus(), 50);
-
-        function finish(result) {
-            dialog.hidden = true;
-            input.hidden = false;
-            confirmBtn.removeEventListener('click', onConfirm);
-            cancelBtn.removeEventListener('click', onCancel);
-            document.removeEventListener('keydown', onKey);
-            dialog.removeEventListener('click', onBackdrop);
-            resolve(result);
-        }
-        function onConfirm() { finish(true); }
-        function onCancel() { finish(false); }
-        function onKey(e) {
-            if (e.key === 'Enter') { e.preventDefault(); finish(true); }
-            if (e.key === 'Escape') finish(false);
-        }
-        function onBackdrop(e) { if (e.target === dialog) finish(false); }
-
-        confirmBtn.addEventListener('click', onConfirm);
-        cancelBtn.addEventListener('click', onCancel);
-        document.addEventListener('keydown', onKey);
-        dialog.addEventListener('click', onBackdrop);
-    });
-}
-
-async function deleteNote() {
-    const editor = document.getElementById('note-editor');
-    if (!editor) return;
-    const ok = await showConfirm('Archive this note?');
-    if (!ok) return;
-    if (!await saveBeforeNoteAction()) return;
-    htmx.ajax('POST', '/notes/delete', {
-        target: '#notes-content',
-        values: { id: editor.dataset.noteId }
-    });
-}
-
-async function renameNote() {
-    const editor = document.getElementById('note-editor');
-    if (!editor) return;
-    const label = document.querySelector('.note-picker-label');
-    const current = label ? label.textContent.trim() : '';
-    const title = await showPrompt('Rename note', current);
-    if (!title || title === current) return;
-    if (!await saveBeforeNoteAction()) return;
-    htmx.ajax('POST', '/notes/rename', {
-        target: '#notes-content',
-        values: { id: editor.dataset.noteId, title }
-    });
 }
 
 // --- Calendar button for todo due date ---
@@ -918,48 +567,7 @@ function hideInactivityWarning() {
     }
 }
 
-// --- Inline todo editing ---
-// Returns the edit input so a touch caller can re-focus it from inside a real
-// user gesture (see the long-press handler).
-function startTodoEdit(spanEl) {
-    const originalText = spanEl.textContent.trim();
-    const item = spanEl.closest('.todo-item');
-    if (!item) return null;
-    const id = item.querySelector('input[name="id"]').value;
-
-    const input = document.createElement('input');
-    input.type = 'text';
-    input.value = originalText;
-    input.className = 'todo-edit-input';
-    spanEl.replaceWith(input);
-    input.focus();
-    input.select();
-
-    let done = false;
-    function save() {
-        if (done) return;
-        done = true;
-        const newText = input.value.trim();
-        if (!newText || newText === originalText) { input.replaceWith(spanEl); return; }
-        htmx.ajax('POST', '/todos/edit', {
-            target: '#todo-items',
-            swap: 'innerHTML',
-            values: { id, text: newText }
-        });
-    }
-    function cancel() {
-        if (done) return;
-        done = true;
-        input.replaceWith(spanEl);
-    }
-    input.addEventListener('keydown', e => {
-        if (e.key === 'Enter') { e.preventDefault(); save(); }
-        if (e.key === 'Escape') cancel();
-    });
-    input.addEventListener('blur', save);
-    return input;
-}
-
+// --- Inline habit editing ---
 function startHabitRename(spanEl) {
     const originalName = spanEl.textContent.trim();
     const item = spanEl.closest('.habit-item');
@@ -999,28 +607,22 @@ function startHabitRename(spanEl) {
     return input;
 }
 
-// Inline edit is reachable two ways: double-click with a mouse, press-and-hold
-// on touch. iOS has no usable dblclick — double-tap is the zoom gesture — so
-// without the long press this feature was desktop-only on a phone-first app.
+// Habit rename is reachable two ways: double-click with a mouse, press-and-hold
+// on touch. Task titles use the direct single-tap editor in workspace.js.
 const LONG_PRESS_MS = 500;
 const LONG_PRESS_SLOP_PX = 10;
 
-// Resolves an event target to the editable label of a live (non-archived) row.
-// Archived rows render the same .todo-text but have no edit endpoint: posting
-// to /todos/edit for one 404s, since that query requires archived = 0.
 function editableLabel(target) {
     if (!target || typeof target.closest !== 'function') return null;
-    const label = target.closest('.todo-text, .habit-name');
+    const label = target.closest('.habit-name');
     if (!label) return null;
-    const row = label.closest('.todo-item, .habit-item');
+    const row = label.closest('.habit-item');
     if (!row || row.classList.contains('archived-item')) return null;
     return label;
 }
 
 function beginInlineEdit(label) {
-    return label.classList.contains('todo-text')
-        ? startTodoEdit(label)
-        : startHabitRename(label);
+    return startHabitRename(label);
 }
 
 document.addEventListener('dblclick', function(e) {
@@ -1101,7 +703,7 @@ document.addEventListener('dblclick', function(e) {
 // --- Global search ---
 function openSearch() {
     const overlay = document.getElementById('search-overlay');
-    if (overlay) overlay.classList.add('visible');
+    if (overlay) { overlay.inert=false;overlay.setAttribute('aria-hidden','false');overlay.classList.add('visible'); }
     const input = document.getElementById('search-input');
     if (input) { input.value = ''; input.focus(); }
     const results = document.getElementById('search-results');
@@ -1110,7 +712,7 @@ function openSearch() {
 
 function closeSearch() {
     const overlay = document.getElementById('search-overlay');
-    if (overlay) overlay.classList.remove('visible');
+    if (overlay) { overlay.classList.remove('visible');overlay.inert=true;overlay.setAttribute('aria-hidden','true'); }
     const input = document.getElementById('search-input');
     if (input) input.value = '';
     const results = document.getElementById('search-results');
@@ -1167,5 +769,6 @@ document.addEventListener('DOMContentLoaded', function() {
     setupInactivityLogout();
     updateTopbarStat();
     updateHabitsBadge();
+    setupMobileKeyboard();
 
 });

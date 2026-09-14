@@ -88,14 +88,14 @@ func loadWorkspace() (Workspace, error) {
 			sm[s.ID] = s
 		}
 	}
-	rows, err = db.Query(`SELECT id,category,text,due_date,done,COALESCE(project_id,0),COALESCE(stage_id,0),archived FROM todos WHERE archived=0 OR (done=1 AND project_id IS NOT NULL) ORDER BY done,position,created_at DESC,id DESC`)
+	rows, err = db.Query(`SELECT id,category,text,due_date,done,COALESCE(project_id,0),COALESCE(stage_id,0),archived,revision FROM todos WHERE archived=0 OR (done=1 AND project_id IS NOT NULL) ORDER BY done,position,created_at DESC,id DESC`)
 	if err != nil {
 		return w, err
 	}
 	for rows.Next() {
 		var t Todo
 		var archived bool
-		if err = rows.Scan(&t.ID, &t.Category, &t.Text, &t.DueDate, &t.Done, &t.ProjectID, &t.StageID, &archived); err != nil {
+		if err = rows.Scan(&t.ID, &t.Category, &t.Text, &t.DueDate, &t.Done, &t.ProjectID, &t.StageID, &archived, &t.Revision); err != nil {
 			rows.Close()
 			return w, err
 		}
@@ -342,7 +342,7 @@ type TaskDetail struct {
 
 func getTask(id int) (Todo, error) {
 	var t Todo
-	err := db.QueryRow(`SELECT id,category,text,due_date,done,COALESCE(project_id,0),COALESCE(stage_id,0) FROM todos t WHERE t.id=? AND `+activeTaskSQL, id).Scan(&t.ID, &t.Category, &t.Text, &t.DueDate, &t.Done, &t.ProjectID, &t.StageID)
+	err := db.QueryRow(`SELECT id,category,text,due_date,done,COALESCE(project_id,0),COALESCE(stage_id,0),revision FROM todos t WHERE t.id=? AND `+activeTaskSQL, id).Scan(&t.ID, &t.Category, &t.Text, &t.DueDate, &t.Done, &t.ProjectID, &t.StageID, &t.Revision)
 	return t, err
 }
 func handleTaskDetail(w http.ResponseWriter, r *http.Request) {
@@ -368,6 +368,11 @@ func handleTaskSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := strings.TrimSpace(r.FormValue("text"))
+	revision, err := strconv.Atoi(r.FormValue("revision"))
+	if err != nil || revision < 1 {
+		http.Error(w, "Invalid task revision", 400)
+		return
+	}
 	due := r.FormValue("due_date")
 	if name == "" || len(name) > 500 {
 		http.Error(w, "Enter task text (up to 500 characters)", 400)
@@ -400,7 +405,21 @@ func handleTaskSave(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), 400)
 		return
 	}
-	_, err = tx.Exec(`UPDATE todos SET text=?,due_date=?,project_id=NULLIF(?,0),stage_id=NULLIF(?,0) WHERE id=?`, name, due, p, s, id)
+	res, err := tx.Exec(`UPDATE todos SET text=?,due_date=?,project_id=NULLIF(?,0),stage_id=NULLIF(?,0),revision=revision+1 WHERE id=? AND revision=?`, name, due, p, s, id, revision)
+	if err == nil {
+		if n, countErr := res.RowsAffected(); countErr != nil {
+			err = countErr
+		} else if n == 0 {
+			tx.Rollback()
+			latest, getErr := getTask(id)
+			if getErr != nil {
+				http.Error(w, "Task unavailable", 404)
+				return
+			}
+			writeJSON(w, http.StatusConflict, map[string]any{"status": "conflict", "task": latest})
+			return
+		}
+	}
 	if err == nil {
 		err = tx.Commit()
 	}

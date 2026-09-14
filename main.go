@@ -57,7 +57,7 @@ var (
 // one of them changes.
 func computeAssetVersion() string {
 	h := sha256.New()
-	for _, name := range []string{"static/app.js", "static/style.css", "static/htmx.min.js", "static/workspace.js", "static/push.js", "static/sw.js", "static/manifest.json"} {
+	for _, name := range []string{"static/app.js", "static/notes.js", "static/style.css", "static/htmx.min.js", "static/workspace.js", "static/push.js", "static/sw.js", "static/manifest.json"} {
 		b, err := staticFiles.ReadFile(name)
 		if err != nil {
 			// Fall back to a build-time value so the app still boots.
@@ -826,7 +826,7 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 	if len(notesList) > 0 {
 		currentNote.ID = notesList[0].ID
 		currentNote.Title = notesList[0].Title
-		db.QueryRow("SELECT content, updated_at FROM notes WHERE id = ?", currentNote.ID).Scan(&currentNote.Content, &currentNote.UpdatedAt)
+		db.QueryRow("SELECT content, updated_at, revision FROM notes WHERE id = ?", currentNote.ID).Scan(&currentNote.Content, &currentNote.UpdatedAt, &currentNote.Revision)
 	}
 
 	habits := loadHabits()
@@ -863,15 +863,16 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 // --- Todos ---
 
 type Todo struct {
-	ID         int
-	Category   string
-	Text       string
-	DueDate    string
-	Done       bool
+	ID         int    `json:"id"`
+	Category   string `json:"category"`
+	Text       string `json:"text"`
+	DueDate    string `json:"due_date"`
+	Done       bool   `json:"done"`
 	CreatedAt  string
 	ArchivedAt string
-	ProjectID  int
-	StageID    int
+	ProjectID  int `json:"project_id"`
+	StageID    int `json:"stage_id"`
+	Revision   int `json:"revision"`
 }
 
 func handleTodos(w http.ResponseWriter, r *http.Request) {
@@ -1033,22 +1034,37 @@ func handleEditTodo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	revision, err := strconv.Atoi(r.FormValue("revision"))
+	if err != nil || revision < 1 {
+		writeJSONError(w, http.StatusBadRequest, "Invalid task revision")
+		return
+	}
 	var category string
-	err := db.QueryRow("SELECT category FROM todos WHERE id = ? AND archived = 0", id).Scan(&category)
+	err = db.QueryRow("SELECT category FROM todos WHERE id = ? AND archived = 0", id).Scan(&category)
 	if err != nil {
 		http.Error(w, "Not found", http.StatusNotFound)
 		return
 	}
 
-	_, err = db.Exec("UPDATE todos SET text = ? WHERE id = ?", text, id)
+	res, err := db.Exec("UPDATE todos SET text = ?, revision = revision + 1 WHERE id = ? AND revision = ?", text, id, revision)
 	if err != nil {
 		http.Error(w, "DB error", http.StatusInternalServerError)
 		return
 	}
+	if n, err := res.RowsAffected(); err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "Could not save task")
+		return
+	} else if n == 0 {
+		var latest Todo
+		if err := db.QueryRow("SELECT id, category, text, due_date, done, revision FROM todos WHERE id = ? AND archived = 0", id).Scan(&latest.ID, &latest.Category, &latest.Text, &latest.DueDate, &latest.Done, &latest.Revision); err != nil {
+			writeJSONError(w, http.StatusNotFound, "Task unavailable")
+			return
+		}
+		writeJSON(w, http.StatusConflict, map[string]any{"status": "conflict", "task": latest})
+		return
+	}
 	log.Printf("Todo edited: id=%d %q", id, text)
-
-	r.URL.RawQuery = "category=" + category
-	handleTodos(w, r)
+	writeJSON(w, http.StatusOK, map[string]any{"status": "saved", "revision": revision + 1, "text": text})
 }
 
 func handleToggleTodo(w http.ResponseWriter, r *http.Request) {
@@ -1226,10 +1242,11 @@ func handlePermanentDeleteTodo(w http.ResponseWriter, r *http.Request) {
 // --- Notes ---
 
 type Note struct {
-	ID        int
-	Title     string
-	Content   string
+	ID        int    `json:"id"`
+	Title     string `json:"title"`
+	Content   string `json:"content"`
 	UpdatedAt string
+	Revision  int `json:"revision"`
 }
 
 type Habit struct {
@@ -1345,14 +1362,14 @@ func handleNotes(w http.ResponseWriter, r *http.Request) {
 	var currentNote Note
 	if noteIDStr != "" {
 		noteID, _ := strconv.Atoi(noteIDStr)
-		db.QueryRow("SELECT id, title, content, updated_at FROM notes WHERE id = ? AND archived = 0", noteID).Scan(
-			&currentNote.ID, &currentNote.Title, &currentNote.Content, &currentNote.UpdatedAt,
+		db.QueryRow("SELECT id, title, content, updated_at, revision FROM notes WHERE id = ? AND archived = 0", noteID).Scan(
+			&currentNote.ID, &currentNote.Title, &currentNote.Content, &currentNote.UpdatedAt, &currentNote.Revision,
 		)
 	}
 	if currentNote.ID == 0 {
 		currentNote.ID = notesList[0].ID
 		currentNote.Title = notesList[0].Title
-		db.QueryRow("SELECT content, updated_at FROM notes WHERE id = ?", currentNote.ID).Scan(&currentNote.Content, &currentNote.UpdatedAt)
+		db.QueryRow("SELECT content, updated_at, revision FROM notes WHERE id = ?", currentNote.ID).Scan(&currentNote.Content, &currentNote.UpdatedAt, &currentNote.Revision)
 	}
 
 	data := struct {
@@ -1381,50 +1398,34 @@ func handleSaveNote(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Optimistic concurrency: if the client sends the timestamp it loaded, only
-	// write while the row still carries that timestamp. Testing it in the
-	// UPDATE's own WHERE clause rather than as a separate SELECT closes the
-	// window where two devices both read the same value and both then write.
-	//
-	// The two sides are in different formats and must be normalized: the column
-	// stores SQLite's "2006-01-02 15:04:05", but the value the client echoes
-	// back was produced by scanning that column into a string, which
-	// database/sql renders as RFC3339 ("2006-01-02T15:04:05Z"). Comparing them
-	// raw never matches, so datetime() is applied to both.
-	clientUpdatedAt := r.FormValue("updated_at")
-	var res sql.Result
-	if clientUpdatedAt != "" {
-		res, err = db.Exec(
-			"UPDATE notes SET content = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND datetime(updated_at) = datetime(?)",
-			content, id, clientUpdatedAt,
-		)
-	} else {
-		res, err = db.Exec(
-			"UPDATE notes SET content = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-			content, id,
-		)
+	revision, err := strconv.Atoi(r.FormValue("revision"))
+	if err != nil || revision < 1 {
+		writeJSONError(w, http.StatusBadRequest, "Invalid note revision")
+		return
 	}
+	res, err := db.Exec(
+		"UPDATE notes SET content = ?, updated_at = CURRENT_TIMESTAMP, revision = revision + 1 WHERE id = ? AND revision = ?",
+		content, id, revision,
+	)
 	if err != nil {
 		http.Error(w, "DB error", http.StatusInternalServerError)
 		return
 	}
-	if clientUpdatedAt != "" {
-		// Nothing matched: either the note is gone, or another device wrote a
-		// newer version since this client loaded it.
-		if n, rerr := res.RowsAffected(); rerr == nil && n == 0 {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusConflict)
-			json.NewEncoder(w).Encode(map[string]string{"status": "conflict"})
+	if n, rerr := res.RowsAffected(); rerr != nil {
+		writeJSONError(w, http.StatusInternalServerError, "Could not save note")
+		return
+	} else if n == 0 {
+		var latest Note
+		if err := db.QueryRow("SELECT id,title,content,updated_at,revision FROM notes WHERE id=? AND archived=0", id).Scan(&latest.ID, &latest.Title, &latest.Content, &latest.UpdatedAt, &latest.Revision); err != nil {
+			writeJSONError(w, http.StatusNotFound, "Note unavailable")
 			return
 		}
+		writeJSON(w, http.StatusConflict, map[string]any{"status": "conflict", "note": latest})
+		return
 	}
 	log.Printf("Note saved: id=%d (%d bytes)", id, len(content))
 
-	var newUpdatedAt string
-	db.QueryRow("SELECT updated_at FROM notes WHERE id = ?", id).Scan(&newUpdatedAt)
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "saved", "updated_at": newUpdatedAt})
+	writeJSON(w, http.StatusOK, map[string]any{"status": "saved", "revision": revision + 1})
 }
 
 func handleCreateNote(w http.ResponseWriter, r *http.Request) {

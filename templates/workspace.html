@@ -1,9 +1,9 @@
 {{define "task-row"}}
-<div class="todo-item {{if .Done}}done{{end}}" id="task-{{.ID}}" data-task-id="{{.ID}}">
+<div class="todo-item {{if .Done}}done{{end}}" id="task-{{.ID}}" data-task-id="{{.ID}}" data-revision="{{.Revision}}">
  <form hx-post="/todos/toggle" hx-target="#todo-items"><input type="hidden" name="id" value="{{.ID}}"><button class="check-btn {{if .Done}}checked{{end}}" aria-label="{{if .Done}}Reopen{{else}}Complete{{end}} {{.Text}}"><span class="task-checkmark" aria-hidden="true"></span></button></form>
- <button class="task-label" onclick="openTask({{.ID}})">{{.Text}}</button>
+ <button type="button" class="task-label" data-action="edit-task-title">{{.Text}}</button><span class="task-edit-status" role="status" aria-live="polite"></span>
  {{if .DueDate}}<span class="todo-date {{if and (not .Done) (isOverdue .DueDate)}}overdue{{end}}">{{formatDate .DueDate}}</span>{{end}}
- <details class="row-menu"><summary class="icon-button" aria-label="Task actions">{{template "icon-more"}}</summary><div class="menu-panel"><button class="action-with-icon" onclick="openTask({{.ID}})">{{template "icon-edit"}}<span>Edit details</span></button><form hx-post="/todos/delete" hx-target="#todo-items"><input type="hidden" name="id" value="{{.ID}}"><button class="action-with-icon">{{template "icon-archive"}}<span>Archive</span></button></form></div></details>
+ <details class="row-menu"><summary class="icon-button" aria-label="Task actions">{{template "icon-more"}}</summary><div class="menu-panel"><button class="action-with-icon" onclick="openTask({{.ID}})">{{template "icon-edit"}}<span>Details</span></button><form hx-post="/todos/delete" hx-target="#todo-items"><input type="hidden" name="id" value="{{.ID}}"><button class="action-with-icon">{{template "icon-archive"}}<span>Archive</span></button></form></div></details>
 </div>
 {{end}}
 {{define "task-group"}}

@@ -166,6 +166,20 @@ func TestParseReminderTime(t *testing.T) {
 	}
 }
 
+func TestNormalizePushSubject(t *testing.T) {
+	cases := map[string]string{
+		"mailto:owner@example.com":   "owner@example.com",
+		" MAILTO:owner@example.com ": "owner@example.com",
+		"owner@example.com":          "owner@example.com",
+		"https://example.com/push":   "https://example.com/push",
+	}
+	for in, want := range cases {
+		if got := normalizePushSubject(in); got != want {
+			t.Errorf("normalizePushSubject(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestShouldSendReminder(t *testing.T) {
 	at := func(h, m int) time.Time { return time.Date(2026, 7, 6, h, m, 0, 0, time.Local) }
 	rt := reminderTime{hour: 9, min: 0, enabled: true}
@@ -301,7 +315,8 @@ func setupTestNotesDB(t *testing.T) {
 		content TEXT DEFAULT '',
 		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-		archived INTEGER DEFAULT 0
+		archived INTEGER DEFAULT 0,
+		revision INTEGER NOT NULL DEFAULT 1
 	)`); err != nil {
 		t.Fatalf("create table: %v", err)
 	}
@@ -309,14 +324,12 @@ func setupTestNotesDB(t *testing.T) {
 	t.Cleanup(func() { testDB.Close() })
 }
 
-func saveNoteRequest(t *testing.T, id, content, updatedAt string) *httptest.ResponseRecorder {
+func saveNoteRequest(t *testing.T, id, content, revision string) *httptest.ResponseRecorder {
 	t.Helper()
 	form := url.Values{}
 	form.Set("id", id)
 	form.Set("content", content)
-	if updatedAt != "" {
-		form.Set("updated_at", updatedAt)
-	}
+	form.Set("revision", revision)
 	req := httptest.NewRequest(http.MethodPost, "/notes/save", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec := httptest.NewRecorder()
@@ -333,11 +346,7 @@ func noteField(t *testing.T, id int, col string) string {
 	return v
 }
 
-// TestSaveNoteOptimisticConcurrency covers the conditional-write path. The
-// timestamp the client echoes back is RFC3339 ("...T...Z") because database/sql
-// renders a scanned DATETIME that way, while the column stores SQLite's
-// "... ..." form — so a same-token save must still match. A regression here
-// (comparing the two formats raw) makes every save report a false conflict.
+// TestSaveNoteOptimisticConcurrency covers the atomic integer-revision path.
 func TestSaveNoteOptimisticConcurrency(t *testing.T) {
 	setupTestNotesDB(t)
 	if _, err := db.Exec(
@@ -346,36 +355,49 @@ func TestSaveNoteOptimisticConcurrency(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 
-	// The token as the page would have rendered it.
-	token := noteField(t, 1, "updated_at")
-	if !strings.Contains(token, "T") {
-		t.Fatalf("expected scanned timestamp in RFC3339 form, got %q", token)
-	}
-
-	// Current token -> the write lands.
-	if rec := saveNoteRequest(t, "1", "first edit", token); rec.Code != http.StatusOK {
+	if rec := saveNoteRequest(t, "1", "first edit", "1"); rec.Code != http.StatusOK {
 		t.Fatalf("save with current token = %d, want 200 (body %q)", rec.Code, rec.Body.String())
 	}
 	if got := noteField(t, 1, "content"); got != "first edit" {
 		t.Errorf("content = %q, want %q", got, "first edit")
 	}
 
-	// The same token is now stale (the row advanced to CURRENT_TIMESTAMP), so a
+	// The same revision is now stale, so a
 	// second device holding it must be refused rather than clobbering the note.
-	rec := saveNoteRequest(t, "1", "clobber", token)
+	rec := saveNoteRequest(t, "1", "clobber", "1")
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("save with stale token = %d, want 409", rec.Code)
 	}
 	if got := noteField(t, 1, "content"); got != "first edit" {
 		t.Errorf("content after refused save = %q, want it unchanged at %q", got, "first edit")
 	}
-
-	// No token at all keeps the old unconditional behaviour.
-	if rec := saveNoteRequest(t, "1", "forced", ""); rec.Code != http.StatusOK {
-		t.Fatalf("save without token = %d, want 200", rec.Code)
+	var conflict struct {
+		Note Note `json:"note"`
 	}
-	if got := noteField(t, 1, "content"); got != "forced" {
-		t.Errorf("content = %q, want %q", got, "forced")
+	if err := json.Unmarshal(rec.Body.Bytes(), &conflict); err != nil {
+		t.Fatal(err)
+	}
+	if conflict.Note.Content != "first edit" || conflict.Note.Revision != 2 {
+		t.Fatalf("conflict returned %#v", conflict.Note)
+	}
+
+	if rec := saveNoteRequest(t, "1", "forced", ""); rec.Code != http.StatusBadRequest {
+		t.Fatalf("save without revision = %d, want 400", rec.Code)
+	}
+}
+
+func TestSaveLargeNote(t *testing.T) {
+	setupTestNotesDB(t)
+	if _, err := db.Exec("INSERT INTO notes (id,title,content) VALUES (1,'large','')"); err != nil {
+		t.Fatal(err)
+	}
+	content := strings.Repeat("mobile-safe note content\n", 4000)
+	rec := saveNoteRequest(t, "1", content, "1")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("large save = %d: %s", rec.Code, rec.Body.String())
+	}
+	if got := noteField(t, 1, "content"); got != content {
+		t.Fatalf("large note length = %d, want %d", len(got), len(content))
 	}
 }
 

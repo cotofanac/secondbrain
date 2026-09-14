@@ -6,6 +6,13 @@ const base = process.env.TEST_BASE_URL || 'http://127.0.0.1:18080';
  const browser = await chromium.launch({headless:true,executablePath:process.env.TEST_BROWSER});
  const context = await browser.newContext({viewport:{width:1280,height:900}});
  const page = await context.newPage(); const errors=[];
+ async function openTaskDetails(name) {
+  const title=page.getByRole('button',{name,exact:true});
+  const row=title.locator('..');
+  await row.locator('.row-menu > summary').click();
+  await row.getByRole('button',{name:'Details',exact:true}).click();
+  await page.locator('#task-detail-form').waitFor();
+ }
  page.on('pageerror',e=>errors.push(e.message));
  await page.goto(base);
  await page.locator('[name=passcode]').fill(process.env.TEST_PASSCODE || '12345678');
@@ -22,7 +29,12 @@ const base = process.env.TEST_BASE_URL || 'http://127.0.0.1:18080';
  await page.locator('#custom-dialog-input').fill('Driving licence');await page.locator('#custom-dialog-confirm').click();
  await page.locator('.stage-group > summary').filter({hasText:'Driving licence'}).click();
  const capture=page.locator('.stage-group .capture-form');await capture.locator('[name=text]').fill('Book lessons');await capture.locator('button.add-circle').click();
+ // The primary title interaction is direct editing on pointer and keyboard.
  await page.getByRole('button',{name:'Book lessons',exact:true}).click();
+ const inlineTitle=page.locator('.task-title-editor input');await inlineTitle.fill('Book practical lessons');await inlineTitle.press('Enter');
+ await page.getByRole('button',{name:'Book practical lessons',exact:true}).waitFor();
+ await page.getByRole('button',{name:'Book practical lessons',exact:true}).click();await page.locator('.task-title-editor input').press('Escape');
+ await openTaskDetails('Book practical lessons');
  await page.locator('#task-detail-form [name=due_date]').fill('2026-10-01');await page.locator('#task-detail-form button.btn-primary').click();
  // A response must not overwrite text entered after the request was sent.
  let releaseTask;const heldTask=new Promise(resolve=>releaseTask=resolve);
@@ -33,14 +45,14 @@ const base = process.env.TEST_BASE_URL || 'http://127.0.0.1:18080';
  await page.locator('.detail-save-status').filter({hasText:'newer edits'}).waitFor();
  assert.equal(await page.locator('#task-detail-form [name=text]').inputValue(),'Draft typed during save');
  await page.unroute('**/task/save');
- await page.getByRole('button',{name:'Cancel edits',exact:true}).click();
- await page.waitForFunction(()=>document.querySelector('#task-detail-form [name=text]').value==='Book lessons');
+ await page.getByRole('button',{name:'Discard',exact:true}).click();
+ await page.waitForFunction(()=>document.querySelector('#task-detail-form [name=text]').value==='Book practical lessons');
  await page.getByRole('button',{name:'Close details',exact:true}).click();
  // Completion and reopening preserve the task and collapsed state.
- await page.getByRole('button',{name:'Complete Book lessons',exact:true}).click();
- await page.locator('.stage-group .completed-group > summary').click();
- await page.getByRole('button',{name:'Reopen Book lessons',exact:true}).click();
- await page.getByRole('button',{name:'Book lessons',exact:true}).waitFor();
+ await page.getByRole('button',{name:'Complete Book practical lessons',exact:true}).click();
+ const completed=page.locator('.stage-group .completed-group');if(!await completed.evaluate(el=>el.open))await completed.locator(':scope > summary').click();
+ await page.getByRole('button',{name:'Reopen Book practical lessons',exact:true}).click();
+ await page.getByRole('button',{name:'Book practical lessons',exact:true}).waitFor();
  // Draft survives another task's mutation and a refresh.
  await page.locator('#capture-tasks [name=text]').fill('Keep this draft');
  await page.evaluate(()=>refreshWorkspace());
@@ -57,9 +69,9 @@ const base = process.env.TEST_BASE_URL || 'http://127.0.0.1:18080';
   if(width===390)await page.screenshot({path:'/private/tmp/secondbrain-iphone.png',fullPage:true});
  }
  await page.setViewportSize({width:390,height:844});
- await page.getByRole('button',{name:'Book lessons',exact:true}).click();
- await page.locator('#task-detail-form').waitFor();
+ await openTaskDetails('Book practical lessons');
  assert.equal(await page.locator('#detail-pane').evaluate(el=>{const b=el.getBoundingClientRect();return b.left>=0&&b.right<=innerWidth&&b.top>=0&&b.bottom<=innerHeight}),true,'mobile details overflow');
+ assert.equal(await page.locator('#detail-pane').evaluate(el=>el.getBoundingClientRect().height < innerHeight*.75),true,'mobile task details should be a compact sheet');
  await page.getByRole('button',{name:'Close details',exact:true}).click();
  await page.evaluate(()=>document.documentElement.style.fontSize='24px');
  assert.equal(await page.evaluate(()=>document.getElementById('app').getBoundingClientRect().right<=innerWidth),true,'large-text overflow');

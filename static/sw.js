@@ -4,6 +4,7 @@ const CACHE_NAME = 'secondbrain-__ASSET_VERSION__';
 const PRECACHE = [
     '/static/style.css?v=__ASSET_VERSION__',
     '/static/app.js?v=__ASSET_VERSION__',
+    '/static/notes.js?v=__ASSET_VERSION__',
     '/static/htmx.min.js?v=__ASSET_VERSION__',
     '/static/workspace.js?v=__ASSET_VERSION__',
     '/static/push.js?v=__ASSET_VERSION__',

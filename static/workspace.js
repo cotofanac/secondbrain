@@ -4,6 +4,7 @@ let pendingFocus=null;
 let workspaceState=null;
 let noteViewState=null;
 let archiveCategory='todo';
+let detailReturnFocus=null;
 function readLocal(key){try{return localStorage.getItem(key);}catch(_){return null;}}
 function writeLocal(key,value){try{localStorage.setItem(key,value);}catch(_){}}
 function restoreSections(){
@@ -13,12 +14,14 @@ document.addEventListener('toggle',e=>{const d=e.target;if(d.matches?.('details[
 function rememberWorkspace(){
  const forms={};document.querySelectorAll('#todo-items .capture-form').forEach(f=>{forms[f.id]=Object.fromEntries(new FormData(f));});
  const el=document.activeElement;
- workspaceState={forms,scroll:window.scrollY,focus:el?.closest('.capture-form')?.id,name:el?.name,start:el?.selectionStart,end:el?.selectionEnd};
+ const row=el?.closest('.todo-item');
+ workspaceState={forms,scroll:window.scrollY,focus:el?.closest('.capture-form')?.id,name:el?.name,start:el?.selectionStart,end:el?.selectionEnd,rowId:row?.dataset.taskId,rowControl:el?.classList.contains('check-btn')?'check':el?.classList.contains('task-label')?'label':''};
 }
 function restoreWorkspace(){
  restoreSections();
  if(workspaceState){const s=workspaceState;for(const [id,values] of Object.entries(s.forms)){const form=document.getElementById(id);if(form){for(const [key,value]of Object.entries(values)){const el=form.elements.namedItem(key);if(el)el.value=value;}}}
  const form=document.getElementById(s.focus);const el=form?.elements.namedItem(s.name);if(el){el.focus({preventScroll:true});if(typeof s.start==='number')el.setSelectionRange?.(s.start,s.end);}
+ if(s.rowId){const row=document.getElementById('task-'+s.rowId);if(row)expandAncestors(row);const control=s.rowControl==='check'?row?.querySelector('.check-btn'):row?.querySelector('.task-label');control?.focus({preventScroll:true});}
  requestAnimationFrame(()=>window.scrollTo(0,s.scroll));workspaceState=null;
  }
  if(pendingFocus){revealTask(pendingFocus);pendingFocus=null;}
@@ -28,14 +31,40 @@ function expandAncestors(el){let node=el;while(node){if(node.tagName==='DETAILS'
 function revealTask(id){const row=document.getElementById('task-'+id);if(row){document.querySelectorAll('.todo-item.selected').forEach(el=>el.classList.remove('selected'));expandAncestors(row);row.scrollIntoView({block:'nearest'});row.classList.add('selected');}}
 function setDestination(values){const url=new URL(location.href);url.search='';Object.entries(values).forEach(([k,v])=>url.searchParams.set(k,v));history.replaceState(null,'',url);}
 function canLeaveDetail(){const form=document.getElementById('task-detail-form');if(form?.dataset.dirty){showToast('Save your task changes before closing these details.');return false;}return true;}
-function showDetail(url){const pane=document.getElementById('detail-pane');if(pane.dataset.url!==url){pane.textContent='Loading details…';pane.dataset.url=url;}pane.hidden=false;document.querySelector('.task-layout').classList.add('has-detail');return htmx.ajax('GET',url,'#detail-pane').catch(()=>{});}
+function showDetail(url){const pane=document.getElementById('detail-pane');if(pane.dataset.url!==url){pane.textContent='Loading details…';pane.dataset.url=url;}pane.hidden=false;pane.dataset.focusAfterLoad='1';document.querySelector('.task-layout').classList.add('has-detail');return htmx.ajax('GET',url,'#detail-pane').catch(()=>{});}
 function discardTaskChanges(){const form=document.getElementById('task-detail-form');if(form){delete form.dataset.dirty;showDetail('/task/detail?id='+form.elements.id.value);}}
-async function openTask(id){if(!id||!canLeaveDetail())return;switchMode('todos');detailSelection={kind:'task',id};
+function closePopupMenus(){document.querySelectorAll('.row-menu,.app-menu,.capture-options').forEach(d=>d.open=false);}
+async function openTask(id){if(!id||!canLeaveDetail())return;detailReturnFocus=document.querySelector('#task-'+id+' .task-label');closePopupMenus();switchMode('todos');detailSelection={kind:'task',id};
  if(document.querySelector('#todo-items .archive-header')){pendingFocus=id;await refreshWorkspace();}
  revealTask(id);setDestination({view:'todos',task:id});showDetail('/task/detail?id='+id);
 }
 async function openProject(id){if(!canLeaveDetail())return;switchMode('todos');if(document.querySelector('#todo-items .archive-header'))await refreshWorkspace();detailSelection={kind:'project',id};const el=document.getElementById('project-'+id);if(el){expandAncestors(el);el.open=true;}setDestination({view:'todos',project:id});showDetail('/projects/detail?id='+id);}
-function closeDetail(){if(!canLeaveDetail())return;document.getElementById('detail-pane').hidden=true;document.querySelector('.task-layout').classList.remove('has-detail');detailSelection=null;setDestination({view:'todos'});}
+function closeDetail(){if(!canLeaveDetail())return;document.getElementById('detail-pane').hidden=true;document.querySelector('.task-layout').classList.remove('has-detail');detailSelection=null;setDestination({view:'todos'});const target=detailReturnFocus;detailReturnFocus=null;target?.focus({preventScroll:true});}
+
+function taskJSON(response){return response.json().catch(()=>({error:'Could not save task'}));}
+function taskAction(label,onClick){const button=document.createElement('button');button.type='button';button.className='task-edit-action';button.textContent=label;button.addEventListener('mousedown',e=>e.preventDefault());button.addEventListener('click',onClick);return button;}
+function beginTaskTitleEdit(button){
+ const row=button.closest('.todo-item');if(!row||row.querySelector('.task-title-editor'))return;
+ const original=button.textContent.trim();const editor=document.createElement('span');editor.className='task-title-editor';
+ const input=document.createElement('input');input.type='text';input.maxLength=500;input.value=original;input.setAttribute('aria-label','Task title');
+ const status=document.createElement('span');status.className='task-edit-message';status.setAttribute('role','status');status.setAttribute('aria-live','polite');
+ const actions=document.createElement('span');actions.className='task-edit-actions';editor.append(input,status,actions);button.replaceWith(editor);input.focus();input.select();
+ let saving=false,finished=false,latest=null;
+ const cancel=()=>{if(finished)return;finished=true;const restored=document.createElement('button');restored.type='button';restored.className='task-label';restored.dataset.action='edit-task-title';restored.textContent=original;editor.replaceWith(restored);restored.focus({preventScroll:true});};
+ const useLatest=()=>{if(!latest)return;finished=true;row.dataset.revision=String(latest.revision);const restored=document.createElement('button');restored.type='button';restored.className='task-label';restored.dataset.action='edit-task-title';restored.textContent=latest.text;editor.replaceWith(restored);restored.focus({preventScroll:true});};
+ async function save(force=false){
+  if(finished||saving)return;const text=input.value.trim();if(!text){status.textContent='Enter a task title';input.focus();return;}if(text===original&&!force){cancel();return;}
+  saving=true;status.textContent='Saving…';actions.replaceChildren();input.disabled=true;
+  try{const response=await fetch('/todos/edit',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded','Accept':'application/json'},body:new URLSearchParams({id:row.dataset.taskId,text,revision:force?latest.revision:row.dataset.revision})});const data=await taskJSON(response);
+   if(response.status===409){latest=data.task;saving=false;input.disabled=false;status.textContent='Changed elsewhere. Latest: '+latest.text;actions.append(taskAction('Keep mine',()=>save(true)),taskAction('Use latest',useLatest));actions.querySelector('button')?.focus();return;}
+   if(!response.ok)throw new Error(data.error||'Could not save task');
+   finished=true;row.dataset.revision=String(data.revision);const saved=document.createElement('button');saved.type='button';saved.className='task-label';saved.dataset.action='edit-task-title';saved.textContent=data.text;editor.replaceWith(saved);saved.focus({preventScroll:true});const live=row.querySelector('.task-edit-status');if(live){live.textContent='Saved';setTimeout(()=>{if(live.textContent==='Saved')live.textContent='';},1200);}
+  }catch(error){saving=false;input.disabled=false;status.textContent=error.message||'Could not save task';actions.append(taskAction('Retry',()=>save(false)),taskAction('Cancel',cancel));input.focus();}
+ }
+ input.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();save();}else if(e.key==='Escape'){e.preventDefault();cancel();}});
+ input.addEventListener('blur',()=>setTimeout(()=>{if(!finished&&!saving&&!editor.contains(document.activeElement)&&!actions.childElementCount)save();},0));
+}
+document.addEventListener('click',e=>{const button=e.target.closest?.('[data-action="edit-task-title"]');if(button)beginTaskTitleEdit(button);});
 function filterStageOptions(form){if(!form?.elements.project_id)return;const project=form.elements.project_id.value;const select=form.elements.stage_id;for(const option of select.options){option.hidden=!!option.dataset.project&&option.dataset.project!==project;option.disabled=option.hidden;}if(select.selectedOptions[0]?.disabled)select.value='0';}
 async function structureCreate(kind,parent){const name=await showPrompt(kind==='project'?'New project':'New stage');if(name)structureAction(kind,0,'create',{name,project_id:parent});}
 async function structureRename(kind,id,el){const name=await showPrompt('Rename '+kind,el.dataset.name);if(name)structureAction(kind,id,'rename',{name});}
@@ -73,7 +102,7 @@ document.body.addEventListener('htmx:beforeSwap',e=>{
 document.body.addEventListener('htmx:afterSwap',e=>{
  const id=e.detail.target.id;
  if(id==='todo-items'){restoreWorkspace();if(detailSelection?.kind==='task')document.getElementById('task-'+detailSelection.id)?.classList.add('selected');if(detailSelection?.kind==='project')showDetail('/projects/detail?id='+detailSelection.id);}
- if(id==='detail-pane'){filterStageOptions(document.getElementById('task-detail-form'));}
+ if(id==='detail-pane'){filterStageOptions(document.getElementById('task-detail-form'));const pane=document.getElementById('detail-pane');if(pane.dataset.focusAfterLoad){delete pane.dataset.focusAfterLoad;pane.focus({preventScroll:true});}}
  if(id==='notes-content'){initNoteEditor();const editor=document.getElementById('note-editor');if(editor&&document.body.dataset.mode==='notes')setDestination({view:'notes',note:editor.dataset.noteId});if(editor&&noteViewState?.id===editor.dataset.noteId){editor.setSelectionRange(noteViewState.start,noteViewState.end);editor.scrollTop=noteViewState.scroll;if(noteViewState.focused)editor.focus({preventScroll:true});}noteViewState=null;}
  if(id==='settings-content'){document.body.dataset.timezone=document.querySelector('#schedule-form [name=timezone]')?.value || document.body.dataset.timezone;updateTopbarStat();preparePush();}
 });
@@ -82,10 +111,10 @@ document.addEventListener('input',e=>{const form=e.target.closest('#task-detail-
 document.addEventListener('keydown',e=>{
  if(e.metaKey&&e.key.toLowerCase()==='k'){e.preventDefault();openSearch();}
  if(e.metaKey&&e.key==='Enter'){const form=document.activeElement.closest('form');if(form){e.preventDefault();form.requestSubmit();}}
- if(e.key==='Escape'){closeSearch();document.querySelectorAll('.row-menu,.app-menu,.capture-options').forEach(d=>d.open=false);if(document.body.dataset.mode==='todos'&&!document.getElementById('detail-pane').hidden)closeDetail();}
+ if(e.key==='Escape'){closeSearch();closePopupMenus();if(document.body.dataset.mode==='todos'&&!document.getElementById('detail-pane').hidden)closeDetail();}
 });
 document.addEventListener('click',e=>document.querySelectorAll('.row-menu[open],.app-menu[open]').forEach(d=>{if(!d.contains(e.target))d.open=false;}));
 window.addEventListener('beforeunload',e=>{if(document.getElementById('note-editor')?.dataset.dirty||document.getElementById('task-detail-form')?.dataset.dirty){e.preventDefault();e.returnValue='';}});
 document.addEventListener('DOMContentLoaded',()=>{restoreSections();routeLocation();});
 
-document.body.addEventListener('htmx:responseError',e=>{if(e.detail.target?.id==='detail-pane'&&!document.getElementById('detail-pane').querySelector('form')){const pane=document.getElementById('detail-pane');pane.textContent='This item is unavailable. It may have been archived.';const close=document.createElement('button');close.textContent='Close details';close.className='btn';close.onclick=closeDetail;pane.appendChild(close);}});
+document.body.addEventListener('htmx:responseError',e=>{if(e.detail.target?.id!=='detail-pane')return;const pane=document.getElementById('detail-pane');if(e.detail.xhr.status===409){let data;try{data=JSON.parse(e.detail.xhr.responseText);}catch(_){return;}const form=pane.querySelector('#task-detail-form');if(!form||!data.task)return;form.dataset.dirty='1';form.elements.revision.value=data.task.revision;let conflict=form.querySelector('.edit-conflict');if(!conflict){conflict=document.createElement('section');conflict.className='edit-conflict';conflict.setAttribute('role','alert');form.appendChild(conflict);}conflict.replaceChildren();const title=document.createElement('h3');title.textContent='Changed on another device';const latest=document.createElement('p');latest.textContent='Latest task: '+data.task.text;const keep=taskAction('Keep mine',()=>{conflict.remove();form.requestSubmit();});const use=taskAction('Use latest',()=>{delete form.dataset.dirty;showDetail('/task/detail?id='+form.elements.id.value);});conflict.append(title,latest,keep,use);keep.focus();return;}if(!pane.querySelector('form')){pane.textContent='This item is unavailable. It may have been archived.';const close=document.createElement('button');close.textContent='Close details';close.className='btn';close.onclick=closeDetail;pane.appendChild(close);}});
