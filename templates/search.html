@@ -1,4 +1,4 @@
-{{if and (not .Notes) (not .Todos)}}
+{{if and (not .Notes) (not .Todos) (not .Projects) (not .Stages)}}
 <div class="search-empty">No results for "{{.Query}}"</div>
 {{else}}
 {{if .Notes}}
@@ -12,10 +12,13 @@
 {{if .Todos}}
 <div class="search-section-label">Tasks</div>
 {{range .Todos}}
-<button type="button" class="search-result-item" onclick="openTodoResult('{{.Category}}')">
+<button type="button" class="search-result-item" onclick="openTodoResult('{{.Category}}',{{.ID}})">
     <span class="search-result-text">{{.Text}}</span>
     <span class="search-result-cat">{{.Category}}</span>
 </button>
 {{end}}
 {{end}}
 {{end}}
+
+{{if .Projects}}<div class="search-section-label">Projects</div>{{range .Projects}}<button class="search-result-item" onclick="closeSearch();openProject({{.ID}})">{{.Name}}</button>{{end}}{{end}}
+{{if .Stages}}<div class="search-section-label">Stages</div>{{range .Stages}}<button class="search-result-item" onclick="openStageResult({{.ID}})">{{.Name}}</button>{{end}}{{end}}

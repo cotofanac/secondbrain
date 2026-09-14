@@ -1,5 +1,5 @@
 # Build stage
-FROM golang:1.23-alpine AS builder
+FROM golang:1.26.8-alpine AS builder
 
 RUN apk add --no-cache gcc musl-dev
 
@@ -15,7 +15,7 @@ COPY . .
 RUN CGO_ENABLED=1 GOOS=linux go build -ldflags="-s -w" -o secondbrain .
 
 # Runtime stage
-FROM alpine:3.20
+FROM alpine:3.24.1
 
 RUN apk add --no-cache ca-certificates tzdata \
     && adduser -D -H -s /sbin/nologin appuser

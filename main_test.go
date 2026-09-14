@@ -237,6 +237,14 @@ func setupTestDB(t *testing.T) {
 		t.Fatalf("create table: %v", err)
 	}
 	db = testDB
+	for _, statement := range []string{`CREATE TABLE IF NOT EXISTS notes(id INTEGER PRIMARY KEY,title TEXT,archived INTEGER DEFAULT 0)`, `CREATE TABLE IF NOT EXISTS push_subscriptions(endpoint TEXT PRIMARY KEY,p256dh TEXT,auth TEXT)`} {
+		if _, err := testDB.Exec(statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := migrateWorkspace(testDB, time.Now()); err != nil {
+		t.Fatal(err)
+	}
 	t.Cleanup(func() { testDB.Close() })
 }
 
@@ -524,62 +532,23 @@ func TestAddTodoReusesExistingListItem(t *testing.T) {
 // past relative to the real UTC today and the "not yet due" rows archive too.
 func TestArchiveStaleTodosUsesSuppliedDate(t *testing.T) {
 	setupTestDB(t)
-	today := date("2020-01-15")
-
-	// text, due_date, created_at, category
-	insert := func(text, due, created, category string) {
-		if _, err := db.Exec(
-			"INSERT INTO todos (category, text, due_date, created_at) VALUES (?, ?, ?, ?)",
-			category, text, due, created,
-		); err != nil {
-			t.Fatalf("insert %q: %v", text, err)
+	now := date("2026-09-13")
+	for _, row := range []struct {
+		text  string
+		done  int
+		after string
+	}{{"unfinished", 0, "2020-01-01T00:00:00Z"}, {"complete old", 1, "2026-09-12T23:59:59Z"}, {"complete later", 1, "2026-09-14T00:00:00Z"}} {
+		if _, err := db.Exec(`INSERT INTO todos(category,text,done,archive_after) VALUES('todo',?,?,?)`, row.text, row.done, row.after); err != nil {
+			t.Fatal(err)
 		}
 	}
-	const old = "2019-12-01 00:00:00" // comfortably older than 7 days
-	const fresh = "2099-01-01 00:00:00"
-
-	insert("past due", "2020-01-14", old, "todo")  // archive: due date has passed
-	insert("due today", "2020-01-15", old, "todo") // keep: still today's problem
-	insert("due later", "2020-01-16", old, "todo") // keep: upcoming
-	insert("no due date", "", old, "todo")         // archive: old and undated
-	insert("too new", "", fresh, "todo")           // keep: under a week old
-	insert("grocery", "", old, "groceries")        // keep: wrong category
-
-	n, err := archiveStaleTodos(today)
-	if err != nil {
-		t.Fatalf("archiveStaleTodos: %v", err)
+	n, err := archiveStaleTodos(now)
+	if err != nil || n != 1 {
+		t.Fatalf("archived=%d err=%v", n, err)
 	}
-	if n != 2 {
-		t.Errorf("archived %d rows, want 2", n)
-	}
-
-	archived := map[string]bool{}
-	rows, err := db.Query("SELECT text, archived FROM todos")
-	if err != nil {
-		t.Fatalf("query: %v", err)
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var text string
-		var a int
-		if err := rows.Scan(&text, &a); err != nil {
-			t.Fatalf("scan: %v", err)
-		}
-		archived[text] = a == 1
-	}
-
-	want := map[string]bool{
-		"past due":    true,
-		"due today":   false,
-		"due later":   false,
-		"no due date": true,
-		"too new":     false,
-		"grocery":     false,
-	}
-	for text, wantArchived := range want {
-		if archived[text] != wantArchived {
-			t.Errorf("%q archived = %v, want %v", text, archived[text], wantArchived)
-		}
+	var name string
+	if err := db.QueryRow(`SELECT text FROM todos WHERE archived=1`).Scan(&name); err != nil || name != "complete old" {
+		t.Fatalf("archived %q err=%v", name, err)
 	}
 }
 

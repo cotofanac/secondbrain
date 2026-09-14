@@ -1,0 +1,48 @@
+{{define "task-row"}}
+<div class="todo-item {{if .Done}}done{{end}}" id="task-{{.ID}}" data-task-id="{{.ID}}">
+ <form hx-post="/todos/toggle" hx-target="#todo-items"><input type="hidden" name="id" value="{{.ID}}"><button class="check-btn {{if .Done}}checked{{end}}" aria-label="{{if .Done}}Reopen{{else}}Complete{{end}} {{.Text}}"><span class="task-checkmark" aria-hidden="true"></span></button></form>
+ <button class="task-label" onclick="openTask({{.ID}})">{{.Text}}</button>
+ {{if .DueDate}}<span class="todo-date {{if and (not .Done) (isOverdue .DueDate)}}overdue{{end}}">{{formatDate .DueDate}}</span>{{end}}
+ <details class="row-menu"><summary class="icon-button" aria-label="Task actions">{{template "icon-more"}}</summary><div class="menu-panel"><button class="action-with-icon" onclick="openTask({{.ID}})">{{template "icon-edit"}}<span>Edit details</span></button><form hx-post="/todos/delete" hx-target="#todo-items"><input type="hidden" name="id" value="{{.ID}}"><button class="action-with-icon">{{template "icon-archive"}}<span>Archive</span></button></form></div></details>
+</div>
+{{end}}
+{{define "task-group"}}
+<div class="task-group" data-group="{{.Key}}">
+ <form class="capture-form" id="capture-{{.Key}}" hx-post="/todos/add" hx-target="#todo-items">
+  <input type="hidden" name="category" value="{{.Category}}"><input type="hidden" name="project_id" value="{{.ProjectID}}"><input type="hidden" name="stage_id" value="{{.StageID}}">
+  <input name="text" aria-label="{{if eq .Category "todo"}}Add task{{else}}Add item{{end}}" placeholder="{{if eq .Category "todo"}}Add a task…{{else}}Add an item…{{end}}" maxlength="500" autocomplete="off" {{if eq .Category "groceries"}}list="grocery-suggestions"{{else if eq .Category "shopping"}}list="shopping-suggestions"{{end}} required>
+  {{if eq .Category "todo"}}<details class="capture-options"><summary class="icon-button" title="Due date" aria-label="Choose an optional due date">{{template "icon-calendar"}}</summary><label>Due date<input type="date" name="due_date"></label></details>{{end}}
+  <button class="add-circle" aria-label="Add">{{template "icon-plus"}}</button>
+ </form>
+ {{range .Tasks}}{{template "task-row" .}}{{else}}<p class="quiet-empty">{{if .Done}}All done for now.{{else}}A little space for what’s next.{{end}}</p>{{end}}
+ {{if .Done}}<details class="completed-group" data-persist="done-{{.Key}}"><summary>Completed <span>{{len .Done}}</span></summary>{{range .Done}}{{template "task-row" .}}{{end}}</details>{{end}}
+</div>
+{{end}}
+{{define "list-section"}}
+<details class="workspace-section" id="section-{{.Key}}" data-persist="{{.Key}}" {{if eq .Key "tasks"}}open{{end}}>
+ <summary><span class="disclosure-icon">{{template "icon-chevron"}}</span><span class="section-title">{{.Name}}</span><span class="section-count">{{len .Tasks}}</span></summary>
+ {{template "task-group" .}}
+ <div class="section-footer"><button class="action-with-icon" onclick="openTaskArchive('{{.Category}}')">{{template "icon-archive"}}<span>Archive</span></button>{{if ne .Category "todo"}}<button class="action-with-icon" hx-post="/todos/clear-checked" hx-target="#todo-items" hx-vals='{"category":"{{.Category}}"}'>{{template "icon-reset"}}<span>Reset checks</span></button>{{end}}</div>
+</details>
+{{end}}
+{{template "list-section" .Tasks}}
+<details class="workspace-section" id="section-projects" data-persist="projects">
+ <summary><span class="disclosure-icon">{{template "icon-chevron"}}</span><span class="section-title">Projects</span><span class="section-count">{{len .Projects}}</span></summary>
+ <div class="section-footer"><button class="action-with-icon" onclick="structureCreate('project',0)">{{template "icon-plus"}}<span>New project</span></button></div>
+ {{range .Projects}}
+ <details class="project-group" id="project-{{.ID}}" data-persist="project-{{.ID}}">
+  <summary><span class="disclosure-icon">{{template "icon-chevron"}}</span><span>{{.Name}}</span><span class="project-progress" style="--progress:{{if .Group.Total}}{{.Group.Completed}}{{else}}0{{end}};--total:{{if .Group.Total}}{{.Group.Total}}{{else}}1{{end}}" aria-label="{{.Group.Completed}} of {{.Group.Total}} complete"></span><span class="section-count">{{.Group.Completed}}/{{.Group.Total}}</span></summary>
+  <div class="section-footer"><button class="action-with-icon" onclick="openProject({{.ID}})">{{template "icon-edit"}}<span>Project details</span></button><button class="action-with-icon" onclick="structureCreate('stage',{{.ID}})">{{template "icon-plus"}}<span>Stage</span></button></div>
+  {{template "task-group" .Group}}
+  {{range .Stages}}{{if not .Archived}}
+  <details class="stage-group" id="stage-{{.ID}}" data-persist="stage-{{.ID}}"><summary><span class="disclosure-icon">{{template "icon-chevron"}}</span><span>{{.Name}}</span><span class="section-count">{{.Group.Completed}}/{{.Group.Total}}</span></summary>
+   {{template "task-group" .Group}}
+   <div class="section-footer"><button class="action-with-icon" onclick="structureRename('stage',{{.ID}},this)" data-name="{{.Name}}">{{template "icon-edit"}}<span>Rename</span></button><button class="icon-button" onclick="structureAction('stage',{{.ID}},'up')" aria-label="Move {{.Name}} up">{{template "icon-up"}}</button><button class="icon-button" onclick="structureAction('stage',{{.ID}},'down')" aria-label="Move {{.Name}} down">{{template "icon-down"}}</button><button class="action-with-icon" onclick="structureAction('stage',{{.ID}},'archive')">{{template "icon-archive"}}<span>Archive stage</span></button></div>
+  </details>
+  {{end}}{{end}}
+ </details>
+ {{else}}<p class="quiet-empty">A goal can start with one small task.</p>{{end}}
+ {{if .ArchivedProjects}}<details class="completed-group" data-persist="archived-projects"><summary>Completed &amp; archived projects</summary>{{range .ArchivedProjects}}<div class="archive-project"><button onclick="openProject({{.ID}})">{{.Name}}</button><button onclick="structureAction('project',{{.ID}},'{{if .Completed}}reopen{{else}}restore{{end}}')">{{if .Completed}}Reopen{{else}}Restore{{end}}</button></div>{{end}}</details>{{end}}
+</details>
+{{template "list-section" .Groceries}}
+{{template "list-section" .Buys}}

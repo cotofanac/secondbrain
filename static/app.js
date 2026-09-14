@@ -1,35 +1,14 @@
 // --- Mode switching (Tasks / Notes / Habits) ---
-const MODE_TITLES = { todos: 'Tasks', notes: 'Notes', habits: 'Habits' };
-
-const TAB_CYCLE = ['groceries', 'shopping', 'todo'];
-
+const MODE_TITLES = { todos: 'Tasks', notes: 'Notes', habits: 'Habits', settings: 'Notifications', review: 'Weekly review' };
 function switchMode(mode) {
-    // A pending undo refers to the view being left, so retire it on navigation.
-    hideToast();
-    const currentMode = document.querySelector('.bottom-nav-btn.active')?.dataset.mode;
-
-    if (mode === 'todos' && currentMode === 'todos') {
-        const activeCat = document.querySelector('#tab-bar .tab.active')?.dataset.cat || 'groceries';
-        const idx = TAB_CYCLE.indexOf(activeCat);
-        const nextCat = TAB_CYCLE[(idx + 1) % TAB_CYCLE.length];
-        switchTab(nextCat, document.querySelector(`[data-cat="${nextCat}"]`));
-        return;
-    }
-
-    document.querySelectorAll('.bottom-nav-btn').forEach(b => b.classList.remove('active'));
-    document.querySelector(`.bottom-nav-btn[data-mode="${mode}"]`).classList.add('active');
-
-    document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
-    document.getElementById(mode + '-view').classList.add('active');
-
-    const titleEl = document.getElementById('topbar-title');
-    if (titleEl) titleEl.textContent = MODE_TITLES[mode] || mode;
-
-    if (mode === 'notes') {
-        const editor = document.getElementById('note-editor');
-        if (editor) editor.focus();
-    }
-
+    if (!MODE_TITLES[mode]) mode='todos';
+    flushPendingNoteSave();
+    document.querySelectorAll('.bottom-nav-btn').forEach(b => b.classList.toggle('active',b.dataset.mode===mode));
+    document.querySelectorAll('.view').forEach(v => v.classList.toggle('active',v.id===mode+'-view'));
+    document.getElementById('topbar-title').textContent=MODE_TITLES[mode];
+    document.querySelectorAll('.app-menu').forEach(d=>d.open=false);
+    document.body.dataset.mode=mode;
+    if(typeof setDestination==='function')setDestination({view:mode});
     updateTopbarStat();
 }
 
@@ -38,7 +17,7 @@ function updateTopbarStat() {
     if (!stat) return;
 
     const now = new Date();
-    const date = now.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+    const date = now.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: document.body.dataset.timezone || undefined });
 
     const activeMode = document.querySelector('.bottom-nav-btn.active')?.dataset.mode;
     let count = '';
@@ -183,7 +162,7 @@ document.body.addEventListener('sbUndo', function(e) {
     const d = e.detail || {};
     if (!d.id) return;
     const isHabit = d.kind === 'habit';
-    showToast(isHabit ? 'Habit archived' : 'Task archived', {
+    showToast(isHabit ? 'Habit archived' : d.kind === 'project' ? 'Project archived' : d.kind === 'stage' ? 'Stage archived' : 'Task archived', {
         label: 'Undo',
         onClick: function() { undoArchive(d.kind, d.id); }
     });
@@ -198,6 +177,7 @@ document.body.addEventListener('sbNotice', function(e) {
 function undoArchive(kind, id) {
     // return=list asks the restore handler for the live list rather than the
     // archive view it would normally re-render.
+    if (kind === 'project' || kind === 'stage') { structureAction(kind,id,'restore'); return; }
     if (kind === 'habit') {
         htmx.ajax('POST', '/habits/restore', {
             target: '#habits-content',
@@ -222,74 +202,14 @@ function doLogout() {
     f.submit();
 }
 
-// --- Tab switching (Shopping List / To-Do / Groceries Checklist) ---
-function switchTab(category, el) {
-    hideToast(); // see switchMode
-    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-    const target = el || document.querySelector(`[data-cat="${category}"]`);
-    if (target) target.classList.add('active');
-
-    document.getElementById('add-category').value = category;
-
-    const dateInput = document.getElementById('add-date');
-    const calendarBtn = document.getElementById('calendar-btn');
-    const calendarWrap = document.getElementById('calendar-wrap');
-    const isTodo = category === 'todo';
-    if (calendarWrap) calendarWrap.style.display = isTodo ? 'inline-flex' : 'none';
-    if (!isTodo && dateInput) {
-        dateInput.value = '';
-        updateCalendarBtn(dateInput, calendarBtn);
-    }
-
-    // Reset archive view
-    document.getElementById('add-form').style.display = '';
-    const archiveBtn = document.getElementById('archive-btn');
-    if (archiveBtn) archiveBtn.classList.remove('active');
-
-    const addInput = document.querySelector('.add-input');
-    if (addInput) {
-        if (category === 'groceries') addInput.setAttribute('list', 'grocery-suggestions');
-        else if (category === 'shopping') addInput.setAttribute('list', 'shopping-suggestions');
-        else addInput.removeAttribute('list');
-    }
-
-    const clearBtn = document.getElementById('clear-checked-btn');
-    if (clearBtn) {
-        clearBtn.style.visibility = category !== 'todo' ? '' : 'hidden';
-        clearBtn.style.pointerEvents = category !== 'todo' ? '' : 'none';
-    }
-
-    htmx.ajax('GET', '/todos?category=' + category, '#todo-items');
-}
-
-// --- Scroll collapse for tabs + add form ---
-(function() {
-    let lastScrollY = 0;
-    const threshold = 30;
-    window.addEventListener('scroll', function() {
-        const sy = window.scrollY;
-        const tabBar = document.getElementById('tab-bar');
-        const addForm = document.getElementById('add-form');
-
-        if (!tabBar || !addForm) return;
-
-        if (sy > threshold && sy > lastScrollY) {
-            tabBar.classList.add('collapsed');
-            addForm.classList.add('collapsed');
-        } else if (sy < lastScrollY - 5 || sy <= threshold) {
-            tabBar.classList.remove('collapsed');
-            addForm.classList.remove('collapsed');
-        }
-        lastScrollY = sy;
-    }, { passive: true });
-})();
-
 // --- Notes ---
 let saveTimer = null;
 
 function initNoteEditor() {
     const editor = document.getElementById('note-editor');
-    if (!editor) return;
+    if (!editor || editor.dataset.initialized) return;
+    editor.dataset.initialized="1";
+    restoreNoteDraft(editor);
 
     editor.addEventListener('keydown', function(e) {
         handleNoteEditorKeydown(e, editor);
@@ -298,7 +218,9 @@ function initNoteEditor() {
     editor.addEventListener('input', function() {
         applyInlineNoteCommands(editor);
         clearTimeout(saveTimer);
-        showNoteStatus('Unsaved...');
+        editor.dataset.dirty='1';
+        storeNoteDraft(editor);
+        showNoteStatus('Unsaved…');
         saveTimer = setTimeout(() => saveCurrentNote(), 800);
     });
 
@@ -437,37 +359,50 @@ function autoResize(el) {
     el.style.height = Math.max(el.scrollHeight, window.innerHeight - 160) + 'px';
 }
 
-function saveCurrentNote() {
-    const editor = document.getElementById('note-editor');
-    if (!editor) return;
-
-    const id = editor.dataset.noteId;
-    const content = editor.value;
-    const updatedAt = editor.dataset.updatedAt || '';
-
-    fetch('/notes/save', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        keepalive: true, // let the save complete even if the page is closing
-        body: 'id=' + encodeURIComponent(id)
-            + '&content=' + encodeURIComponent(content)
-            + '&updated_at=' + encodeURIComponent(updatedAt)
-    }).then(r => r.json()).then(data => {
-        if (data.status === 'saved') {
-            editor.dataset.updatedAt = data.updated_at || updatedAt;
-            showNoteStatus('Saved');
-            setTimeout(() => showNoteStatus(''), 2000);
-        } else if (data.status === 'conflict') {
-            showNoteStatus('Conflict — edited on another device. Reload to see latest.');
-        } else {
-            showNoteStatus('Error saving');
-        }
-    }).catch(() => showNoteStatus('Offline — not saved'));
+let noteSavePending = null;
+function storeNoteDraft(editor) {
+    try { sessionStorage.setItem('note-draft-'+editor.dataset.noteId,JSON.stringify({content:editor.value,updatedAt:editor.dataset.updatedAt})); } catch (_) {}
+}
+function restoreNoteDraft(editor) {
+    try { const raw=sessionStorage.getItem('note-draft-'+editor.dataset.noteId); if(raw){const draft=JSON.parse(raw);if(draft.content!==editor.value){editor.value=draft.content;editor.dataset.updatedAt=draft.updatedAt;editor.dataset.dirty='1';showNoteStatus('Unsaved draft restored. Edit to retry saving.');}else sessionStorage.removeItem('note-draft-'+editor.dataset.noteId);} } catch (_) {}
+}
+async function saveCurrentNote() {
+    clearTimeout(saveTimer); saveTimer=null;
+    if(noteSavePending) {
+        if(!await noteSavePending) return false;
+        return saveCurrentNote();
+    }
+    const editor=document.getElementById('note-editor');
+    if(!editor || !editor.dataset.dirty) return true;
+    const content=editor.value, updatedAt=editor.dataset.updatedAt || '';
+    storeNoteDraft(editor);
+    noteSavePending=(async()=>{
+        try {
+            const response=await fetch('/notes/save',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},keepalive:true,body:new URLSearchParams({id:editor.dataset.noteId,content,updated_at:updatedAt})});
+            if(response.redirected) throw new Error('Session expired — sign in to save your draft.');
+            const data=await response.json();
+            if(data.status==='conflict'){showNoteStatus('Edited on another device. Your draft is kept here; copy it before reloading the latest version.');return false;}
+            if(!response.ok||data.status!=='saved') throw new Error('Could not save — your draft is kept here.');
+            editor.dataset.updatedAt=data.updated_at || updatedAt;
+            if(editor.value===content){delete editor.dataset.dirty;try{sessionStorage.removeItem('note-draft-'+editor.dataset.noteId);}catch(_){}showNoteStatus('Saved');}else{storeNoteDraft(editor);}
+            return true;
+        } catch(error){showNoteStatus(error.message || 'Offline — your draft is kept here.');return false;}
+    })();
+    const ok=await noteSavePending;noteSavePending=null;return ok;
 }
 
 function showNoteStatus(msg) {
     const el = document.getElementById('note-status');
     if (el) el.textContent = msg;
+}
+
+async function saveBeforeNoteAction() {
+    const saved = await saveCurrentNote();
+    if (!saved || document.getElementById('note-editor')?.dataset.dirty) {
+        showToast('Save or copy your current draft before changing notes.');
+        return false;
+    }
+    return true;
 }
 
 // If the tab is being hidden or closed with an edit still in the debounce
@@ -503,10 +438,10 @@ function filterNotes(query) {
     });
 }
 
-function selectNote(id) {
-    const panel = document.getElementById('note-picker-panel');
-    if (panel) panel.hidden = true;
-    htmx.ajax('GET', '/notes?id=' + id, '#notes-content');
+async function selectNote(id) {
+    if(!await saveBeforeNoteAction()) return;
+    const panel=document.getElementById('note-picker-panel');if(panel)panel.hidden=true;
+    htmx.ajax('GET','/notes?id='+id,'#notes-content');
 }
 
 document.addEventListener('click', function(e) {
@@ -564,6 +499,7 @@ function showPrompt(label, defaultValue = '') {
 async function createNote() {
     const title = await showPrompt('Note name');
     if (!title) return;
+    if (!await saveBeforeNoteAction()) return;
     htmx.ajax('POST', '/notes/create', {
         target: '#notes-content',
         values: { title }
@@ -612,6 +548,7 @@ async function deleteNote() {
     if (!editor) return;
     const ok = await showConfirm('Archive this note?');
     if (!ok) return;
+    if (!await saveBeforeNoteAction()) return;
     htmx.ajax('POST', '/notes/delete', {
         target: '#notes-content',
         values: { id: editor.dataset.noteId }
@@ -625,107 +562,11 @@ async function renameNote() {
     const current = label ? label.textContent.trim() : '';
     const title = await showPrompt('Rename note', current);
     if (!title || title === current) return;
+    if (!await saveBeforeNoteAction()) return;
     htmx.ajax('POST', '/notes/rename', {
         target: '#notes-content',
         values: { id: editor.dataset.noteId, title }
     });
-}
-
-if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('/static/sw.js', { updateViaCache: 'none' });
-}
-
-// --- Push notification reminders ---
-// The bell subscribes/unsubscribes the current device. Push is only offered
-// where the platform supports it — on iOS that means the app must be installed
-// to the Home Screen, which is exactly when PushManager becomes available.
-function pushSupported() {
-    return 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
-}
-
-function urlBase64ToUint8Array(base64String) {
-    const padding = '='.repeat((4 - base64String.length % 4) % 4);
-    const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
-    const raw = atob(base64);
-    const output = new Uint8Array(raw.length);
-    for (let i = 0; i < raw.length; i++) output[i] = raw.charCodeAt(i);
-    return output;
-}
-
-function setPushBtnState(on) {
-    const btn = document.getElementById('push-toggle-btn');
-    if (!btn) return;
-    btn.classList.toggle('push-on', on);
-    btn.title = on ? 'Reminders on' : 'Reminders off';
-}
-
-async function initPushButton() {
-    const btn = document.getElementById('push-toggle-btn');
-    if (!btn || !pushSupported()) return;
-    btn.hidden = false;
-    try {
-        const reg = await navigator.serviceWorker.ready;
-        const sub = await reg.pushManager.getSubscription();
-        setPushBtnState(!!sub);
-    } catch (e) {
-        setPushBtnState(false);
-    }
-}
-
-async function togglePush() {
-    if (!pushSupported()) return;
-    const reg = await navigator.serviceWorker.ready;
-    const existing = await reg.pushManager.getSubscription();
-
-    // Already on -> turn off.
-    if (existing) {
-        try {
-            await fetch('/push/unsubscribe', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ endpoint: existing.endpoint })
-            });
-            await existing.unsubscribe();
-            setPushBtnState(false);
-            showToast('Reminders off');
-        } catch (e) {
-            showToast('Could not turn off reminders');
-        }
-        return;
-    }
-
-    // Turn on. requestPermission must run inside this click handler (iOS
-    // requires a user gesture), so ask before any awaits that could defer it.
-    let permission;
-    try {
-        permission = await Notification.requestPermission();
-    } catch (e) {
-        permission = Notification.permission;
-    }
-    if (permission !== 'granted') {
-        showToast(permission === 'denied'
-            ? 'Notifications blocked — enable them in your browser settings'
-            : 'Notifications not enabled');
-        return;
-    }
-
-    try {
-        const res = await fetch('/push/public-key');
-        const { key } = await res.json();
-        const sub = await reg.pushManager.subscribe({
-            userVisibleOnly: true,
-            applicationServerKey: urlBase64ToUint8Array(key)
-        });
-        await fetch('/push/subscribe', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(sub)
-        });
-        setPushBtnState(true);
-        showToast('Reminders on');
-    } catch (e) {
-        showToast('Could not enable reminders');
-    }
 }
 
 // --- Calendar button for todo due date ---
@@ -815,7 +656,8 @@ function hideArchive() {
     document.getElementById('archive-btn').classList.remove('active');
 }
 
-function showNotesArchive() {
+async function showNotesArchive() {
+    if (!await saveBeforeNoteAction()) return;
     htmx.ajax('GET', '/notes/archive', '#notes-content');
 }
 
@@ -991,18 +833,14 @@ function bindInactivityActions(timeoutMs) {
 }
 
 function refreshCurrentView() {
-    const activeMode = document.querySelector('.bottom-nav-btn.active')?.dataset.mode || 'todos';
-    if (activeMode === 'todos') {
-        const activeCat = document.querySelector('#tab-bar .tab.active')?.dataset.cat || 'groceries';
-        preserveScroll();
-        switchTab(activeCat, document.querySelector(`[data-cat="${activeCat}"]`));
-    } else if (activeMode === 'notes') {
-        const noteId = document.getElementById('note-editor')?.dataset.noteId;
-        if (noteId) { preserveScroll(); loadNote(noteId); }
-    } else if (activeMode === 'habits') {
-        preserveScroll();
-        htmx.ajax('GET', '/habits', '#habits-content');
+    const mode=document.body.dataset.mode || 'todos';
+    if(mode==='todos' && !document.querySelector('#todo-items .archive-header')) refreshWorkspace();
+    if(mode==='notes') {
+        const editor=document.getElementById('note-editor');
+        if(editor && !editor.dataset.dirty && !noteSavePending) { preserveScroll(); loadNote(editor.dataset.noteId); }
     }
+    if(mode==='habits') { preserveScroll(); htmx.ajax('GET','/habits','#habits-content'); }
+    if(typeof preparePush==='function') preparePush();
 }
 
 // Restore the window scroll position after the next htmx swap settles. Swapping
@@ -1310,14 +1148,10 @@ document.addEventListener('keydown', function(e) {
 function openNoteResult(id) {
     closeSearch();
     switchMode('notes');
-    htmx.ajax('GET', '/notes?id=' + id, '#notes-content');
+    selectNote(id);
 }
 
-function openTodoResult(category) {
-    closeSearch();
-    switchMode('todos');
-    switchTab(category, document.querySelector('[data-cat="' + category + '"]'));
-}
+function openTodoResult(category,id) { closeSearch(); switchMode('todos'); openTask(id); }
 
 document.addEventListener('keydown', function(e) {
     if (e.key !== 'Escape') return;
@@ -1333,5 +1167,5 @@ document.addEventListener('DOMContentLoaded', function() {
     setupInactivityLogout();
     updateTopbarStat();
     updateHabitsBadge();
-    initPushButton();
+
 });

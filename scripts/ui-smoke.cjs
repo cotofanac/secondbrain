@@ -1,0 +1,103 @@
+// Run only against a disposable local database; this creates sample content.
+const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
+const assert = require('node:assert/strict');
+const base = process.env.TEST_BASE_URL || 'http://127.0.0.1:18080';
+(async () => {
+ const browser = await chromium.launch({headless:true,executablePath:process.env.TEST_BROWSER});
+ const context = await browser.newContext({viewport:{width:1280,height:900}});
+ const page = await context.newPage(); const errors=[];
+ page.on('pageerror',e=>errors.push(e.message));
+ await page.goto(base);
+ await page.locator('[name=passcode]').fill(process.env.TEST_PASSCODE || '12345678');
+ await page.waitForURL(url=>url.pathname==='/',{waitUntil:'networkidle'});
+ await page.locator('#capture-tasks [name=text]').fill('Call the driving school');
+ await page.locator('#capture-tasks button[type=submit], #capture-tasks button.add-circle').click();
+ await page.getByRole('button',{name:'Call the driving school',exact:true}).waitFor();
+ assert.equal(await page.locator('#capture-tasks [name=text]').inputValue(),'');
+ await page.locator('#section-projects > summary').click();
+ await page.getByRole('button',{name:'New project',exact:true}).click();
+ await page.locator('#custom-dialog-input').fill('Car');await page.locator('#custom-dialog-confirm').click();
+ await page.locator('.project-group > summary').filter({hasText:'Car'}).click();
+ await page.getByRole('button',{name:'Stage',exact:true}).click();
+ await page.locator('#custom-dialog-input').fill('Driving licence');await page.locator('#custom-dialog-confirm').click();
+ await page.locator('.stage-group > summary').filter({hasText:'Driving licence'}).click();
+ const capture=page.locator('.stage-group .capture-form');await capture.locator('[name=text]').fill('Book lessons');await capture.locator('button.add-circle').click();
+ await page.getByRole('button',{name:'Book lessons',exact:true}).click();
+ await page.locator('#task-detail-form [name=due_date]').fill('2026-10-01');await page.locator('#task-detail-form button.btn-primary').click();
+ // A response must not overwrite text entered after the request was sent.
+ let releaseTask;const heldTask=new Promise(resolve=>releaseTask=resolve);
+ await page.route('**/task/save',async route=>{const response=await route.fetch();await heldTask;await route.fulfill({response});});
+ const taskRequest=page.waitForRequest('**/task/save');
+ await page.locator('#task-detail-form button.btn-primary').click();await taskRequest;
+ await page.locator('#task-detail-form [name=text]').fill('Draft typed during save');releaseTask();
+ await page.locator('.detail-save-status').filter({hasText:'newer edits'}).waitFor();
+ assert.equal(await page.locator('#task-detail-form [name=text]').inputValue(),'Draft typed during save');
+ await page.unroute('**/task/save');
+ await page.getByRole('button',{name:'Cancel edits',exact:true}).click();
+ await page.waitForFunction(()=>document.querySelector('#task-detail-form [name=text]').value==='Book lessons');
+ await page.getByRole('button',{name:'Close details',exact:true}).click();
+ // Completion and reopening preserve the task and collapsed state.
+ await page.getByRole('button',{name:'Complete Book lessons',exact:true}).click();
+ await page.locator('.stage-group .completed-group > summary').click();
+ await page.getByRole('button',{name:'Reopen Book lessons',exact:true}).click();
+ await page.getByRole('button',{name:'Book lessons',exact:true}).waitFor();
+ // Draft survives another task's mutation and a refresh.
+ await page.locator('#capture-tasks [name=text]').fill('Keep this draft');
+ await page.evaluate(()=>refreshWorkspace());
+ assert.equal(await page.locator('#capture-tasks [name=text]').inputValue(),'Keep this draft');
+ await page.locator('#capture-tasks [name=text]').fill('');
+ await page.getByRole('button',{name:'Project details',exact:true}).click();
+ await page.getByRole('button',{name:'Link note',exact:true}).click();
+ await page.getByRole('button',{name:'Quick Notes',exact:true}).waitFor();
+ await page.screenshot({path:'/private/tmp/secondbrain-desktop.png',fullPage:true});
+ await page.getByRole('button',{name:'Close details',exact:true}).click();
+ for (const width of [320,375,390,430,1024,1440]) {
+  await page.setViewportSize({width,height:900});
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth && document.getElementById('app').getBoundingClientRect().right<=innerWidth),true,'horizontal overflow '+width);
+  if(width===390)await page.screenshot({path:'/private/tmp/secondbrain-iphone.png',fullPage:true});
+ }
+ await page.setViewportSize({width:390,height:844});
+ await page.getByRole('button',{name:'Book lessons',exact:true}).click();
+ await page.locator('#task-detail-form').waitFor();
+ assert.equal(await page.locator('#detail-pane').evaluate(el=>{const b=el.getBoundingClientRect();return b.left>=0&&b.right<=innerWidth&&b.top>=0&&b.bottom<=innerHeight}),true,'mobile details overflow');
+ await page.getByRole('button',{name:'Close details',exact:true}).click();
+ await page.evaluate(()=>document.documentElement.style.fontSize='24px');
+ assert.equal(await page.evaluate(()=>document.getElementById('app').getBoundingClientRect().right<=innerWidth),true,'large-text overflow');
+ await page.evaluate(()=>document.documentElement.style.fontSize='');
+ await page.setViewportSize({width:1280,height:900});
+ await page.getByRole('button',{name:'Notes',exact:true}).click();
+ assert.equal(await page.locator('#note-picker-panel').isVisible(),true,'Mac note list missing');
+ await page.locator('#note-editor').fill('A note that should survive refresh.');
+ await page.waitForFunction(()=>!document.getElementById('note-editor').dataset.dirty);
+ await page.evaluate(()=>refreshCurrentView());
+ await page.waitForTimeout(200);
+ assert.equal(await page.locator('#note-editor').inputValue(),'A note that should survive refresh.');
+ await page.locator('#note-editor').focus();await page.locator('#note-editor').evaluate(el=>el.setSelectionRange(3,9));
+ const noteRefresh=page.waitForResponse(response=>response.url().includes('/notes?id='));await page.evaluate(()=>refreshCurrentView());await noteRefresh;
+ await page.waitForFunction(()=>document.getElementById('note-editor').selectionStart===3&&document.getElementById('note-editor').selectionEnd===9);
+ await page.keyboard.press('Meta+k');assert.equal(await page.locator('#search-input').evaluate(el=>el===document.activeElement),true);await page.keyboard.press('Escape');
+ assert.equal(await page.evaluate(()=>document.body.dataset.mode),'notes');
+ // Delay the fetch response in-page: service-worker requests do not always
+ // produce Playwright page request events.
+ await page.evaluate(()=>{
+  window.smokeOriginalFetch=window.fetch;let count=0;
+  window.fetch=async(...args)=>{const response=await window.smokeOriginalFetch(...args);if(args[0]==='/notes/save'&&++count===1)await new Promise(resolve=>window.smokeReleaseNote=resolve);return response;};
+ });
+ await page.locator('#note-editor').fill('First note revision');await page.evaluate(()=>{void saveCurrentNote();});
+ await page.waitForFunction(()=>typeof window.smokeReleaseNote==='function');
+ await page.locator('#note-editor').fill('Newer note revision');await page.evaluate(()=>window.smokeReleaseNote());
+ await page.waitForFunction(()=>!document.getElementById('note-editor').dataset.dirty);
+ assert.equal(await page.locator('#note-editor').inputValue(),'Newer note revision');
+ await page.evaluate(()=>{window.fetch=window.smokeOriginalFetch;delete window.smokeOriginalFetch;delete window.smokeReleaseNote;});
+ await page.evaluate(()=>openSettings());
+ await page.locator('.secondary-settings > summary').click();
+ await page.locator('#schedule-form').waitFor();
+ await page.locator('[name=review_enabled]').check();await page.getByRole('button',{name:'Save schedule',exact:true}).click();
+ await page.waitForTimeout(200);assert.equal(await page.locator('[name=review_enabled]').isChecked(),true);
+ await page.evaluate(()=>openReview());await page.getByRole('heading',{name:'Your week so far'}).waitFor();
+ // Root service worker must become ready, unlike the old /static/ scope.
+ const scope=await page.evaluate(async()=> (await navigator.serviceWorker.ready).scope);assert.equal(scope,base+'/');
+ await page.emulateMedia({colorScheme:'dark'});await page.screenshot({path:'/private/tmp/secondbrain-review-dark.png',fullPage:true});
+ assert.deepEqual(errors,[],'browser errors');
+ await browser.close();console.log('UI smoke passed: projects, stages, task editing, completion, drafts, notes, notifications, review, root worker, six viewport widths.');
+})().catch(error=>{console.error(error);process.exit(1)});

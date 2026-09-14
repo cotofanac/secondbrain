@@ -57,11 +57,11 @@ var (
 // one of them changes.
 func computeAssetVersion() string {
 	h := sha256.New()
-	for _, name := range []string{"static/app.js", "static/style.css", "static/htmx.min.js"} {
+	for _, name := range []string{"static/app.js", "static/style.css", "static/htmx.min.js", "static/workspace.js", "static/push.js", "static/sw.js", "static/manifest.json"} {
 		b, err := staticFiles.ReadFile(name)
 		if err != nil {
 			// Fall back to a build-time value so the app still boots.
-			return strconv.FormatInt(time.Now().Unix(), 16)
+			return strconv.FormatInt(appNow().Unix(), 16)
 		}
 		h.Write(b)
 	}
@@ -109,6 +109,13 @@ func renderTemplate(w http.ResponseWriter, name string, data any) {
 
 func securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Bound every state-changing request before FormValue or a JSON decoder
+		// reads it. Notes allow up to 1 MB, leaving room for form encoding while
+		// preventing an authenticated or accidental oversized upload from
+		// consuming unbounded memory or temporary disk space.
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			r.Body = http.MaxBytesReader(w, r.Body, 2<<20)
+		}
 		// CSRF defense-in-depth on top of the SameSite=Strict cookie: reject
 		// state-changing requests whose Origin doesn't match this host. A
 		// missing Origin (non-browser clients, some same-origin GETs) is allowed.
@@ -156,7 +163,11 @@ func sameOrigin(r *http.Request) bool {
 	if err != nil {
 		return false
 	}
-	return u.Host == r.Host
+	expectedScheme := "http"
+	if isHTTPS(r) {
+		expectedScheme = "https"
+	}
+	return strings.EqualFold(u.Scheme, expectedScheme) && strings.EqualFold(u.Host, r.Host)
 }
 
 func handleHealth(w http.ResponseWriter, _ *http.Request) {
@@ -174,7 +185,7 @@ func handleHealth(w http.ResponseWriter, _ *http.Request) {
 // METHOD /path STATUS duration
 func loggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		start := time.Now()
+		start := appNow()
 		rw := &responseWriter{ResponseWriter: w, status: http.StatusOK}
 		next.ServeHTTP(rw, r)
 		// skip noisy static-asset lines in logs
@@ -194,36 +205,20 @@ func (rw *responseWriter) WriteHeader(code int) {
 	rw.ResponseWriter.WriteHeader(code)
 }
 
-// archiveStaleTodos files away to-dos that are over a week old and no longer
-// upcoming: a task keeps its place until its due date has passed (or it never
-// had one).
-//
-// today must be the *local* date. due_date stores the calendar date the user
-// picked, so comparing it against SQLite's date('now') — which is UTC — archives
-// a task on the evening of the very day it is due for any timezone behind UTC.
-// The age test stays in SQLite because created_at is a UTC CURRENT_TIMESTAMP,
-// so both sides of that comparison are already UTC. Same reasoning as the
-// habit-log floor in loadHabits.
-func archiveStaleTodos(today time.Time) (int64, error) {
-	res, err := db.Exec(`
-		UPDATE todos SET archived = 1, archived_at = CURRENT_TIMESTAMP
-		WHERE category = 'todo'
-		  AND archived = 0
-		  AND created_at <= datetime('now', '-7 days')
-		  AND (due_date = '' OR due_date < ?)`,
-		today.Format("2006-01-02"),
-	)
+// Completed tasks tidy away seven days after completion; unfinished work stays.
+func archiveStaleTodos(now time.Time) (int64, error) {
+	res, err := db.Exec(`UPDATE todos SET archived=1, archived_at=CURRENT_TIMESTAMP
+ WHERE category='todo' AND archived=0 AND done=1 AND archive_after IS NOT NULL AND archive_after<=?`, now.UTC().Format(time.RFC3339))
 	if err != nil {
 		return 0, err
 	}
-	n, _ := res.RowsAffected()
-	return n, nil
+	return res.RowsAffected()
 }
 
 func startAutoArchiveTodos() {
 	go func() {
 		for {
-			if n, err := archiveStaleTodos(time.Now()); err != nil {
+			if n, err := archiveStaleTodos(appNow()); err != nil {
 				log.Printf("Auto-archive failed: %v", err)
 			} else if n > 0 {
 				log.Printf("Auto-archived %d todo items", n)
@@ -257,6 +252,7 @@ func main() {
 	defer db.Close()
 
 	initPush()
+	initScheduleSettings()
 
 	funcMap := template.FuncMap{
 		"formatDate": func(s string) string {
@@ -276,11 +272,11 @@ func main() {
 			if !ok {
 				return ""
 			}
-			t = t.In(time.Local)
+			t = t.In(appLocation())
 			if time.Since(t) < 24*time.Hour {
 				return t.Format("3:04 PM")
 			}
-			if t.Year() == time.Now().Year() {
+			if t.Year() == appNow().Year() {
 				return t.Format("Jan 2")
 			}
 			return t.Format("Jan 2, 2006")
@@ -291,7 +287,7 @@ func main() {
 			}
 			// Compare ISO date strings so "today" follows the local timezone;
 			// time.Truncate works in UTC and flips dates a few hours early/late.
-			return s < time.Now().Format("2006-01-02")
+			return s < appNow().Format("2006-01-02")
 		},
 		"todoArchiveHint": func(createdAt, dueDate string) string {
 			if createdAt == "" {
@@ -299,7 +295,7 @@ func main() {
 			}
 			// A task due today or later isn't eligible for auto-archive yet,
 			// so don't tease an archive countdown for it.
-			if dueDate != "" && dueDate >= time.Now().Format("2006-01-02") {
+			if dueDate != "" && dueDate >= appNow().Format("2006-01-02") {
 				return ""
 			}
 			t, ok := parseDBTime(createdAt)
@@ -364,6 +360,7 @@ func main() {
 	swSource, _ := staticFiles.ReadFile("static/sw.js")
 	swBody := bytes.ReplaceAll(swSource, []byte("__ASSET_VERSION__"), []byte(assetVersion))
 	http.HandleFunc("/static/sw.js", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Service-Worker-Allowed", "/")
 		w.Header().Set("Content-Type", "application/javascript")
 		w.Header().Set("Cache-Control", "no-cache")
 		w.Write(swBody)
@@ -374,6 +371,9 @@ func main() {
 	http.HandleFunc("/", authMiddleware(handleIndex))
 	http.HandleFunc("/login", handleLogin)
 	http.HandleFunc("/logout", handleLogout)
+
+	registerWorkspaceRoutes()
+	registerScheduleRoutes()
 
 	// Todo API
 	http.HandleFunc("/todos", authMiddleware(handleTodos))
@@ -558,6 +558,9 @@ func initDB() {
 		db.Exec("INSERT INTO notes (title, content) VALUES (?, ?)", "Quick Notes", "")
 		log.Printf("Database initialized with default note")
 	}
+	if err := migrateWorkspace(db, appNow()); err != nil {
+		log.Fatalf("Database migration failed: %v", err)
+	}
 	log.Printf("Database ready")
 }
 
@@ -572,14 +575,18 @@ func generateToken() string {
 	return hex.EncodeToString(b)
 }
 
-func createSession() string {
-	db.Exec("DELETE FROM sessions WHERE expires_at <= datetime('now')")
+func createSession() (string, error) {
+	if _, err := db.Exec("DELETE FROM sessions WHERE expires_at <= datetime('now')"); err != nil {
+		return "", err
+	}
 	token := generateToken()
 	// Store in SQLite's datetime format so string comparison against
 	// datetime('now') is correct (see the migration note in initDB).
-	expiry := time.Now().UTC().Add(sessionDuration).Format("2006-01-02 15:04:05")
-	db.Exec("INSERT INTO sessions (token, expires_at, last_seen) VALUES (?, ?, datetime('now'))", token, expiry)
-	return token
+	expiry := appNow().UTC().Add(sessionDuration).Format("2006-01-02 15:04:05")
+	if _, err := db.Exec("INSERT INTO sessions (token, expires_at, last_seen) VALUES (?, ?, datetime('now'))", token, expiry); err != nil {
+		return "", err
+	}
+	return token, nil
 }
 
 func validSession(token string) bool {
@@ -632,6 +639,13 @@ func authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		token := getSessionToken(r)
 		if !validSession(token) {
+			if r.Method == "GET" && r.URL.Path == "/" && r.URL.RawQuery != "" {
+				http.SetCookie(w, &http.Cookie{Name: "return_to", Value: url.QueryEscape(r.URL.RequestURI()), Path: "/", HttpOnly: true, Secure: isHTTPS(r), SameSite: http.SameSiteStrictMode, MaxAge: 600})
+			}
+			if strings.HasPrefix(r.URL.Path, "/push/") {
+				writeJSONError(w, 401, "Session expired. Sign in and try again.")
+				return
+			}
 			if r.Header.Get("HX-Request") == "true" {
 				w.Header().Set("HX-Redirect", "/login")
 				w.WriteHeader(http.StatusUnauthorized)
@@ -679,7 +693,7 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 		isHTMX := r.Header.Get("HX-Request") == "true"
 
 		loginMu.Lock()
-		blocked := time.Now().Before(loginBlocked)
+		blocked := appNow().Before(loginBlocked)
 		loginMu.Unlock()
 		if blocked {
 			log.Printf("Login blocked (lockout active) from %s", r.RemoteAddr)
@@ -691,7 +705,7 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 			loginMu.Lock()
 			loginFailures++
 			if loginFailures >= maxLoginFailures {
-				loginBlocked = time.Now().Add(loginLockout)
+				loginBlocked = appNow().Add(loginLockout)
 				loginFailures = 0
 				log.Printf("Login lockout engaged for %s after repeated failures", loginLockout)
 			}
@@ -706,7 +720,12 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 		loginMu.Unlock()
 
 		log.Printf("Successful login from %s", r.RemoteAddr)
-		token := createSession()
+		token, err := createSession()
+		if err != nil {
+			log.Printf("Create session: %v", err)
+			http.Error(w, "Could not start session", http.StatusInternalServerError)
+			return
+		}
 		http.SetCookie(w, &http.Cookie{
 			Name:     "session",
 			Value:    token,
@@ -716,11 +735,18 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 			SameSite: http.SameSiteStrictMode,
 			MaxAge:   int(sessionDuration.Seconds()),
 		})
+		destination := "/"
+		if c, err := r.Cookie("return_to"); err == nil {
+			if v, e := url.QueryUnescape(c.Value); e == nil && strings.HasPrefix(v, "/?") {
+				destination = v
+			}
+			http.SetCookie(w, &http.Cookie{Name: "return_to", Path: "/", MaxAge: -1, HttpOnly: true})
+		}
 		if isHTMX {
-			w.Header().Set("HX-Redirect", "/")
+			w.Header().Set("HX-Redirect", destination)
 			w.WriteHeader(http.StatusOK)
 		} else {
-			http.Redirect(w, r, "/", http.StatusSeeOther)
+			http.Redirect(w, r, destination, http.StatusSeeOther)
 		}
 	}
 }
@@ -784,20 +810,6 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Fetch initial groceries for server-side render
-	rows, err := db.Query(
-		"SELECT id, category, text, due_date, done FROM todos WHERE category = 'groceries' AND archived = 0 ORDER BY done ASC, position ASC, created_at DESC",
-	)
-	var todos []Todo
-	if err == nil {
-		defer rows.Close()
-		for rows.Next() {
-			var t Todo
-			rows.Scan(&t.ID, &t.Category, &t.Text, &t.DueDate, &t.Done)
-			todos = append(todos, t)
-		}
-	}
-
 	// Fetch notes list and current note
 	noteRows, err := db.Query("SELECT id, title FROM notes WHERE archived = 0 ORDER BY title ASC")
 	var notesList []Note
@@ -819,16 +831,24 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 
 	habits := loadHabits()
 
+	workspace, err := loadWorkspace()
+	if err != nil {
+		http.Error(w, "Could not load workspace", 500)
+		return
+	}
+
 	data := struct {
-		Todos                    []Todo
 		Notes                    []Note
 		CurrentNote              Note
 		Habits                   HabitsView
 		InactivityTimeoutSeconds int
+		Timezone                 string
+		Workspace                Workspace
 		GrocerySuggestions       []string
 		ShoppingSuggestions      []string
 	}{
-		Todos:                    todos,
+		Timezone:                 appLocation().String(),
+		Workspace:                workspace,
 		Notes:                    notesList,
 		CurrentNote:              currentNote,
 		Habits:                   groupHabits(habits),
@@ -850,9 +870,15 @@ type Todo struct {
 	Done       bool
 	CreatedAt  string
 	ArchivedAt string
+	ProjectID  int
+	StageID    int
 }
 
 func handleTodos(w http.ResponseWriter, r *http.Request) {
+	if r.Header.Get("HX-Target") == "todo-items" || r.URL.Query().Get("workspace") == "1" {
+		handleWorkspace(w, r)
+		return
+	}
 	category := r.URL.Query().Get("category")
 	if category != "groceries" && category != "todo" && category != "shopping" {
 		category = "groceries"
@@ -963,10 +989,21 @@ func handleAddTodo(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	} else {
-		_, err := db.Exec(
-			"INSERT INTO todos (category, text, due_date) VALUES (?, ?, ?)",
-			category, text, dueDate,
-		)
+		tx, err := db.Begin()
+		if err != nil {
+			http.Error(w, "DB error", 500)
+			return
+		}
+		defer tx.Rollback()
+		project, stage, err := validMembership(tx, r.FormValue("project_id"), r.FormValue("stage_id"))
+		if err != nil {
+			http.Error(w, err.Error(), 400)
+			return
+		}
+		_, err = tx.Exec("INSERT INTO todos (category,text,due_date,project_id,stage_id) VALUES(?,?,?,NULLIF(?,0),NULLIF(?,0))", category, text, dueDate, project, stage)
+		if err == nil {
+			err = tx.Commit()
+		}
 		if err != nil {
 			http.Error(w, "DB error", http.StatusInternalServerError)
 			return
@@ -1025,13 +1062,14 @@ func handleToggleTodo(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var category string
-	err := db.QueryRow("SELECT category FROM todos WHERE id = ?", id).Scan(&category)
+	err := db.QueryRow(`SELECT t.category FROM todos t WHERE t.id=? AND `+activeTaskSQL, id).Scan(&category)
 	if err != nil {
 		http.Error(w, "Not found", http.StatusNotFound)
 		return
 	}
 
-	if _, err := db.Exec("UPDATE todos SET done = CASE WHEN done = 0 THEN 1 ELSE 0 END WHERE id = ?", id); err != nil {
+	if _, err := db.Exec(`UPDATE todos SET completed_at=CASE WHEN done=0 THEN ? ELSE NULL END,
+ archive_after=CASE WHEN done=0 THEN ? ELSE NULL END, done=1-done WHERE id=?`, appNow().UTC().Format(time.RFC3339), appNow().UTC().AddDate(0, 0, 7).Format(time.RFC3339), id); err != nil {
 		http.Error(w, "DB error", http.StatusInternalServerError)
 		return
 	}
@@ -1141,7 +1179,7 @@ func handleRestoreTodo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, err := db.Exec("UPDATE todos SET archived = 0 WHERE id = ?", id); err != nil {
+	if _, err := db.Exec("UPDATE todos SET archived = 0, archive_after=CASE WHEN done=1 THEN ? ELSE NULL END WHERE id = ?", appNow().UTC().AddDate(0, 0, 7).Format(time.RFC3339), id); err != nil {
 		http.Error(w, "DB error", http.StatusInternalServerError)
 		return
 	}
@@ -1530,9 +1568,11 @@ func handleRenameNote(w http.ResponseWriter, r *http.Request) {
 }
 
 type SearchResultData struct {
-	Query string
-	Notes []Note
-	Todos []Todo
+	Query    string
+	Notes    []Note
+	Todos    []Todo
+	Projects []Project
+	Stages   []Stage
 }
 
 func handleSearch(w http.ResponseWriter, r *http.Request) {
@@ -1559,7 +1599,7 @@ func handleSearch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	todoRows, err := db.Query(
-		"SELECT id, category, text FROM todos WHERE archived = 0 AND done = 0 AND text LIKE ? ORDER BY created_at DESC LIMIT 10",
+		`SELECT t.id, t.category, t.text FROM todos t WHERE `+activeTaskSQL+` AND done=0 AND text LIKE ? ORDER BY created_at DESC LIMIT 10`,
 		pattern,
 	)
 	var todos []Todo
@@ -1572,7 +1612,29 @@ func handleSearch(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	renderTemplate(w, "search.html", SearchResultData{Query: q, Notes: notes, Todos: todos})
+	var projects []Project
+	var stages []Stage
+	rows, err := db.Query(`SELECT id,name FROM projects WHERE archived=0 AND completed=0 AND name LIKE ? ORDER BY position,id LIMIT 10`, pattern)
+	if err == nil {
+		for rows.Next() {
+			var p Project
+			if rows.Scan(&p.ID, &p.Name) == nil {
+				projects = append(projects, p)
+			}
+		}
+		rows.Close()
+	}
+	rows, err = db.Query(`SELECT s.id,s.name FROM stages s JOIN projects p ON p.id=s.project_id WHERE s.archived=0 AND p.archived=0 AND p.completed=0 AND s.name LIKE ? ORDER BY s.position,s.id LIMIT 10`, pattern)
+	if err == nil {
+		for rows.Next() {
+			var s Stage
+			if rows.Scan(&s.ID, &s.Name) == nil {
+				stages = append(stages, s)
+			}
+		}
+		rows.Close()
+	}
+	renderTemplate(w, "search.html", SearchResultData{Query: q, Notes: notes, Todos: todos, Projects: projects, Stages: stages})
 }
 
 func handleArchiveNotes(w http.ResponseWriter, r *http.Request) {
@@ -1700,8 +1762,8 @@ func periodStreak(sums map[string]int, now time.Time, period string, target int)
 	return streak
 }
 
-func loadHabits() []Habit {
-	now := time.Now()
+func loadHabits() []Habit { return loadHabitsAt(appNow()) }
+func loadHabitsAt(now time.Time) []Habit {
 	today := now.Format("2006-01-02")
 	rows, err := db.Query(`
 		SELECT id, name, period, target
@@ -1976,7 +2038,7 @@ func handleToggleHabit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	today := time.Now().Format("2006-01-02")
+	today := appNow().Format("2006-01-02")
 	res, err := db.Exec("DELETE FROM habit_logs WHERE habit_id = ? AND date = ?", id, today)
 	if err != nil {
 		http.Error(w, "DB error", http.StatusInternalServerError)
@@ -2010,7 +2072,7 @@ func handleIncrementHabit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	today := time.Now().Format("2006-01-02")
+	today := appNow().Format("2006-01-02")
 	_, err := db.Exec(`
 		INSERT INTO habit_logs (habit_id, date, count) VALUES (?, ?, 1)
 		ON CONFLICT(habit_id, date) DO UPDATE SET count = count + 1
@@ -2042,7 +2104,7 @@ func handleDecrementHabit(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Not found", http.StatusNotFound)
 		return
 	}
-	startStr := startOfPeriod(time.Now(), period).Format("2006-01-02")
+	startStr := startOfPeriod(appNow(), period).Format("2006-01-02")
 
 	var date string
 	var count int

@@ -1,0 +1,11 @@
+<div class="detail-heading"><h2>Task details</h2><button class="icon-button" onclick="closeDetail()" aria-label="Close details">{{template "icon-close"}}</button></div>
+<form id="task-detail-form" class="detail-form" hx-post="/task/save" hx-target="#detail-pane">
+ <input type="hidden" name="id" value="{{.Task.ID}}">
+ <label>Task<input name="text" value="{{.Task.Text}}" maxlength="500" required></label>
+ {{if eq .Task.Category "todo"}}
+ <label>Due date<input type="date" name="due_date" value="{{.Task.DueDate}}"></label>
+ <label>Project<select name="project_id" onchange="filterStageOptions(this.form)"><option value="0">No project</option>{{range .Projects}}<option value="{{.ID}}" {{if eq .ID $.Task.ProjectID}}selected{{end}}>{{.Name}}</option>{{end}}</select></label>
+ <label>Stage<select name="stage_id"><option value="0">No stage</option>{{range .Projects}}{{$pid:=.ID}}{{range .Stages}}{{if not .Archived}}<option data-project="{{$pid}}" value="{{.ID}}" {{if eq .ID $.Task.StageID}}selected{{end}}>{{.Name}}</option>{{end}}{{end}}{{end}}</select></label>
+ {{end}}
+ <button class="btn btn-primary">Save changes</button><button type="button" class="btn" onclick="discardTaskChanges()">Cancel edits</button><p class="detail-save-status" role="status"></p>
+</form>

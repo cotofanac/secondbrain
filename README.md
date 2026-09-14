@@ -10,10 +10,10 @@ Go + HTMX + SQLite  →  one binary  →  your server  →  your data
 
 ## Philosophy
 
-- **One binary, one file.** The whole app compiles to a single executable; all your data is one SQLite file you can copy, back up, or move at will.
-- **No framework tax.** The UI is server-rendered HTML with [HTMX](https://htmx.org) for interactivity. There is no build step, no bundler, no client-side state to debug.
-- **Calm by default.** Chrome gets out of the way — tabs and inputs collapse as you scroll, and there's exactly one credential between you and your data.
-- **Yours, privately.** Nothing leaves your server. No third parties, no analytics, no outbound calls at runtime.
+- **One binary, one file.** The whole app compiles to a single executable; all your data is one SQLite file you can back up using SQLite or copy while the app is stopped.
+- **No framework tax.** The UI is server-rendered HTML with [HTMX](https://htmx.org) for interactivity. There is no build step, no bundler, only a small JavaScript layer for presentation preferences and draft protection.
+- **Calm by default.** Chrome gets out of the way — tasks and projects live in collapsible sections, and there's exactly one credential between you and your data.
+- **Yours, privately.** Nothing leaves your server. No analytics or external content services; optional Web Push contacts device push services.
 
 ## Quick Start
 
@@ -36,7 +36,12 @@ docker compose up -d
 
 **Lists that fit how you actually shop and plan**
 - **Groceries & Buys** — reusable checklists. Re-adding an item un-checks the existing one instead of piling up duplicates, so recurring staples stay a single row.
-- **Tasks** — a focused to-do list with optional due dates, overdue highlighting, and gentle "archives soon" hints. Tasks older than a week tidy themselves away automatically, so the list never becomes a graveyard.
+- **Tasks** — a focused to-do list with optional due dates, overdue highlighting, and gentle "archives soon" hints. Unfinished tasks stay until you archive them. Completed tasks collapse and tidy themselves away seven days after completion.
+
+**Projects without extra navigation**
+- Optional projects with stages and ordinary tasks. Tasks can always stand alone.
+- Link existing research notes, see completion counts, and archive/restore projects without losing their contents.
+- A Mac sidebar and detail pane; compact collapsible sections on iPhone, with automatic light/dark appearance.
 
 **Notes that stay out of your way**
 - Multiple notes with a quick-filter picker and a last-edited timestamp.
@@ -51,7 +56,8 @@ docker compose up -d
 
 **Built like an app**
 - **Installable PWA** — add it to your phone or desktop and launch it from the home screen. A service worker keeps assets fresh across deploys, with cache-busting handled for you.
-- **Push reminders** — an optional daily nudge for unchecked habits and tasks due today, delivered even when the app is closed. One tap on the bell to opt a device in. See [Reminders](#reminders).
+- **Push reminders** — an optional daily nudge for unchecked habits and tasks due today, delivered even when the app is closed. Enable each device from Notifications and send a test to check delivery. See [Reminders](#reminders).
+- **Weekly review** — optional Sunday summary of completed work, project progress, habits, and upcoming tasks, saved locally with a push link.
 - **Archive, restore, and permanent-delete** for tasks, notes, and habits — nothing is lost by accident.
 
 ## Security
@@ -70,18 +76,22 @@ A single passcode, taken seriously:
 | `PORT` | `8080` | Server port |
 | `DATA_DIR` | `./data` | SQLite database location |
 | `INACTIVITY_LOGOUT_MINUTES` | `45` | Auto-logout timeout after inactivity |
-| `HABIT_REMINDER_TIME` | `20:00` | Daily "habits left" push, in `TZ` local time. `off` to disable |
-| `TASK_REMINDER_TIME` | `09:00` | Daily "tasks due today" push, in `TZ` local time. `off` to disable |
+| `HABIT_REMINDER_TIME` | `20:00` | Initial daily habit reminder setting; editable under Notifications → Reminder schedule afterward. `off` to disable initially |
+| `TASK_REMINDER_TIME` | `09:00` | Initial daily task reminder setting; editable under Notifications → Reminder schedule afterward. `off` to disable initially |
 | `PUSH_SUBJECT` | `mailto:secondbrain@localhost` | VAPID contact sent to push services (optional) |
 
 ### Reminders
 
-SecondBrain can send **push notifications** — a nightly nudge when daily habits are still unchecked, and a morning list of tasks due that day. Tap the **bell** in the top bar to turn reminders on for a device; the app remembers the choice per device.
+Open **More (⋯) → Notifications → Enable this device**, grant permission, then choose **Send test notification**. Each installed device subscribes separately. This screen remains available for testing, disabling, or repairing registration and reports the last push-service result; check the device itself to confirm the banner arrived.
 
-- Notifications are **server-sent Web Push**, so they arrive even when the app is closed. No third-party service or account is needed — the server generates its own VAPID keys on first run (stored in the database).
-- **HTTPS is required** (browsers only allow push over a secure origin). `localhost` counts as secure for development.
-- **On iOS (16.4+)** the app must first be **added to the Home Screen**; the bell only appears once push is available.
-- Reminder times use the container's `TZ`. Set either variable to `off` to disable that reminder.
+- Notifications are server-sent Web Push and can arrive while the app is closed. HTTPS is required.
+- On iPhone, launch the installed Home Screen app (iOS 16.4+). Notifications includes installation and blocked-permission guidance.
+- Shared task, habit, and weekly-review schedules are tucked under **Notifications → Reminder schedule**. The shared time zone defaults to Europe/Bucharest.
+- Weekly review is off by default, with Sunday 18:00 selected. Open it from More to see the current week or a saved review.
+- Existing environment reminder times seed the database once; saved settings take precedence afterward.
+- VAPID keys persist in SQLite. Preserve the database across deploys. `PUSH_SUBJECT` can supply a real contact address if needed.
+
+**Upgrading an existing installation?** This update adds database tables and columns and changes task cleanup behavior. Read [database migration, backup, rollback, and device verification instructions](docs/UPGRADE.md) before deploying.
 
 ## Architecture
 
@@ -103,4 +113,4 @@ HTMX is vendored at `static/htmx.min.js` and embedded into the binary, so there'
 
 ## Data & Backup
 
-Everything lives in one SQLite file at `DATA_DIR/secondbrain.db`. To back up or migrate, copy that file — no export, no transformation, no lock-in.
+Everything lives in one SQLite file at `DATA_DIR/secondbrain.db`. Use SQLite’s `.backup` command, or stop the app cleanly before copying it. Do not copy only the main file while WAL writes are active. See [upgrade and backup instructions](docs/UPGRADE.md).

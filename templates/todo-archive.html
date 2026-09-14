@@ -1,6 +1,6 @@
 <div class="archive-header">
     <button class="btn btn-sm btn-back" onclick="hideArchive()">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+        {{template "icon-back"}}
         Back
     </button>
     <span class="archive-title">Archive</span>
@@ -15,12 +15,12 @@
     <form hx-post="/todos/restore" hx-target="#todo-items" hx-swap="innerHTML" class="todo-action">
         <input type="hidden" name="id" value="{{.ID}}">
         <button type="submit" class="btn-restore" title="Restore">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+            {{template "icon-restore"}}
         </button>
     </form>
     <form hx-post="/todos/permanent-delete" hx-target="#todo-items" hx-swap="innerHTML" class="todo-action" hx-confirm="Delete this item forever? This can't be undone.">
         <input type="hidden" name="id" value="{{.ID}}">
-        <button type="submit" class="del-btn" title="Delete forever" aria-label="Delete forever"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+        <button type="submit" class="del-btn" title="Delete forever" aria-label="Delete forever">{{template "icon-delete"}}</button>
     </form>
 </div>
 {{else}}

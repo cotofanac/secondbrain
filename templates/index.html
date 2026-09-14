@@ -2,28 +2,27 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="theme-color" content="#0f0f0f">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="theme-color" content="#f7f8fa" media="(prefers-color-scheme: light)"><meta name="theme-color" content="#111315" media="(prefers-color-scheme: dark)">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <title>SecondBrain</title>
     <link rel="manifest" href="/static/manifest.json">
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
-    <link rel="apple-touch-icon" href="/static/icon-192.svg">
+    <link rel="apple-touch-icon" href="/static/icon-192.png">
     <link rel="stylesheet" href="/static/style.css?v={{assetVersion}}">
 </head>
-<body data-inactivity-timeout-seconds="{{.InactivityTimeoutSeconds}}">
+<body data-timezone="{{.Timezone}}" data-inactivity-timeout-seconds="{{.InactivityTimeoutSeconds}}">
     <div id="app">
     <!-- Top nav: mode switcher -->
     <header class="topbar" id="topbar">
         <span class="topbar-title" id="topbar-title">Tasks</span>
         <span class="topbar-stat" id="topbar-stat"></span>
-        <button type="button" class="logout-btn push-toggle-btn" id="push-toggle-btn" onclick="togglePush()" title="Reminders" aria-label="Toggle reminders" hidden>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
-        </button>
+        <button class="header-action icon-button" onclick="openSearch()" aria-label="Search">{{template "icon-search"}}</button>
+        <details class="app-menu"><summary class="icon-button" aria-label="More options">{{template "icon-more"}}</summary><div class="menu-panel"><button class="action-with-icon" onclick="openReview()">{{template "icon-calendar"}}<span>Weekly review</span></button><button class="action-with-icon" onclick="openSettings()">{{template "icon-settings"}}<span>Notifications</span></button></div></details>
         <form method="post" action="/logout" class="logout-form">
             <button type="submit" class="logout-btn" title="Logout" aria-label="Logout">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+                {{template "icon-logout"}}
             </button>
         </form>
     </header>
@@ -31,142 +30,28 @@
     <!-- Search overlay -->
     <div id="search-overlay" class="search-overlay">
         <div class="search-bar">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="search-icon"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <span class="search-icon">{{template "icon-search"}}</span>
             <input type="text" id="search-input" class="search-input"
-                   placeholder="Search notes and tasks..."
+                   placeholder="Search tasks, projects and notes…"
                    hx-get="/search" hx-trigger="input changed delay:200ms"
                    hx-target="#search-results" hx-swap="innerHTML"
                    name="q" autocomplete="off">
             <button type="button" class="btn-icon search-close" onclick="closeSearch()" aria-label="Close search">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                {{template "icon-close"}}
             </button>
         </div>
         <div id="search-results" class="search-results"></div>
     </div>
 
-    <!-- Todos view -->
-    <main id="todos-view" class="view active">
-        <!-- Category tabs -->
-        <div class="tab-bar" id="tab-bar">
-            <div class="tab-group">
-                <button class="tab active" data-cat="groceries" onclick="switchTab('groceries', this)">
-                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg>
-                    Groceries
-                </button>
-                <button class="tab" data-cat="shopping" onclick="switchTab('shopping', this)">
-                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 0 1-8 0"/></svg>
-                    Buys
-                </button>
-                <button class="tab" data-cat="todo" onclick="switchTab('todo', this)">
-                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
-                    To-Do
-                </button>
-            </div>
-            <button class="btn-icon tab-archive" id="clear-checked-btn" onclick="clearChecked()" title="Reset list">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
-            </button>
-            <button class="btn-icon tab-archive" id="archive-btn" onclick="showArchive()" title="Archive">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
-            </button>
-        </div>
-
-        <!-- Add form -->
-        <div class="add-form" id="add-form">
-            <form hx-post="/todos/add" hx-target="#todo-items" hx-swap="innerHTML" class="add-row">
-                <input type="hidden" name="category" id="add-category" value="groceries">
-                <input type="text" name="text" placeholder="Add item..." class="add-input" list="grocery-suggestions" autocomplete="off" required>
-                <div class="calendar-wrap" id="calendar-wrap" style="display:none">
-                    <button type="button" class="btn btn-icon calendar-btn" id="calendar-btn" title="Due date">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
-                            <line x1="16" y1="2" x2="16" y2="6"/>
-                            <line x1="8" y1="2" x2="8" y2="6"/>
-                            <line x1="3" y1="10" x2="21" y2="10"/>
-                        </svg>
-                    </button>
-                    <input type="date" name="due_date" class="add-date" id="add-date">
-                </div>
-                <button type="submit" class="btn btn-add">+</button>
-            </form>
-        </div>
-
-        <datalist id="grocery-suggestions">
-            {{range .GrocerySuggestions}}<option value="{{.}}">{{end}}
-        </datalist>
-        <datalist id="shopping-suggestions">
-            {{range .ShoppingSuggestions}}<option value="{{.}}">{{end}}
-        </datalist>
-
-        <!-- Todo list -->
-        <div id="todo-items">
-            {{range .Todos}}
-            <div class="todo-item {{if .Done}}done{{end}}">
-                <form hx-post="/todos/toggle" hx-target="#todo-items" hx-swap="innerHTML" class="todo-check">
-                    <input type="hidden" name="id" value="{{.ID}}">
-                    <button type="submit" class="check-btn {{if .Done}}checked{{end}}" aria-label="Toggle done">
-                        <svg class="icon-unchecked" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="12" cy="12" r="9"/></svg>
-                        <svg class="icon-checked" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
-                    </button>
-                </form>
-                <span class="todo-text">{{.Text}}</span>
-                {{if .DueDate}}
-                <span class="todo-date {{if and (not .Done) (isOverdue .DueDate)}}overdue{{end}}">{{formatDate .DueDate}}</span>
-                {{end}}
-                <form hx-post="/todos/delete" hx-target="#todo-items" hx-swap="innerHTML" class="todo-del">
-                    <input type="hidden" name="id" value="{{.ID}}">
-                    <button type="submit" class="del-btn" aria-label="Delete item"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
-                </form>
-            </div>
-            {{else}}
-            <div class="empty-state">No items yet</div>
-            {{end}}
-        </div>
-    </main>
+    <main id="todos-view" class="view active"><div class="task-layout"><div id="todo-items">{{template "workspace.html" .Workspace}}</div><aside id="detail-pane" class="detail-pane" aria-label="Details" hidden></aside></div>
+    <datalist id="grocery-suggestions">{{range .GrocerySuggestions}}<option value="{{.}}">{{end}}</datalist><datalist id="shopping-suggestions">{{range .ShoppingSuggestions}}<option value="{{.}}">{{end}}</datalist></main>
+    <main id="settings-view" class="view"><div id="settings-content"></div></main>
+    <main id="review-view" class="view"><div id="review-content"></div></main>
 
     <!-- Notes view -->
     <main id="notes-view" class="view">
         <div id="notes-content">
-            <div class="notes-toolbar">
-                <div class="note-picker" id="note-picker">
-                    <button type="button" class="note-picker-btn" onclick="toggleNotePicker()">
-                        <span class="note-picker-label">{{.CurrentNote.Title}}</span>
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
-                    </button>
-                    <div class="note-picker-panel" id="note-picker-panel" hidden>
-                        <input type="text" class="note-picker-search" id="note-picker-search"
-                               placeholder="Filter notes..." autocomplete="off"
-                               oninput="filterNotes(this.value)">
-                        <div class="note-picker-list">
-                            {{range .Notes}}
-                            <button type="button" class="note-picker-item {{if eq .ID $.CurrentNote.ID}}active{{end}}"
-                                    data-title="{{.Title}}" onclick="selectNote({{.ID}})">{{.Title}}</button>
-                            {{end}}
-                        </div>
-                    </div>
-                </div>
-                <div class="notes-actions">
-                    <button class="btn btn-icon" onclick="createNote()" title="New note">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-                    </button>
-                    <button class="btn btn-icon" onclick="renameNote()" title="Rename">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
-                    </button>
-                    <button class="btn btn-icon btn-danger" onclick="deleteNote()" title="Delete">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-                    </button>
-                    <button class="btn btn-icon" onclick="showNotesArchive()" title="Archive">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
-                    </button>
-                </div>
-            </div>
-            <div class="note-meta">
-                <span id="note-status" class="note-status"></span>
-                {{if .CurrentNote.UpdatedAt}}<span class="note-updated">{{formatUpdated .CurrentNote.UpdatedAt}}</span>{{end}}
-            </div>
-            <textarea id="note-editor" class="note-editor"
-                      data-note-id="{{.CurrentNote.ID}}"
-                      data-updated-at="{{.CurrentNote.UpdatedAt}}"
-                      placeholder="Start typing... 1. list, *bold*, _italic_, [] checkbox">{{.CurrentNote.Content}}</textarea>
+            {{template "notes.html" .}}
         </div>
     </main>
 
@@ -215,16 +100,16 @@
 
     <nav class="bottom-nav" id="bottom-nav">
         <button class="bottom-nav-btn active" data-mode="todos" onclick="switchMode('todos')">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+            {{template "icon-tasks"}}
             <span>Tasks</span>
         </button>
         <button class="bottom-nav-btn" data-mode="notes" onclick="switchMode('notes')">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+            {{template "icon-notes"}}
             <span>Notes</span>
         </button>
         <button class="bottom-nav-btn" data-mode="habits" onclick="switchMode('habits')">
             <span class="nav-btn-icon-wrap">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                {{template "icon-habits"}}
                 <span class="nav-badge" id="habits-badge" hidden></span>
             </span>
             <span>Habits</span>
@@ -233,5 +118,7 @@
 
     <script src="/static/htmx.min.js?v={{assetVersion}}"></script>
     <script src="/static/app.js?v={{assetVersion}}"></script>
+    <script src="/static/workspace.js?v={{assetVersion}}"></script>
+    <script src="/static/push.js?v={{assetVersion}}"></script>
 </body>
 </html>

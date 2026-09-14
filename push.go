@@ -1,9 +1,7 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"net"
 	"net/http"
@@ -189,7 +187,7 @@ func isPublicIP(ip net.IP) bool {
 
 func saveSubscription(s webpush.Subscription) error {
 	_, err := db.Exec(
-		"INSERT OR REPLACE INTO push_subscriptions (endpoint, p256dh, auth) VALUES (?, ?, ?)",
+		"INSERT INTO push_subscriptions (endpoint, p256dh, auth) VALUES (?, ?, ?) ON CONFLICT(endpoint) DO UPDATE SET p256dh=excluded.p256dh,auth=excluded.auth",
 		s.Endpoint, s.Keys.P256dh, s.Keys.Auth,
 	)
 	return err
@@ -199,24 +197,6 @@ func deleteSubscription(endpoint string) {
 	db.Exec("DELETE FROM push_subscriptions WHERE endpoint = ?", endpoint)
 }
 
-func loadSubscriptions() []webpush.Subscription {
-	rows, err := db.Query("SELECT endpoint, p256dh, auth FROM push_subscriptions")
-	if err != nil {
-		log.Printf("push: load subscriptions: %v", err)
-		return nil
-	}
-	defer rows.Close()
-	var subs []webpush.Subscription
-	for rows.Next() {
-		var s webpush.Subscription
-		rows.Scan(&s.Endpoint, &s.Keys.P256dh, &s.Keys.Auth)
-		subs = append(subs, s)
-	}
-	return subs
-}
-
-// --- sending ---
-
 // pushPayload is the JSON the service worker's 'push' handler expects.
 type pushPayload struct {
 	Title string `json:"title"`
@@ -224,61 +204,6 @@ type pushPayload struct {
 	Tag   string `json:"tag"`
 	URL   string `json:"url"`
 }
-
-// sendPush encrypts and delivers a payload to every stored subscription.
-// Subscriptions the push service reports as gone (404/410) are pruned so we
-// stop retrying them; other failures are logged without retry.
-func sendPush(p pushPayload) {
-	subs := loadSubscriptions()
-	if len(subs) == 0 {
-		return
-	}
-	msg, err := json.Marshal(p)
-	if err != nil {
-		log.Printf("push: marshal payload: %v", err)
-		return
-	}
-	for i := range subs {
-		s := subs[i]
-		// Rows stored before endpoint validation existed are still in the
-		// table, so re-check the scheme here. Kept to a parse (no DNS) so a
-		// flaky resolver can't silently drop a legitimate reminder.
-		if u, err := url.Parse(s.Endpoint); err != nil || u.Scheme != "https" {
-			log.Printf("push: skipping non-https endpoint %s", shortEndpoint(s.Endpoint))
-			continue
-		}
-		resp, err := webpush.SendNotification(msg, &s, &webpush.Options{
-			HTTPClient:      pushHTTPClient,
-			Subscriber:      pushSubject,
-			VAPIDPublicKey:  vapidPublicKey,
-			VAPIDPrivateKey: vapidPrivateKey,
-			TTL:             86400,
-			Urgency:         webpush.UrgencyNormal,
-		})
-		if err != nil {
-			log.Printf("push: send to %s: %v", shortEndpoint(s.Endpoint), err)
-			continue
-		}
-		switch {
-		case resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusGone:
-			deleteSubscription(s.Endpoint)
-			log.Printf("push: dropped expired subscription %s", shortEndpoint(s.Endpoint))
-		case resp.StatusCode >= 400:
-			body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-			log.Printf("push: %s returned %d: %s", shortEndpoint(s.Endpoint), resp.StatusCode, strings.TrimSpace(string(body)))
-		}
-		resp.Body.Close()
-	}
-}
-
-func shortEndpoint(e string) string {
-	if len(e) > 40 {
-		return e[:40] + "..."
-	}
-	return e
-}
-
-// --- daily reminders ---
 
 // shouldSendReminder reports whether a reminder should fire now, given the local
 // date it was last sent (""=never). It fires at most once per calendar day: at
@@ -296,67 +221,16 @@ func shouldSendReminder(rt reminderTime, now time.Time, lastSentDate string) boo
 	return !now.Before(fireAt)
 }
 
-// startPushReminders wakes once a minute and delivers each due reminder once per
-// day. Modeled on startAutoArchiveTodos. The per-reminder date marker is written
-// after the decision even when nothing was sent, so an empty list doesn't cause
-// repeated re-checks for the rest of the day.
+// startPushReminders runs the persistent per-device scheduler once a minute.
 func startPushReminders() {
-	if !habitReminder.enabled && !taskReminder.enabled {
-		return
-	}
 	go func() {
 		for {
-			now := time.Now()
-			if shouldSendReminder(habitReminder, now, getSetting("habit_reminder_sent")) {
-				sendHabitReminder()
-				setSetting("habit_reminder_sent", now.Format("2006-01-02"))
+			if err := runScheduleTick(appNow()); err != nil {
+				log.Printf("Reminder scheduler: %v", err)
 			}
-			if shouldSendReminder(taskReminder, now, getSetting("task_reminder_sent")) {
-				sendTaskReminder(now)
-				setSetting("task_reminder_sent", now.Format("2006-01-02"))
-			}
-			time.Sleep(1 * time.Minute)
+			time.Sleep(time.Minute)
 		}
 	}()
-}
-
-func sendHabitReminder() {
-	left := 0
-	for _, h := range loadHabits() {
-		if h.Period == "day" && !h.Done {
-			left++
-		}
-	}
-	if left == 0 {
-		return
-	}
-	noun := "habit"
-	if left != 1 {
-		noun = "habits"
-	}
-	sendPush(pushPayload{
-		Title: "Habits",
-		Body:  fmt.Sprintf("%d %s left to check off today", left, noun),
-		Tag:   "habits",
-		URL:   "/",
-	})
-}
-
-func sendTaskReminder(now time.Time) {
-	tasks, err := dueTodayTasks(now)
-	if err != nil {
-		log.Printf("push: due-task query: %v", err)
-		return
-	}
-	if len(tasks) == 0 {
-		return
-	}
-	sendPush(pushPayload{
-		Title: "Tasks due",
-		Body:  taskReminderBody(tasks),
-		Tag:   "tasks",
-		URL:   "/",
-	})
 }
 
 // dueTodayTasks returns the text of active to-do items due today or earlier,
@@ -364,8 +238,8 @@ func sendTaskReminder(now time.Time) {
 // app), not SQLite's UTC date('now').
 func dueTodayTasks(now time.Time) ([]string, error) {
 	rows, err := db.Query(`
-		SELECT text FROM todos
-		WHERE category = 'todo' AND archived = 0 AND done = 0
+		SELECT text FROM todos t
+		WHERE category = 'todo' AND `+activeTaskSQL+` AND done = 0
 		  AND due_date != '' AND due_date <= ?
 		ORDER BY due_date ASC, position ASC`, now.Format("2006-01-02"))
 	if err != nil {
@@ -391,60 +265,3 @@ func taskReminderBody(tasks []string) string {
 }
 
 // --- HTTP endpoints (registered behind authMiddleware) ---
-
-func handlePushPublicKey(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"key": vapidPublicKey})
-}
-
-func handlePushSubscribe(w http.ResponseWriter, r *http.Request) {
-	if !requirePost(w, r) {
-		return
-	}
-	var sub webpush.Subscription
-	if err := json.NewDecoder(io.LimitReader(r.Body, 8192)).Decode(&sub); err != nil ||
-		sub.Endpoint == "" || sub.Keys.P256dh == "" || sub.Keys.Auth == "" {
-		http.Error(w, "invalid subscription", http.StatusBadRequest)
-		return
-	}
-	if err := validatePushEndpoint(sub.Endpoint); err != nil {
-		log.Printf("push: rejected subscription endpoint: %v", err)
-		http.Error(w, "invalid subscription endpoint", http.StatusBadRequest)
-		return
-	}
-	if err := saveSubscription(sub); err != nil {
-		http.Error(w, "could not save subscription", http.StatusInternalServerError)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-func handlePushUnsubscribe(w http.ResponseWriter, r *http.Request) {
-	if !requirePost(w, r) {
-		return
-	}
-	var body struct {
-		Endpoint string `json:"endpoint"`
-	}
-	if err := json.NewDecoder(io.LimitReader(r.Body, 8192)).Decode(&body); err != nil || body.Endpoint == "" {
-		http.Error(w, "invalid request", http.StatusBadRequest)
-		return
-	}
-	deleteSubscription(body.Endpoint)
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// handlePushTest delivers a notification to all subscriptions immediately, to
-// verify end-to-end delivery from the browser.
-func handlePushTest(w http.ResponseWriter, r *http.Request) {
-	if !requirePost(w, r) {
-		return
-	}
-	sendPush(pushPayload{
-		Title: "SecondBrain",
-		Body:  "Notifications are working",
-		Tag:   "test",
-		URL:   "/",
-	})
-	w.WriteHeader(http.StatusNoContent)
-}

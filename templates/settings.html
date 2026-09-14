@@ -1,0 +1,17 @@
+<section class="settings-card">
+ <h2>Notifications on this device</h2>
+ <p id="push-status" role="status">Checking notification support…</p>
+ <p id="push-last-result" class="muted"></p>
+ <div class="detail-actions"><button class="btn" id="push-enable" onclick="enablePush()" disabled>Enable this device</button><button class="btn" id="push-disable" onclick="disablePush()" hidden>Disable this device</button><button class="btn" id="push-test" onclick="testPush()" hidden>Send test notification</button></div>
+ <details><summary>Help with iPhone and Mac notifications</summary><p>On iPhone, open this app from its Home Screen icon. If needed, open it in Safari and choose Share → Add to Home Screen.</p><p>If permission is blocked, allow SecondBrain in Settings → Notifications on iPhone, or System Settings → Notifications on Mac. Focus modes can silence banners. HTTPS and a working server connection are required.</p><p>In Brave, open <strong>brave://settings/privacy</strong>, enable <strong>Use Google services for push messaging</strong>, and relaunch Brave. Brave cannot create Web Push subscriptions while that service is disabled.</p><p>The test reports whether the push service accepted the message. Check the notification on this device to confirm delivery.</p></details>
+</section>
+<details class="settings-card secondary-settings"><summary>Reminder schedule</summary><p class="muted">These times apply to all enabled devices. They usually only need to be configured once.</p>
+<form id="schedule-form" class="detail-form" hx-post="/settings/save" hx-target="#settings-content">
+ <label class="toggle-label"><input type="checkbox" name="task_enabled" {{if .TaskEnabled}}checked{{end}}>Tasks due or overdue</label><label>Task reminder time<input type="time" name="task_time" value="{{.TaskTime}}" required></label>
+ <label class="toggle-label"><input type="checkbox" name="habit_enabled" {{if .HabitEnabled}}checked{{end}}>Unfinished daily habits</label><label>Habit reminder time<input type="time" name="habit_time" value="{{.HabitTime}}" required></label>
+ <label class="toggle-label"><input type="checkbox" name="review_enabled" {{if .ReviewEnabled}}checked{{end}}>Weekly review and notification</label>
+ <label>Review day<select name="review_day"><option value="0" {{if eq .ReviewDay 0}}selected{{end}}>Sunday</option><option value="1" {{if eq .ReviewDay 1}}selected{{end}}>Monday</option><option value="2" {{if eq .ReviewDay 2}}selected{{end}}>Tuesday</option><option value="3" {{if eq .ReviewDay 3}}selected{{end}}>Wednesday</option><option value="4" {{if eq .ReviewDay 4}}selected{{end}}>Thursday</option><option value="5" {{if eq .ReviewDay 5}}selected{{end}}>Friday</option><option value="6" {{if eq .ReviewDay 6}}selected{{end}}>Saturday</option></select></label>
+ <label>Review time<input type="time" name="review_time" value="{{.ReviewTime}}" required></label>
+ <label>Time zone<input name="timezone" value="{{.Timezone}}" placeholder="Europe/Bucharest" list="timezones" required></label><datalist id="timezones"><option value="Europe/Bucharest"><option value="Europe/London"><option value="Europe/Paris"><option value="America/New_York"><option value="UTC"></datalist>
+ <button class="btn btn-primary">Save schedule</button>
+</form></details>

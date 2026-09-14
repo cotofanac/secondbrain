@@ -1,24 +1,25 @@
 {
-    "name": "SecondBrain",
-    "short_name": "SecondBrain",
-    "description": "Minimalist tasks & notes",
-    "start_url": "/",
-    "display": "standalone",
-    "background_color": "#0f0f0f",
-    "theme_color": "#0f0f0f",
-    "orientation": "portrait",
-    "icons": [
-        {
-            "src": "/static/icon-192.svg",
-            "sizes": "192x192",
-            "type": "image/svg+xml",
-            "purpose": "any maskable"
-        },
-        {
-            "src": "/static/icon-512.svg",
-            "sizes": "512x512",
-            "type": "image/svg+xml",
-            "purpose": "any maskable"
-        }
-    ]
+  "name": "SecondBrain",
+  "short_name": "SecondBrain",
+  "description": "A quiet place for tasks, projects, notes and habits",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#111315",
+  "theme_color": "#111315",
+  "icons": [
+    {
+      "src": "/static/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/static/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "id": "/",
+  "scope": "/"
 }

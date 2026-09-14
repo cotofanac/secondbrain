@@ -1,0 +1,11 @@
+<article class="review-card">
+ <div class="detail-heading"><h2>{{if .Preview}}Your week so far{{else}}Weekly review{{end}}</h2></div>
+ {{if .Saved}}<label class="review-history">Saved reviews <select onchange="openReview(this.value)"><option value="">Current week</option>{{range .Saved}}<option value="{{.ID}}" {{if eq .ID $.ID}}selected{{end}}>{{.Label}}</option>{{end}}</select></label>{{end}}
+ <p class="muted">{{.Start}} – {{.End}}</p>
+ {{if .Preview}}<p class="muted">A live look at the past seven days. Scheduled reviews create a saved summary.</p>{{end}}
+ <h2>Completed · {{len .Completed}}</h2><ul>{{range .Completed}}<li>{{.Text}}</li>{{else}}<li>No completed tasks in this period. Small steps still count.</li>{{end}}</ul>
+ <h2>Projects</h2><ul>{{range .Projects}}<li><a href="/?view=todos&amp;project={{.ID}}">{{.Name}}</a> · {{.Done}}/{{.Total}}</li>{{else}}<li>No active projects.</li>{{end}}</ul>
+ <h2>Overdue · {{len .Overdue}}</h2><ul>{{range .Overdue}}<li><a href="/?view=todos&amp;task={{.ID}}">{{.Text}}</a> · {{.Date}}</li>{{else}}<li>Nothing overdue.</li>{{end}}</ul>
+ <h2>Next seven days</h2><ul>{{range .Upcoming}}<li><a href="/?view=todos&amp;task={{.ID}}">{{.Text}}</a> · {{.Date}}</li>{{else}}<li>No upcoming due dates.</li>{{end}}</ul>
+ <h2>Habits</h2><p>{{.HabitActivity}} habit check-ins across the completed calendar days in this period.</p>
+</article>
