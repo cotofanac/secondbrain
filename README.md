@@ -1,116 +1,104 @@
-# SecondBrain
+<div align="center">
+  <img src="static/icon-192.png" width="88" height="88" alt="Second Brain icon">
 
-**A quiet place for your tasks, notes, and habits.** Self-hosted, single binary, no clutter.
+  # Second Brain
 
-SecondBrain is a personal organizer built on a simple premise: the tool should disappear and leave you with your thoughts. No accounts, no sync services, no telemetry, no JavaScript framework churn — just a Go binary, a SQLite file, and a fast, installable web app you own end to end.
+  **Everything on your mind. One calm place to put it.**
 
+  A private, self-hosted home for tasks, projects, notes, lists, and habits.
+</div>
+
+---
+
+Second Brain is made for the quiet work of keeping your life together.
+
+Capture something before it disappears. Turn it into a task when it matters.
+Give larger plans a little structure. Keep the groceries separate from the
+ideas, and the habits visible without letting any of it take over your day.
+
+No feeds. No team dashboards. No productivity theatre. Just your things, in a
+place that feels considered.
+
+## One Place, Six Clear Spaces
+
+**Tasks** for what needs doing. Add one in a moment, give it a date when it
+needs one, and let completed work move quietly out of the way.
+
+**Projects** for the things that take more than one step. Add stages, see real
+progress, and keep the notes behind a project close to the work itself.
+
+**Groceries** and **Buys** for the lists you come back to. Familiar items are
+remembered, so recurring errands stay effortless instead of becoming clutter.
+
+**Notes** for thoughts that need somewhere to land. They save as you write and
+stay simple enough that writing remains the point.
+
+**Habits** for the rhythms you want to keep. Track a daily practice or work
+toward a weekly, monthly, or yearly target without turning your life into a
+spreadsheet.
+
+## Designed to Get Out of the Way
+
+Second Brain feels at home on both a desktop and a phone. The desktop gives
+your work room to breathe, with focused collections and details alongside the
+list. Mobile keeps the same structure close at hand with fast entry,
+touch-friendly controls, and compact navigation.
+
+Every interaction is intentionally small. Press Return to capture. Select to
+edit. Check something off and keep moving.
+
+Light and dark appearances follow your device. Install it to your Home Screen
+and it opens like an app, without giving up ownership of your data.
+
+## A Gentle Look Ahead
+
+Today brings due tasks, unfinished habits, and the next few days into one calm,
+actionable view. It is there when you want direction, while Second Brain still
+reopens the list you last used when you only need to capture something quickly.
+
+Due dates highlight what needs attention without making everything feel urgent.
+Optional reminders bring back tasks due today and habits still waiting for a
+check-in.
+
+The weekly review gathers the shape of your week in one place: what you
+finished, how projects moved, what is coming next, and the habits you showed up
+for. A useful pause, not another report to maintain.
+
+## Yours, Properly
+
+Second Brain runs on your server and stores everything in your own SQLite
+database. There are no accounts to create, no subscription, no analytics, and
+no service holding your notes on your behalf.
+
+It is intentionally small: one Go application, one database, one person.
+
+## Version 4
+
+Version 4 is a new chapter for Second Brain. It brings a focused desktop
+workspace, a new Today view, thoughtful mobile navigation, faster capture,
+direct editing, stronger notes, richer habits, project details, weekly reviews,
+notifications, and a visual identity that finally feels like the product.
+
+The result is not a system you have to manage. It is simply a dependable place
+to return to.
+
+## Make It Yours
+
+Create a `.env` file with your own eight-digit passcode:
+
+```dotenv
+PASSCODE=12345678
+TZ=Europe/Bucharest
 ```
-Go + HTMX + SQLite  →  one binary  →  your server  →  your data
-```
 
-## Philosophy
-
-- **One binary, one file.** The whole app compiles to a single executable; all your data is one SQLite file you can back up using SQLite or copy while the app is stopped.
-- **No framework tax.** The UI is server-rendered HTML with [HTMX](https://htmx.org) for interactivity. There is no build step, no bundler, only a small JavaScript layer for presentation preferences and draft protection.
-- **Calm by default.** Chrome gets out of the way — tasks and projects live in collapsible sections, and there's exactly one credential between you and your data.
-- **Yours, privately.** Nothing leaves your server. No analytics or external content services; optional Web Push contacts device push services.
-
-## Quick Start
+Then start Second Brain:
 
 ```bash
-# 1. Create a .env file with your chosen passcode
-cat > .env <<EOF
-PASSCODE=your8digits
-PORT=8080
-EOF
-
-# 2. Pull and run (image hosted on Docker Hub)
+mkdir -p data
 docker compose up -d
-
-# 3. Open http://localhost:8080
 ```
 
-> The passcode is exactly 8 digits (e.g. `12345678`) and is the only credential protecting the app. Choose your own, and put SecondBrain behind HTTPS if you expose it beyond your network.
+Open [http://localhost:8080](http://localhost:8080).
 
-## Features
-
-**Lists that fit how you actually shop and plan**
-- **Groceries & Buys** — reusable checklists. Re-adding an item un-checks the existing one instead of piling up duplicates, so recurring staples stay a single row.
-- **Tasks** — a focused to-do list with optional due dates, overdue highlighting, and gentle "archives soon" hints. Unfinished tasks stay until you archive them. Completed tasks collapse and tidy themselves away seven days after completion.
-
-**Projects without extra navigation**
-- Optional projects with stages and ordinary tasks. Tasks can always stand alone.
-- Link existing research notes, see completion counts, and archive/restore projects without losing their contents.
-- A Mac sidebar and detail pane; compact collapsible sections on iPhone, with automatic light/dark appearance.
-
-**Notes that stay out of your way**
-- Multiple notes with a quick-filter picker and a last-edited timestamp.
-- **Auto-save** as you type, with optimistic concurrency — edit the same note on two devices and SecondBrain warns you instead of silently clobbering a version.
-- Lightweight inline formatting: numbered lists, `*bold*`, `_italic_`, and `[] ` checkboxes.
-
-**Habits worth keeping**
-- One-tap daily tracking with a running **streak counter**.
-
-**Find anything, fast**
-- Global search across notes and tasks — pull down from the top or press `/`.
-
-**Built like an app**
-- **Installable PWA** — add it to your phone or desktop and launch it from the home screen. A service worker keeps assets fresh across deploys, with cache-busting handled for you.
-- **Push reminders** — an optional daily nudge for unchecked habits and tasks due today, delivered even when the app is closed. Enable each device from Notifications and send a test to check delivery. See [Reminders](#reminders).
-- **Weekly review** — optional Sunday summary of completed work, project progress, habits, and upcoming tasks, saved locally with a push link.
-- **Archive, restore, and permanent-delete** for tasks, notes, and habits — nothing is lost by accident.
-
-## Security
-
-A single passcode, taken seriously:
-
-- **8-digit passcode** compared in constant time, with a lockout after repeated failures.
-- **Hardened sessions** — `HttpOnly`, `Secure` (over HTTPS), `SameSite=Strict` cookies; configurable auto-logout on inactivity; clean server-side session expiry.
-- **Sensible headers** — Content-Security-Policy, `X-Frame-Options`, `X-Content-Type-Options`, HSTS over HTTPS, and `no-store` on your private pages.
-
-## Configuration
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `PASSCODE` | *(required)* | 8-digit numeric passcode |
-| `PORT` | `8080` | Server port |
-| `DATA_DIR` | `./data` | SQLite database location |
-| `INACTIVITY_LOGOUT_MINUTES` | `45` | Auto-logout timeout after inactivity |
-| `HABIT_REMINDER_TIME` | `20:00` | Initial daily habit reminder setting; editable under Notifications → Reminder schedule afterward. `off` to disable initially |
-| `TASK_REMINDER_TIME` | `09:00` | Initial daily task reminder setting; editable under Notifications → Reminder schedule afterward. `off` to disable initially |
-| `PUSH_SUBJECT` | `secondbrain@example.com` | VAPID contact email or HTTPS URL sent to push services (optional; `mailto:` email values are also accepted) |
-
-### Reminders
-
-Open **More (⋯) → Notifications → Enable this device**, grant permission, then choose **Send test notification**. Each installed device subscribes separately. This screen remains available for testing, disabling, or repairing registration and reports the last push-service result; check the device itself to confirm the banner arrived.
-
-- Notifications are server-sent Web Push and can arrive while the app is closed. HTTPS is required.
-- On iPhone, launch the installed Home Screen app (iOS 16.4+). Notifications includes installation and blocked-permission guidance.
-- Shared task, habit, and weekly-review schedules are tucked under **Notifications → Reminder schedule**. The shared time zone defaults to Europe/Bucharest.
-- Weekly review is off by default, with Sunday 18:00 selected. Open it from More to see the current week or a saved review.
-- Existing environment reminder times seed the database once; saved settings take precedence afterward.
-- VAPID keys persist in SQLite. Preserve the database across deploys. `PUSH_SUBJECT` can supply a real contact address if needed.
-
-**Upgrading an existing installation?** This update adds database tables and columns and changes task cleanup behavior. Read [database migration, backup, rollback, and device verification instructions](docs/UPGRADE.md) before deploying.
-
-## Architecture
-
-SecondBrain is deliberately small enough to read in one sitting.
-
-- **Backend** — a single Go program. HTML templates and static assets are embedded into the binary, so deployment is "copy the file and run it."
-- **Frontend** — server-rendered templates swapped in place by HTMX. No SPA, no client framework, no build pipeline.
-- **Storage** — SQLite in WAL mode behind a single connection, with a graceful shutdown that checkpoints cleanly on `SIGTERM`.
-- **Runtime dependencies** — none beyond the binary and its data directory.
-
-## Development
-
-```bash
-export PASSCODE=12345678
-go run .
-```
-
-HTMX is vendored at `static/htmx.min.js` and embedded into the binary, so there's no fetch step and the build needs no network access. To bump the pinned version, run `go run cmd/fetch_htmx.go` and commit the updated file.
-
-## Data & Backup
-
-Everything lives in one SQLite file at `DATA_DIR/secondbrain.db`. Use SQLite’s `.backup` command, or stop the app cleanly before copying it. Do not copy only the main file while WAL writes are active. See [upgrade and backup instructions](docs/UPGRADE.md).
+For upgrades, backups, and deployment details, see
+[the upgrade guide](docs/UPGRADE.md).

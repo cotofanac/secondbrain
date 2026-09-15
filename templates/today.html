@@ -1,0 +1,66 @@
+<div class="today-page">
+ <header class="today-heading">
+  <span class="section-kind-icon today-icon">{{template "icon-sun"}}</span>
+  <div><h1>Today</h1><p>{{.Date}}</p></div>
+ </header>
+
+ <form class="capture-form today-capture" hx-post="/todos/add" hx-target="#today-content">
+  <input type="hidden" name="category" value="todo">
+  <input type="hidden" name="due_date" value="{{.ISODate}}">
+  <span class="capture-leading" aria-hidden="true">{{template "icon-plus"}}</span>
+  <input type="text" name="text" aria-label="Add a task for today" placeholder="Add a task for today…" maxlength="500" autocomplete="off" enterkeyhint="done" required>
+  <button type="submit" class="add-circle" aria-label="Add">{{template "icon-plus"}}</button>
+ </form>
+
+ {{if or .Overdue .Due}}
+ <section class="today-section today-attention">
+  <h2>Needs attention <span>{{len .Overdue}} overdue · {{len .Due}} today</span></h2>
+  {{range .Overdue}}{{template "today-task" .}}{{end}}
+  {{range .Due}}{{template "today-task" .}}{{end}}
+ </section>
+ {{else}}
+ <p class="today-clear">Nothing pressing today.</p>
+ {{end}}
+
+ <section class="today-section">
+  <h2>Habits <span>{{len .Habits}}</span></h2>
+  {{range .Habits}}
+  <div class="today-row {{if .Done}}done{{end}}">
+   <form hx-post="/habits/toggle" hx-target="#today-content">
+    <input type="hidden" name="id" value="{{.ID}}">
+    <button type="submit" class="check-btn {{if .Done}}checked{{end}}" aria-label="{{if .Done}}Uncheck{{else}}Complete{{end}} {{.Name}}"><span class="task-checkmark" aria-hidden="true"></span></button>
+   </form>
+   <span class="today-row-label">{{.Name}}</span>
+   {{if .StreakLabel}}<span class="habit-streak">{{.StreakLabel}}</span>{{end}}
+  </div>
+  {{else}}<p class="quiet-empty">No daily habits yet.</p>{{end}}
+ </section>
+
+ {{if .Upcoming}}
+ <section class="today-section today-upcoming">
+  <h2>Next <span>7 days</span></h2>
+  {{range .Upcoming}}{{template "today-task" .}}{{end}}
+ </section>
+ {{end}}
+
+ <details class="today-review">
+  <summary><span>Weekly review</span><span>{{len .Week.Completed}} completed</span>{{template "icon-chevron"}}</summary>
+  <div class="today-review-body">
+   <div><strong>{{len .Week.Completed}}</strong><span>completed</span></div>
+   <div><strong>{{len .Week.Projects}}</strong><span>projects</span></div>
+   <div><strong>{{.Week.HabitActivity}}</strong><span>check-ins</span></div>
+  </div>
+  <button type="button" class="text-action" onclick="openReview()">Open weekly review</button>
+ </details>
+</div>
+
+{{define "today-task"}}
+<div class="today-row">
+ <form hx-post="/todos/toggle" hx-target="#today-content">
+  <input type="hidden" name="id" value="{{.ID}}">
+  <button type="submit" class="check-btn" aria-label="Complete {{.Text}}"><span class="task-checkmark" aria-hidden="true"></span></button>
+ </form>
+ <button type="button" class="today-row-label" onclick="openTask({{.ID}})">{{.Text}}</button>
+ {{if .Date}}<span class="todo-date">{{formatDate .Date}}</span>{{end}}
+</div>
+{{end}}

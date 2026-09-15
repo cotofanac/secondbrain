@@ -1015,6 +1015,10 @@ func handleAddTodo(w http.ResponseWriter, r *http.Request) {
 
 	// Return updated list
 	r.URL.RawQuery = "category=" + category
+	if r.Header.Get("HX-Target") == "today-content" {
+		handleToday(w, r)
+		return
+	}
 	handleTodos(w, r)
 }
 
@@ -1091,6 +1095,10 @@ func handleToggleTodo(w http.ResponseWriter, r *http.Request) {
 	}
 	log.Printf("Todo toggled: id=%d [%s]", id, category)
 
+	if r.Header.Get("HX-Target") == "today-content" {
+		handleToday(w, r)
+		return
+	}
 	r.URL.RawQuery = "category=" + category
 	handleTodos(w, r)
 }
@@ -1515,15 +1523,38 @@ func handleDeleteNote(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Don't archive if it's the last active note
+	tx, err := db.Begin()
+	if err != nil {
+		http.Error(w, "DB error", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+
+	// Keep the count and archive in one transaction so concurrent requests
+	// cannot both decide that another active note remains.
 	var count int
-	db.QueryRow("SELECT COUNT(*) FROM notes WHERE archived = 0").Scan(&count)
+	if err = tx.QueryRow("SELECT COUNT(*) FROM notes WHERE archived = 0").Scan(&count); err != nil {
+		http.Error(w, "DB error", http.StatusInternalServerError)
+		return
+	}
 	if count <= 1 {
 		http.Error(w, "Cannot delete the last note", http.StatusBadRequest)
 		return
 	}
 
-	db.Exec("UPDATE notes SET archived = 1 WHERE id = ?", id)
+	res, err := tx.Exec("UPDATE notes SET archived = 1 WHERE id = ? AND archived = 0", id)
+	if err != nil {
+		http.Error(w, "DB error", http.StatusInternalServerError)
+		return
+	}
+	if n, err := res.RowsAffected(); err != nil || n != 1 {
+		http.Error(w, "Note unavailable", http.StatusNotFound)
+		return
+	}
+	if err = tx.Commit(); err != nil {
+		http.Error(w, "DB error", http.StatusInternalServerError)
+		return
+	}
 	log.Printf("Note archived: id=%d", id)
 
 	r.URL.RawQuery = ""
@@ -1980,6 +2011,10 @@ func handleAddHabit(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Habit added: %q period=%s target=%d", name, period, target)
 	}
 
+	if r.Header.Get("HX-Target") == "today-content" {
+		handleToday(w, r)
+		return
+	}
 	handleHabits(w, r)
 }
 
@@ -2029,8 +2064,14 @@ func handleToggleHabit(w http.ResponseWriter, r *http.Request) {
 
 	// Toggle is for daily habits only; refuse it for periodic goals so a stale
 	// or crafted request can never wipe a day that holds multiple completions.
+	tx, err := db.Begin()
+	if err != nil {
+		http.Error(w, "DB error", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
 	var period string
-	if err := db.QueryRow("SELECT period FROM habits WHERE id = ?", id).Scan(&period); err != nil {
+	if err := tx.QueryRow("SELECT period FROM habits WHERE id = ?", id).Scan(&period); err != nil {
 		http.Error(w, "Not found", http.StatusNotFound)
 		return
 	}
@@ -2040,14 +2081,19 @@ func handleToggleHabit(w http.ResponseWriter, r *http.Request) {
 	}
 
 	today := appNow().Format("2006-01-02")
-	res, err := db.Exec("DELETE FROM habit_logs WHERE habit_id = ? AND date = ?", id, today)
+	res, err := tx.Exec("DELETE FROM habit_logs WHERE habit_id = ? AND date = ?", id, today)
 	if err != nil {
 		http.Error(w, "DB error", http.StatusInternalServerError)
 		return
 	}
 
-	if n, _ := res.RowsAffected(); n == 0 {
-		_, err = db.Exec("INSERT INTO habit_logs (habit_id, date, count) VALUES (?, ?, 1)", id, today)
+	n, err := res.RowsAffected()
+	if err != nil {
+		http.Error(w, "DB error", http.StatusInternalServerError)
+		return
+	}
+	if n == 0 {
+		_, err = tx.Exec("INSERT INTO habit_logs (habit_id, date, count) VALUES (?, ?, 1)", id, today)
 		if err != nil {
 			http.Error(w, "DB error", http.StatusInternalServerError)
 			return
@@ -2055,6 +2101,10 @@ func handleToggleHabit(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Habit checked: id=%d date=%s", id, today)
 	} else {
 		log.Printf("Habit unchecked: id=%d date=%s", id, today)
+	}
+	if err = tx.Commit(); err != nil {
+		http.Error(w, "DB error", http.StatusInternalServerError)
+		return
 	}
 
 	handleHabits(w, r)
@@ -2100,8 +2150,14 @@ func handleDecrementHabit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	tx, err := db.Begin()
+	if err != nil {
+		http.Error(w, "DB error", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
 	var period string
-	if err := db.QueryRow("SELECT period FROM habits WHERE id = ?", id).Scan(&period); err != nil {
+	if err := tx.QueryRow("SELECT period FROM habits WHERE id = ?", id).Scan(&period); err != nil {
 		http.Error(w, "Not found", http.StatusNotFound)
 		return
 	}
@@ -2109,7 +2165,7 @@ func handleDecrementHabit(w http.ResponseWriter, r *http.Request) {
 
 	var date string
 	var count int
-	err := db.QueryRow(`
+	err = tx.QueryRow(`
 		SELECT date, count FROM habit_logs
 		WHERE habit_id = ? AND date >= ?
 		ORDER BY date DESC LIMIT 1
@@ -2124,11 +2180,15 @@ func handleDecrementHabit(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if count <= 1 {
-		_, err = db.Exec("DELETE FROM habit_logs WHERE habit_id = ? AND date = ?", id, date)
+		_, err = tx.Exec("DELETE FROM habit_logs WHERE habit_id = ? AND date = ?", id, date)
 	} else {
-		_, err = db.Exec("UPDATE habit_logs SET count = count - 1 WHERE habit_id = ? AND date = ?", id, date)
+		_, err = tx.Exec("UPDATE habit_logs SET count = count - 1 WHERE habit_id = ? AND date = ?", id, date)
 	}
 	if err != nil {
+		http.Error(w, "DB error", http.StatusInternalServerError)
+		return
+	}
+	if err = tx.Commit(); err != nil {
 		http.Error(w, "DB error", http.StatusInternalServerError)
 		return
 	}

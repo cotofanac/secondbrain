@@ -1,15 +1,108 @@
 // --- Mode switching (Tasks / Notes / Habits) ---
-const MODE_TITLES = { todos: 'Tasks', notes: 'Notes', habits: 'Habits', settings: 'Notifications', review: 'Weekly review' };
+const MODE_TITLES = { todos: 'Tasks', today: 'Today', notes: 'Notes', habits: 'Habits', settings: 'Notifications', review: 'Weekly review' };
+const WORKSPACE_TITLES = { tasks: 'Tasks', projects: 'Projects', groceries: 'Groceries', shopping: 'Buys' };
+let secondaryReturnDestination = { mode: 'todos', workspace: 'tasks' };
+function currentWorkspaceSection() {
+    return WORKSPACE_TITLES[document.body.dataset.workspaceSection] ? document.body.dataset.workspaceSection : 'tasks';
+}
+function updateNavigation(mode) {
+    const workspace = currentWorkspaceSection();
+    document.querySelectorAll('.bottom-nav-btn').forEach(button => {
+        const active = mode === 'todos'
+            ? button.dataset.mode === 'todos' && button.dataset.workspace === workspace
+            : button.dataset.mode === mode;
+        button.classList.toggle('active', active);
+        if (active) button.setAttribute('aria-current', 'page');
+        else button.removeAttribute('aria-current');
+    });
+}
 function switchMode(mode) {
     if (!MODE_TITLES[mode]) mode='todos';
+    const previousMode = document.body.dataset.mode || 'todos';
+    if ((mode === 'settings' || mode === 'review') && previousMode !== 'settings' && previousMode !== 'review') {
+        secondaryReturnDestination = { mode: previousMode, workspace: currentWorkspaceSection() };
+    }
     flushPendingNoteSave();
-    document.querySelectorAll('.bottom-nav-btn').forEach(b => b.classList.toggle('active',b.dataset.mode===mode));
+    updateNavigation(mode);
     document.querySelectorAll('.view').forEach(v => v.classList.toggle('active',v.id===mode+'-view'));
-    document.getElementById('topbar-title').textContent=MODE_TITLES[mode];
+    const title = document.getElementById('topbar-title');
+    title.textContent=mode === 'todos' ? WORKSPACE_TITLES[currentWorkspaceSection()] : MODE_TITLES[mode];
+    title.classList.toggle('can-switch-workspace', mode === 'todos' || mode === 'today');
+    title.setAttribute('aria-label', mode === 'todos' ? 'Choose task list, current list '+WORKSPACE_TITLES[currentWorkspaceSection()] : mode === 'today' ? 'Choose destination, current view Today' : MODE_TITLES[mode]);
+    const back = document.getElementById('topbar-back');
+    if (back) {
+        const secondary = mode === 'settings' || mode === 'review';
+        back.hidden = !secondary;
+        back.setAttribute('aria-label', 'Back to ' + (secondaryReturnDestination.mode === 'todos' ? WORKSPACE_TITLES[secondaryReturnDestination.workspace] : MODE_TITLES[secondaryReturnDestination.mode]));
+    }
     document.querySelectorAll('.app-menu').forEach(d=>d.open=false);
     document.body.dataset.mode=mode;
     if(typeof setDestination==='function')setDestination({view:mode});
     updateTopbarStat();
+}
+
+function leaveSecondaryView() {
+    if (secondaryReturnDestination.mode === 'todos') {
+        switchWorkspaceSection(secondaryReturnDestination.workspace, { preserveScroll: true });
+        return;
+    }
+    switchMode(secondaryReturnDestination.mode);
+}
+
+function openMobileWorkspaceSwitcher() {
+    if (document.body.dataset.mode !== 'todos' && document.body.dataset.mode !== 'today') return;
+    const menu = document.getElementById('mobile-workspace-menu');
+    if (!menu) return;
+    const current = currentWorkspaceSection();
+    menu.querySelectorAll('[data-workspace-option]').forEach(button => {
+        const selected = document.body.dataset.mode === 'todos' && button.dataset.workspaceOption === current;
+        button.classList.toggle('selected', selected);
+        button.setAttribute('aria-current', selected ? 'page' : 'false');
+    });
+    const today = menu.querySelector('[data-mode-option="today"]');
+    const todaySelected = document.body.dataset.mode === 'today';
+    today?.classList.toggle('selected', todaySelected);
+    today?.setAttribute('aria-current', todaySelected ? 'page' : 'false');
+    openModal(menu, todaySelected ? today : menu.querySelector('[data-workspace-option="'+current+'"]'));
+}
+function closeMobileWorkspaceSwitcher() {
+    closeModal(document.getElementById('mobile-workspace-menu'));
+}
+function chooseMobileWorkspace(section) {
+    closeMobileWorkspaceSwitcher();
+    switchWorkspaceSection(section);
+}
+function chooseMobileUtility(mode) {
+    closeMobileWorkspaceSwitcher();
+    if (mode === 'today') openToday();
+    if (mode === 'review') openReview();
+    if (mode === 'settings') openSettings();
+}
+document.addEventListener('click', function(e) {
+    if (e.target?.id === 'mobile-workspace-menu') closeMobileWorkspaceSwitcher();
+});
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape' && !document.getElementById('mobile-workspace-menu')?.hidden) closeMobileWorkspaceSwitcher();
+});
+
+function switchWorkspaceSection(section, options = {}) {
+    if (!WORKSPACE_TITLES[section]) section = 'tasks';
+    if (typeof canLeaveDetail === 'function' && !canLeaveDetail()) return false;
+    const pane = document.getElementById('detail-pane');
+    if (pane && !pane.hidden && typeof closeDetail === 'function') closeDetail();
+    document.body.dataset.workspaceSection = section;
+    try { localStorage.setItem('desktop-workspace', section); } catch (_) {}
+    const target = document.getElementById('section-' + section);
+    if (target) target.open = true;
+    switchMode('todos');
+    if (target) {
+        target.classList.remove('workspace-entering');
+        void target.offsetWidth;
+        target.classList.add('workspace-entering');
+        setTimeout(() => target.classList.remove('workspace-entering'), 220);
+    }
+    if (!options.preserveScroll) window.scrollTo({ top: 0, behavior: 'auto' });
+    return true;
 }
 
 function updateTopbarStat() {
@@ -19,13 +112,14 @@ function updateTopbarStat() {
     const now = new Date();
     const date = now.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: document.body.dataset.timezone || undefined });
 
-    const activeMode = document.querySelector('.bottom-nav-btn.active')?.dataset.mode;
+    const activeMode = document.body.dataset.mode || 'todos';
     let count = '';
 
     if (activeMode === 'todos') {
         const archiveOpen = document.getElementById('archive-btn')?.classList.contains('active');
         if (!archiveOpen) {
-            const pending = document.querySelectorAll('#todo-items .todo-item:not(.done):not(.archived-item)').length;
+            const section = document.getElementById('section-' + currentWorkspaceSection());
+            const pending = section?.querySelectorAll('.todo-item:not(.done):not(.archived-item)').length || 0;
             if (pending > 0) count = pending + ' left';
         }
     } else if (activeMode === 'habits') {
@@ -70,6 +164,38 @@ function setupMobileKeyboard() {
     document.addEventListener('focusin', update);
     document.addEventListener('focusout', () => setTimeout(update, 0));
 }
+
+let modalReturnFocus = null;
+function openModal(container, initialFocus) {
+    if (!container) return;
+    modalReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    document.getElementById('app')?.setAttribute('inert', '');
+    document.getElementById('bottom-nav')?.setAttribute('inert', '');
+    container.hidden = false;
+    container.setAttribute('aria-hidden', 'false');
+    setTimeout(() => initialFocus?.focus(), 0);
+}
+function closeModal(container) {
+    if (!container) return;
+    container.hidden = true;
+    container.setAttribute('aria-hidden', 'true');
+    document.getElementById('app')?.removeAttribute('inert');
+    document.getElementById('bottom-nav')?.removeAttribute('inert');
+    const target = modalReturnFocus;
+    modalReturnFocus = null;
+    if (target?.isConnected) target.focus({ preventScroll: true });
+}
+document.addEventListener('keydown', function(e) {
+    if (e.key !== 'Tab') return;
+    const modal = document.querySelector('.custom-dialog:not([hidden]), .inactivity-warning:not([hidden]), .mobile-workspace-menu:not([hidden])');
+    if (!modal) return;
+    const focusable = [...modal.querySelectorAll('button:not([disabled]):not([hidden]), input:not([disabled]):not([hidden]), select:not([disabled]):not([hidden]), textarea:not([disabled]):not([hidden]), [tabindex]:not([tabindex="-1"])')].filter(el => el.getClientRects().length);
+    if (!focusable.length) { e.preventDefault(); return; }
+    const first = focusable[0], last = focusable[focusable.length - 1];
+    if (!modal.contains(document.activeElement)) { e.preventDefault(); (e.shiftKey ? last : first).focus(); }
+    else if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+});
 
 document.body.addEventListener('htmx:afterSwap', function(e) {
     const id = e.detail.target?.id;
@@ -343,8 +469,8 @@ function showHabitDialog() {
         targetInput.value = '1';
         selectPeriod('day');
         extra.hidden = false;
-        dialog.hidden = false;
-        setTimeout(() => { input.focus(); input.select(); }, 50);
+        openModal(dialog, input);
+        setTimeout(() => input.select(), 0);
 
         function onChipClick(e) {
             const chip = e.target.closest('.chip');
@@ -364,7 +490,7 @@ function showHabitDialog() {
         }
         function dismiss() { cleanup(); resolve(null); }
         function cleanup() {
-            dialog.hidden = true;
+            closeModal(dialog);
             extra.hidden = true;
             selectPeriod('day');
             confirmBtn.removeEventListener('click', submit);
@@ -538,8 +664,7 @@ function showInactivityWarning(seconds) {
     if (!warning || !countdown) return;
 
     let remaining = seconds;
-    warning.hidden = false;
-    warning.setAttribute('aria-hidden', 'false');
+    openModal(warning, document.getElementById('inactivity-stay-btn'));
     countdown.textContent = String(remaining);
 
     inactivityCountdownTimer = setInterval(function() {
@@ -558,8 +683,7 @@ function hideInactivityWarning() {
     const warning = document.getElementById('inactivity-warning');
     if (!warning || warning.hidden) return;
 
-    warning.hidden = true;
-    warning.setAttribute('aria-hidden', 'true');
+    closeModal(warning);
 
     if (inactivityCountdownTimer) {
         clearInterval(inactivityCountdownTimer);
@@ -582,17 +706,23 @@ function startHabitRename(spanEl) {
     input.focus();
     input.select();
 
-    let done = false;
-    function save() {
-        if (done) return;
-        done = true;
+    let done = false, saving = false;
+    async function save() {
+        if (done || saving) return;
         const newName = input.value.trim();
-        if (!newName || newName === originalName) { input.replaceWith(spanEl); return; }
-        htmx.ajax('POST', '/habits/rename', {
-            target: '#habits-content',
-            swap: 'innerHTML',
-            values: { id, name: newName }
-        });
+        if (!newName || newName === originalName) { done = true; input.replaceWith(spanEl); spanEl.focus(); return; }
+        saving = true;
+        input.disabled = true;
+        try {
+            await htmx.ajax('POST', '/habits/rename', { target: '#habits-content', swap: 'innerHTML', values: { id, name: newName } });
+            done = true;
+        } catch (_) {
+            saving = false;
+            input.disabled = false;
+            input.setAttribute('aria-invalid', 'true');
+            input.focus();
+            showToast('Could not rename habit. Your edit is still here.');
+        }
     }
     function cancel() {
         if (done) return;
@@ -607,8 +737,8 @@ function startHabitRename(spanEl) {
     return input;
 }
 
-// Habit rename is reachable two ways: double-click with a mouse, press-and-hold
-// on touch. Task titles use the direct single-tap editor in workspace.js.
+// Pointer users can edit directly; long press remains as a forgiving mobile
+// gesture for people already accustomed to it.
 const LONG_PRESS_MS = 500;
 const LONG_PRESS_SLOP_PX = 10;
 
@@ -627,6 +757,10 @@ function beginInlineEdit(label) {
 
 document.addEventListener('dblclick', function(e) {
     const label = editableLabel(e.target);
+    if (label) beginInlineEdit(label);
+});
+document.addEventListener('click', function(e) {
+    const label = e.target.closest?.('[data-action="rename-habit"]');
     if (label) beginInlineEdit(label);
 });
 
@@ -764,6 +898,9 @@ document.addEventListener('keydown', function(e) {
 
 
 document.addEventListener('DOMContentLoaded', function() {
+    let savedWorkspace = 'tasks';
+    try { savedWorkspace = localStorage.getItem('desktop-workspace') || 'tasks'; } catch (_) {}
+    document.body.dataset.workspaceSection = WORKSPACE_TITLES[savedWorkspace] ? savedWorkspace : 'tasks';
     initNoteEditor();
     initCalendarBtn();
     setupInactivityLogout();

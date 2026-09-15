@@ -1,33 +1,34 @@
 {{define "task-row"}}
 <div class="todo-item {{if .Done}}done{{end}}" id="task-{{.ID}}" data-task-id="{{.ID}}" data-revision="{{.Revision}}">
- <form hx-post="/todos/toggle" hx-target="#todo-items"><input type="hidden" name="id" value="{{.ID}}"><button class="check-btn {{if .Done}}checked{{end}}" aria-label="{{if .Done}}Reopen{{else}}Complete{{end}} {{.Text}}"><span class="task-checkmark" aria-hidden="true"></span></button></form>
+ <form hx-post="/todos/toggle" hx-target="#todo-items" hx-swap="innerHTML swap:140ms"><input type="hidden" name="id" value="{{.ID}}"><button class="check-btn {{if .Done}}checked{{end}}" aria-label="{{if .Done}}Reopen{{else}}Complete{{end}} {{.Text}}"><span class="task-checkmark" aria-hidden="true"></span></button></form>
  <button type="button" class="task-label" data-action="edit-task-title">{{.Text}}</button><span class="task-edit-status" role="status" aria-live="polite"></span>
  {{if .DueDate}}<span class="todo-date {{if and (not .Done) (isOverdue .DueDate)}}overdue{{end}}">{{formatDate .DueDate}}</span>{{end}}
  <details class="row-menu"><summary class="icon-button" aria-label="Task actions">{{template "icon-more"}}</summary><div class="menu-panel"><button class="action-with-icon" onclick="openTask({{.ID}})">{{template "icon-edit"}}<span>Details</span></button><form hx-post="/todos/delete" hx-target="#todo-items"><input type="hidden" name="id" value="{{.ID}}"><button class="action-with-icon">{{template "icon-archive"}}<span>Archive</span></button></form></div></details>
 </div>
 {{end}}
 {{define "task-group"}}
-<div class="task-group" data-group="{{.Key}}">
+<div class="task-group" data-group="{{.Key}}" data-category="{{.Category}}">
  <form class="capture-form" id="capture-{{.Key}}" hx-post="/todos/add" hx-target="#todo-items">
   <input type="hidden" name="category" value="{{.Category}}"><input type="hidden" name="project_id" value="{{.ProjectID}}"><input type="hidden" name="stage_id" value="{{.StageID}}">
-  <input name="text" aria-label="{{if eq .Category "todo"}}Add task{{else}}Add item{{end}}" placeholder="{{if eq .Category "todo"}}Add a task…{{else}}Add an item…{{end}}" maxlength="500" autocomplete="off" {{if eq .Category "groceries"}}list="grocery-suggestions"{{else if eq .Category "shopping"}}list="shopping-suggestions"{{end}} required>
+  <span class="capture-leading" aria-hidden="true">{{if eq .Category "groceries"}}{{template "icon-cart"}}{{else if eq .Category "shopping"}}{{template "icon-bag"}}{{else}}{{template "icon-plus"}}{{end}}</span>
+  <input type="text" name="text" aria-label="{{if eq .Category "todo"}}Add task{{else}}Add item{{end}}" placeholder="{{if eq .Category "todo"}}Add a task…{{else}}Add an item…{{end}}" maxlength="500" autocomplete="off" enterkeyhint="done" {{if eq .Category "groceries"}}list="grocery-suggestions"{{else if eq .Category "shopping"}}list="shopping-suggestions"{{end}} required>
   {{if eq .Category "todo"}}<details class="capture-options"><summary class="icon-button" title="Due date" aria-label="Choose an optional due date">{{template "icon-calendar"}}</summary><label>Due date<input type="date" name="due_date"></label></details>{{end}}
-  <button class="add-circle" aria-label="Add">{{template "icon-plus"}}</button>
+  <button type="submit" class="add-circle" aria-label="Add">{{template "icon-plus"}}</button>
  </form>
- {{range .Tasks}}{{template "task-row" .}}{{else}}<p class="quiet-empty">{{if .Done}}All done for now.{{else}}A little space for what’s next.{{end}}</p>{{end}}
+ {{range .Tasks}}{{template "task-row" .}}{{else}}<p class="quiet-empty">{{if .Done}}All done.{{else}}No items{{end}}</p>{{end}}
  {{if .Done}}<details class="completed-group" data-persist="done-{{.Key}}"><summary>Completed <span>{{len .Done}}</span></summary>{{range .Done}}{{template "task-row" .}}{{end}}</details>{{end}}
 </div>
 {{end}}
 {{define "list-section"}}
 <details class="workspace-section" id="section-{{.Key}}" data-persist="{{.Key}}" {{if eq .Key "tasks"}}open{{end}}>
- <summary><span class="disclosure-icon">{{template "icon-chevron"}}</span><span class="section-title">{{.Name}}</span><span class="section-count">{{len .Tasks}}</span></summary>
+ <summary><span class="disclosure-icon">{{template "icon-chevron"}}</span><span class="section-kind-icon">{{if eq .Category "groceries"}}{{template "icon-cart"}}{{else if eq .Category "shopping"}}{{template "icon-bag"}}{{else}}{{template "icon-inbox"}}{{end}}</span><span class="section-title">{{.Name}}</span><span class="section-count">{{len .Tasks}}</span></summary>
  {{template "task-group" .}}
  <div class="section-footer"><button class="action-with-icon" onclick="openTaskArchive('{{.Category}}')">{{template "icon-archive"}}<span>Archive</span></button>{{if ne .Category "todo"}}<button class="action-with-icon" hx-post="/todos/clear-checked" hx-target="#todo-items" hx-vals='{"category":"{{.Category}}"}'>{{template "icon-reset"}}<span>Reset checks</span></button>{{end}}</div>
 </details>
 {{end}}
 {{template "list-section" .Tasks}}
 <details class="workspace-section" id="section-projects" data-persist="projects">
- <summary><span class="disclosure-icon">{{template "icon-chevron"}}</span><span class="section-title">Projects</span><span class="section-count">{{len .Projects}}</span></summary>
+ <summary><span class="disclosure-icon">{{template "icon-chevron"}}</span><span class="section-kind-icon project-icon">{{template "icon-folder"}}</span><span class="section-title">Projects</span><span class="section-count">{{len .Projects}}</span></summary>
  <div class="section-footer"><button class="action-with-icon" onclick="structureCreate('project',0)">{{template "icon-plus"}}<span>New project</span></button></div>
  {{range .Projects}}
  <details class="project-group" id="project-{{.ID}}" data-persist="project-{{.ID}}">

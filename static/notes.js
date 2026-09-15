@@ -281,8 +281,8 @@ function showPrompt(label, defaultValue = '') {
 
         labelEl.textContent = label;
         input.value = defaultValue;
-        dialog.hidden = false;
-        setTimeout(() => { input.focus(); input.select(); }, 50);
+        openModal(dialog, input);
+        setTimeout(() => input.select(), 0);
 
         function submit() {
             const val = input.value.trim();
@@ -291,7 +291,7 @@ function showPrompt(label, defaultValue = '') {
         }
         function dismiss() { cleanup(); resolve(null); }
         function cleanup() {
-            dialog.hidden = true;
+            closeModal(dialog);
             confirmBtn.removeEventListener('click', submit);
             cancelBtn.removeEventListener('click', dismiss);
             input.removeEventListener('keydown', onKey);
@@ -330,11 +330,10 @@ function showConfirm(message) {
 
         labelEl.textContent = message;
         input.hidden = true;
-        dialog.hidden = false;
-        setTimeout(() => confirmBtn.focus(), 50);
+        openModal(dialog, confirmBtn);
 
         function finish(result) {
-            dialog.hidden = true;
+            closeModal(dialog);
             input.hidden = false;
             confirmBtn.removeEventListener('click', onConfirm);
             cancelBtn.removeEventListener('click', onCancel);

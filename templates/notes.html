@@ -1,5 +1,9 @@
 <div class="notes-toolbar">
     <div class="note-picker" id="note-picker">
+        <div class="feature-heading notes-heading">
+            <span class="section-kind-icon notes-icon">{{template "icon-notes"}}</span>
+            <span class="feature-title">Notes</span>
+        </div>
         <button type="button" class="note-picker-btn" onclick="toggleNotePicker()">
             <span class="note-picker-label">{{.CurrentNote.Title}}</span>
             {{template "icon-down"}}
@@ -16,6 +20,7 @@
             </div>
         </div>
     </div>
+    <span class="note-current-title">{{.CurrentNote.Title}}</span>
     <div class="notes-actions">
         <button class="icon-button" onclick="createNote()" title="New note" aria-label="New note">
             {{template "icon-plus"}}

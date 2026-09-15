@@ -5,6 +5,7 @@ let workspaceState=null;
 let noteViewState=null;
 let archiveCategory='todo';
 let detailReturnFocus=null;
+let captureRequestID=0;
 function readLocal(key){try{return localStorage.getItem(key);}catch(_){return null;}}
 function writeLocal(key,value){try{localStorage.setItem(key,value);}catch(_){}}
 function restoreSections(){
@@ -28,17 +29,18 @@ function restoreWorkspace(){
 }
 function refreshWorkspace(){return htmx.ajax('GET','/workspace','#todo-items');}
 function expandAncestors(el){let node=el;while(node){if(node.tagName==='DETAILS')node.open=true;node=node.parentElement;}}
-function revealTask(id){const row=document.getElementById('task-'+id);if(row){document.querySelectorAll('.todo-item.selected').forEach(el=>el.classList.remove('selected'));expandAncestors(row);row.scrollIntoView({block:'nearest'});row.classList.add('selected');}}
+function showWorkspaceContaining(el){const section=el?.closest('.workspace-section');if(!section)return;const key=section.id.replace('section-','');if(WORKSPACE_TITLES[key]){document.body.dataset.workspaceSection=key;writeLocal('desktop-workspace',key);updateNavigation('todos');document.getElementById('topbar-title').textContent=WORKSPACE_TITLES[key];}}
+function revealTask(id){const row=document.getElementById('task-'+id);if(row){showWorkspaceContaining(row);document.querySelectorAll('.todo-item.selected').forEach(el=>el.classList.remove('selected'));expandAncestors(row);row.scrollIntoView({block:'nearest'});row.classList.add('selected');}}
 function setDestination(values){const url=new URL(location.href);url.search='';Object.entries(values).forEach(([k,v])=>url.searchParams.set(k,v));history.replaceState(null,'',url);}
 function canLeaveDetail(){const form=document.getElementById('task-detail-form');if(form?.dataset.dirty){showToast('Save your task changes before closing these details.');return false;}return true;}
-function showDetail(url){const pane=document.getElementById('detail-pane');if(pane.dataset.url!==url){pane.textContent='Loading details…';pane.dataset.url=url;}pane.hidden=false;pane.dataset.focusAfterLoad='1';document.querySelector('.task-layout').classList.add('has-detail');return htmx.ajax('GET',url,'#detail-pane').catch(()=>{});}
+function showDetail(url){const pane=document.getElementById('detail-pane');const opening=pane.hidden;if(pane.dataset.url!==url){pane.textContent='Loading details…';pane.dataset.url=url;}pane.hidden=false;if(opening){pane.classList.remove('detail-entering');void pane.offsetWidth;pane.classList.add('detail-entering');setTimeout(()=>pane.classList.remove('detail-entering'),220);}pane.dataset.focusAfterLoad='1';document.querySelector('.task-layout').classList.add('has-detail');return htmx.ajax('GET',url,'#detail-pane').catch(()=>{});}
 function discardTaskChanges(){const form=document.getElementById('task-detail-form');if(form){delete form.dataset.dirty;showDetail('/task/detail?id='+form.elements.id.value);}}
 function closePopupMenus(){document.querySelectorAll('.row-menu,.app-menu,.capture-options').forEach(d=>d.open=false);}
 async function openTask(id){if(!id||!canLeaveDetail())return;detailReturnFocus=document.querySelector('#task-'+id+' .task-label');closePopupMenus();switchMode('todos');detailSelection={kind:'task',id};
  if(document.querySelector('#todo-items .archive-header')){pendingFocus=id;await refreshWorkspace();}
  revealTask(id);setDestination({view:'todos',task:id});showDetail('/task/detail?id='+id);
 }
-async function openProject(id){if(!canLeaveDetail())return;switchMode('todos');if(document.querySelector('#todo-items .archive-header'))await refreshWorkspace();detailSelection={kind:'project',id};const el=document.getElementById('project-'+id);if(el){expandAncestors(el);el.open=true;}setDestination({view:'todos',project:id});showDetail('/projects/detail?id='+id);}
+async function openProject(id){if(!canLeaveDetail())return;document.body.dataset.workspaceSection='projects';writeLocal('desktop-workspace','projects');switchMode('todos');if(document.querySelector('#todo-items .archive-header'))await refreshWorkspace();detailSelection={kind:'project',id};const el=document.getElementById('project-'+id);if(el){showWorkspaceContaining(el);expandAncestors(el);el.open=true;}setDestination({view:'todos',project:id});showDetail('/projects/detail?id='+id);}
 function closeDetail(){if(!canLeaveDetail())return;document.getElementById('detail-pane').hidden=true;document.querySelector('.task-layout').classList.remove('has-detail');detailSelection=null;setDestination({view:'todos'});const target=detailReturnFocus;detailReturnFocus=null;target?.focus({preventScroll:true});}
 
 function taskJSON(response){return response.json().catch(()=>({error:'Could not save task'}));}
@@ -72,9 +74,10 @@ async function structureAction(kind,id,action,extra={}){await htmx.ajax('POST',k
 function openTaskArchive(category){if(!canLeaveDetail())return;closeDetail();archiveCategory=category;htmx.ajax('GET','/todos/archive?category='+category,'#todo-items');}
 function hideArchive(){refreshWorkspace();}
 function openSettings(){switchMode('settings');setDestination({view:'settings'});htmx.ajax('GET','/settings','#settings-content');}
-function openReview(id){switchMode('review');setDestination(id?{view:'review',review:id}:{view:'review'});htmx.ajax('GET','/review'+(id?'?id='+id:''),'#review-content');}
-function routeLocation(){const q=new URLSearchParams(location.search);if(q.get('task'))openTask(Number(q.get('task')));else if(q.get('project'))openProject(Number(q.get('project')));else if(q.get('view')==='review')openReview(q.get('review'));else if(q.get('view')==='settings')openSettings();else if(q.get('note'))openNoteResult(Number(q.get('note')));else if(q.get('stage'))openStageResult(Number(q.get('stage')));else if(q.get('view'))switchMode(q.get('view'));}
-async function openStageResult(id){closeSearch();switchMode('todos');if(document.querySelector('#todo-items .archive-header'))await refreshWorkspace();setDestination({view:'todos',stage:id});const el=document.getElementById('stage-'+id);if(el){expandAncestors(el);el.open=true;el.scrollIntoView({block:'nearest'});}}
+function openToday(){switchMode('today');setDestination({view:'today'});htmx.ajax('GET','/today','#today-content');}
+function openReview(id){switchMode('today');setDestination(id?{view:'review',review:id}:{view:'today'});htmx.ajax('GET','/review'+(id?'?id='+id:''),'#today-content');}
+function routeLocation(){const q=new URLSearchParams(location.search);if(q.get('task'))openTask(Number(q.get('task')));else if(q.get('project'))openProject(Number(q.get('project')));else if(q.get('view')==='review')openReview(q.get('review'));else if(q.get('view')==='today')openToday();else if(q.get('view')==='settings')openSettings();else if(q.get('note'))openNoteResult(Number(q.get('note')));else if(q.get('stage'))openStageResult(Number(q.get('stage')));else if(q.get('view'))switchMode(q.get('view'));}
+async function openStageResult(id){closeSearch();document.body.dataset.workspaceSection='projects';writeLocal('desktop-workspace','projects');switchMode('todos');if(document.querySelector('#todo-items .archive-header'))await refreshWorkspace();setDestination({view:'todos',stage:id});const el=document.getElementById('stage-'+id);if(el){showWorkspaceContaining(el);expandAncestors(el);el.open=true;el.scrollIntoView({block:'nearest'});}}
 document.body.addEventListener('htmx:beforeSwap',e=>{
  if(e.detail.target.id==='detail-pane') {
   const config=e.detail.requestConfig;
@@ -98,6 +101,47 @@ document.body.addEventListener('htmx:beforeSwap',e=>{
   if(editor?.dataset.dirty){e.detail.shouldSwap=false;return;}
   if(editor)noteViewState={id:editor.dataset.noteId,start:editor.selectionStart,end:editor.selectionEnd,scroll:editor.scrollTop,focused:document.activeElement===editor};
  }
+});
+document.body.addEventListener('htmx:beforeRequest',e=>{
+ const form=e.detail.elt;
+ if(form?.getAttribute('hx-post')==='/todos/toggle'){
+  const row=form.closest('.todo-item');
+  if(row&&!row.classList.contains('done'))row.classList.add('is-completing');
+ }
+ if(!form?.classList.contains('capture-form'))return;
+ const input=form.elements.text;
+ const text=input?.value.trim();
+ if(!text)return;
+ const pending=document.createElement('div');
+ pending.className='todo-item capture-pending';
+ pending.dataset.captureRequest=String(++captureRequestID);
+ const marker=document.createElement('span');marker.className='pending-marker';marker.setAttribute('aria-hidden','true');
+ const label=document.createElement('span');label.className='task-label';label.textContent=text;
+ pending.append(marker,label);
+ form.insertAdjacentElement('afterend',pending);
+ form.closest('.task-group')?.querySelector('.quiet-empty')?.setAttribute('hidden','');
+ form.dataset.pendingRow=pending.dataset.captureRequest;
+ input.value='';
+ input.focus({preventScroll:true});
+});
+function restoreFailedCapture(e){
+ const form=e.detail.elt;
+ if(!form?.classList.contains('capture-form'))return;
+ const pending=document.querySelector('[data-capture-request="'+form.dataset.pendingRow+'"]');
+ if(pending&&!form.elements.text.value)form.elements.text.value=pending.querySelector('.task-label')?.textContent||'';
+ pending?.remove();
+ form.closest('.task-group')?.querySelector('.quiet-empty')?.removeAttribute('hidden');
+}
+document.body.addEventListener('htmx:responseError',restoreFailedCapture);
+document.body.addEventListener('htmx:sendError',restoreFailedCapture);
+function restoreFailedCompletion(e){e.detail.elt?.closest('.todo-item')?.classList.remove('is-completing');}
+document.body.addEventListener('htmx:responseError',restoreFailedCompletion);
+document.body.addEventListener('htmx:sendError',restoreFailedCompletion);
+document.addEventListener('keydown',e=>{
+ const input=e.target.closest?.('.capture-form input[name="text"]');
+ if(!input||e.key!=='Enter'||e.isComposing)return;
+ e.preventDefault();
+ input.form.requestSubmit();
 });
 document.body.addEventListener('htmx:afterSwap',e=>{
  const id=e.detail.target.id;

@@ -80,8 +80,47 @@ func loadSchedule() (ScheduleSettings, error) {
 func registerScheduleRoutes() {
 	http.HandleFunc("/settings", authMiddleware(handleSettings))
 	http.HandleFunc("/settings/save", authMiddleware(handleSaveSettings))
+	http.HandleFunc("/today", authMiddleware(handleToday))
 	http.HandleFunc("/review", authMiddleware(handleReview))
 	http.HandleFunc("/push/status", authMiddleware(handlePushStatus))
+}
+
+type TodayView struct {
+	Date, ISODate          string
+	Overdue, Due, Upcoming []ReviewItem
+	Habits                 []Habit
+	Week                   WeeklyReview
+}
+
+func loadToday(now time.Time) (TodayView, error) {
+	week, err := buildReview(now)
+	if err != nil {
+		return TodayView{}, err
+	}
+	today := now.Format("2006-01-02")
+	view := TodayView{Date: now.Format("Monday, 2 January"), ISODate: today, Overdue: week.Overdue, Week: week}
+	for _, item := range week.Upcoming {
+		if item.Date == today {
+			view.Due = append(view.Due, item)
+		} else {
+			view.Upcoming = append(view.Upcoming, item)
+		}
+	}
+	for _, habit := range loadHabitsAt(now) {
+		if habit.Period == "day" {
+			view.Habits = append(view.Habits, habit)
+		}
+	}
+	return view, nil
+}
+
+func handleToday(w http.ResponseWriter, r *http.Request) {
+	view, err := loadToday(appNow())
+	if err != nil {
+		http.Error(w, "Today unavailable", http.StatusInternalServerError)
+		return
+	}
+	renderTemplate(w, "today.html", view)
 }
 func handleSettings(w http.ResponseWriter, r *http.Request) {
 	s, err := loadSchedule()
@@ -360,7 +399,7 @@ func runScheduleTick(now time.Time) error {
 			if len(tasks) == 0 {
 				continue
 			}
-			payload = pushPayload{Title: "Tasks due", Body: taskReminderBody(tasks), Tag: "tasks", URL: "/?view=todos"}
+			payload = pushPayload{Title: "Tasks due", Body: taskReminderBody(tasks), Tag: "tasks", URL: "/?view=today"}
 		} else {
 			left := 0
 			for _, h := range loadHabitsAt(now) {
@@ -371,7 +410,7 @@ func runScheduleTick(now time.Time) error {
 			if left == 0 {
 				continue
 			}
-			payload = pushPayload{Title: "Habits", Body: fmt.Sprintf("%d habits left today", left), Tag: "habits", URL: "/?view=habits"}
+			payload = pushPayload{Title: "Habits", Body: fmt.Sprintf("%d habits left today", left), Tag: "habits", URL: "/?view=today"}
 		}
 		if err = queueNotification(key, payload, now, expires); err != nil {
 			return err

@@ -12,14 +12,14 @@
     <link rel="apple-touch-icon" href="/static/icon-192.png">
     <link rel="stylesheet" href="/static/style.css?v={{assetVersion}}">
 </head>
-<body data-timezone="{{.Timezone}}" data-inactivity-timeout-seconds="{{.InactivityTimeoutSeconds}}">
+<body data-mode="todos" data-timezone="{{.Timezone}}" data-inactivity-timeout-seconds="{{.InactivityTimeoutSeconds}}">
     <div id="app">
     <!-- Top nav: mode switcher -->
     <header class="topbar" id="topbar">
-        <span class="topbar-title" id="topbar-title">Tasks</span>
+        <button type="button" class="topbar-back icon-button" id="topbar-back" onclick="leaveSecondaryView()" aria-label="Back" hidden>{{template "icon-back"}}</button>
+        <button type="button" class="topbar-title workspace-switcher" id="topbar-title" onclick="openMobileWorkspaceSwitcher()" aria-label="Choose task list" aria-haspopup="dialog">Tasks</button>
         <span class="topbar-stat" id="topbar-stat"></span>
         <button class="header-action icon-button" onclick="openSearch()" aria-label="Search">{{template "icon-search"}}</button>
-        <details class="app-menu"><summary class="icon-button" aria-label="More options">{{template "icon-more"}}</summary><div class="menu-panel"><button class="action-with-icon" onclick="openReview()">{{template "icon-calendar"}}<span>Weekly review</span></button><button class="action-with-icon" onclick="openSettings()">{{template "icon-settings"}}<span>Notifications</span></button></div></details>
         <form method="post" action="/logout" class="logout-form">
             <button type="submit" class="logout-btn" title="Logout" aria-label="Logout">
                 {{template "icon-logout"}}
@@ -46,7 +46,7 @@
     <main id="todos-view" class="view active"><div class="task-layout"><div id="todo-items">{{template "workspace.html" .Workspace}}</div><aside id="detail-pane" class="detail-pane" aria-label="Details" tabindex="-1" hidden></aside></div>
     <datalist id="grocery-suggestions">{{range .GrocerySuggestions}}<option value="{{.}}">{{end}}</datalist><datalist id="shopping-suggestions">{{range .ShoppingSuggestions}}<option value="{{.}}">{{end}}</datalist></main>
     <main id="settings-view" class="view"><div id="settings-content"></div></main>
-    <main id="review-view" class="view"><div id="review-content"></div></main>
+    <main id="today-view" class="view"><div id="today-content"></div></main>
 
     <!-- Notes view -->
     <main id="notes-view" class="view">
@@ -98,10 +98,49 @@
         </div>
     </div>
 
+    <div id="mobile-workspace-menu" class="mobile-workspace-menu" hidden aria-hidden="true">
+        <div class="mobile-workspace-sheet" role="dialog" aria-modal="true" aria-labelledby="mobile-workspace-title">
+            <div class="mobile-sheet-handle" aria-hidden="true"></div>
+            <h2 id="mobile-workspace-title">Go to</h2>
+            <div class="mobile-workspace-options">
+                <button type="button" data-mode-option="today" onclick="chooseMobileUtility('today')">{{template "icon-sun"}}<span>Today</span>{{template "icon-check"}}</button>
+                <button type="button" data-workspace-option="tasks" onclick="chooseMobileWorkspace('tasks')">{{template "icon-tasks"}}<span>Tasks</span>{{template "icon-check"}}</button>
+                <button type="button" data-workspace-option="projects" onclick="chooseMobileWorkspace('projects')">{{template "icon-folder"}}<span>Projects</span>{{template "icon-check"}}</button>
+                <button type="button" data-workspace-option="groceries" onclick="chooseMobileWorkspace('groceries')">{{template "icon-cart"}}<span>Groceries</span>{{template "icon-check"}}</button>
+                <button type="button" data-workspace-option="shopping" onclick="chooseMobileWorkspace('shopping')">{{template "icon-bag"}}<span>Buys</span>{{template "icon-check"}}</button>
+            </div>
+            <div class="mobile-workspace-utilities">
+                <button type="button" onclick="chooseMobileUtility('settings')">{{template "icon-settings"}}<span>Notifications</span></button>
+            </div>
+        </div>
+    </div>
+
     <nav class="bottom-nav" id="bottom-nav">
-        <button class="bottom-nav-btn active" data-mode="todos" onclick="switchMode('todos')">
+        <div class="app-brand" aria-label="Second Brain">
+            <span class="brand-mark" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><circle cx="9" cy="9" r="4.5"/><circle cx="15" cy="15" r="4.5"/><path d="M12 8.5v7"/></svg>
+            </span>
+            <span class="brand-name">Second Brain</span>
+        </div>
+        <button class="bottom-nav-btn workspace-nav-btn" data-mode="today" onclick="openToday()">
+            {{template "icon-sun"}}
+            <span>Today</span>
+        </button>
+        <button class="bottom-nav-btn active" data-mode="todos" data-workspace="tasks" onclick="switchWorkspaceSection('tasks')">
             {{template "icon-tasks"}}
             <span>Tasks</span>
+        </button>
+        <button class="bottom-nav-btn workspace-nav-btn" data-mode="todos" data-workspace="projects" onclick="switchWorkspaceSection('projects')">
+            {{template "icon-folder"}}
+            <span>Projects</span>
+        </button>
+        <button class="bottom-nav-btn workspace-nav-btn" data-mode="todos" data-workspace="groceries" onclick="switchWorkspaceSection('groceries')">
+            {{template "icon-cart"}}
+            <span>Groceries</span>
+        </button>
+        <button class="bottom-nav-btn workspace-nav-btn" data-mode="todos" data-workspace="shopping" onclick="switchWorkspaceSection('shopping')">
+            {{template "icon-bag"}}
+            <span>Buys</span>
         </button>
         <button class="bottom-nav-btn" data-mode="notes" onclick="switchMode('notes')">
             {{template "icon-notes"}}
@@ -114,6 +153,12 @@
             </span>
             <span>Habits</span>
         </button>
+        <div class="desktop-secondary-nav">
+            <button class="bottom-nav-btn" data-mode="settings" onclick="openSettings()">
+                {{template "icon-settings"}}
+                <span>Notifications</span>
+            </button>
+        </div>
     </nav>
 
     <script src="/static/htmx.min.js?v={{assetVersion}}"></script>

@@ -1,6 +1,9 @@
 {{define "habit-list"}}
 <div class="habits-toolbar">
-    <span class="habits-title">{{if .Daily}}Today{{else}}Habits{{end}}</span>
+    <div class="feature-heading habits-heading">
+        <span class="section-kind-icon habits-icon">{{template "icon-habits"}}</span>
+        <span class="feature-title">Habits</span>
+    </div>
     <div class="habits-actions">
         <button class="icon-button" onclick="addHabit()" title="New habit" aria-label="New habit">
             {{template "icon-plus"}}
@@ -21,7 +24,7 @@
                 <span class="icon-checked">{{template "icon-check"}}</span>
             </button>
         </form>
-        <span class="habit-name">{{.Name}}</span>
+        <button type="button" class="habit-name" data-action="rename-habit" aria-label="Rename {{.Name}}">{{.Name}}</button>
         {{if .StreakLabel}}<span class="habit-streak">{{.StreakLabel}}</span>{{end}}
         <form hx-post="/habits/delete" hx-target="#habits-content" hx-swap="innerHTML" class="habit-del-form">
             <input type="hidden" name="id" value="{{.ID}}">
@@ -64,7 +67,7 @@
         </button>
     </form>
     <div class="habit-goal-body">
-        <span class="habit-name">{{.Name}}</span>
+        <button type="button" class="habit-name" data-action="rename-habit" aria-label="Rename {{.Name}}">{{.Name}}</button>
         <div class="habit-progress"><div class="habit-progress-fill" style="width: {{.Percent}}%"></div></div>
     </div>
     <span class="habit-count">{{.Progress}}/{{.Target}}</span>

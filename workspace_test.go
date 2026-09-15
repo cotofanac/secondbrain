@@ -7,7 +7,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -238,6 +240,73 @@ func TestWorkspaceTemplatesAndSearch(t *testing.T) {
 		if !strings.Contains(strings.ReplaceAll(html.UnescapeString(w.Body.String()), " ", ""), expected) {
 			t.Errorf("search missing %s", expected)
 		}
+	}
+}
+
+func TestHabitTemplateExposesKeyboardRename(t *testing.T) {
+	setupWorkspaceDB(t)
+	execSQL(t, `INSERT INTO habits(id,name,period,target) VALUES(1,'Read','day',1)`)
+	w := httptest.NewRecorder()
+	handleHabits(w, httptest.NewRequest(http.MethodGet, "/habits", nil))
+	requireOK(t, w)
+	body := w.Body.String()
+	if !strings.Contains(body, `data-action="rename-habit"`) || !strings.Contains(body, `aria-label="Rename Read"`) {
+		t.Fatalf("habit rename is not keyboard accessible: %s", body)
+	}
+}
+
+func TestConcurrentNoteArchiveKeepsOneActive(t *testing.T) {
+	setupWorkspaceDB(t)
+	execSQL(t, `INSERT INTO notes(title,content) VALUES('Second','')`)
+	rows, err := db.Query(`SELECT id FROM notes WHERE archived=0 ORDER BY id`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	for rows.Next() {
+		var id int
+		if err := rows.Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, strconv.Itoa(id))
+	}
+	rows.Close()
+	if len(ids) != 2 {
+		t.Fatalf("active notes = %d, want 2", len(ids))
+	}
+
+	start := make(chan struct{})
+	codes := make(chan int, 2)
+	var wg sync.WaitGroup
+	for _, id := range ids {
+		wg.Add(1)
+		go func(id string) {
+			defer wg.Done()
+			<-start
+			codes <- formRequest(t, handleDeleteNote, "/notes/delete", url.Values{"id": {id}}).Code
+		}(id)
+	}
+	close(start)
+	wg.Wait()
+	close(codes)
+
+	var active int
+	if err := db.QueryRow(`SELECT count(*) FROM notes WHERE archived=0`).Scan(&active); err != nil {
+		t.Fatal(err)
+	}
+	if active != 1 {
+		t.Fatalf("active notes = %d, want 1", active)
+	}
+	var ok, rejected int
+	for code := range codes {
+		if code == http.StatusOK {
+			ok++
+		} else if code == http.StatusBadRequest {
+			rejected++
+		}
+	}
+	if ok != 1 || rejected != 1 {
+		t.Fatalf("archive statuses: ok=%d rejected=%d", ok, rejected)
 	}
 }
 
