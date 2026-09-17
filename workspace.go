@@ -154,6 +154,42 @@ func handleWorkspace(w http.ResponseWriter, r *http.Request) {
 	renderTemplate(w, "workspace.html", data)
 }
 
+func handleTaskGroup(w http.ResponseWriter, category string, projectID, stageID int) {
+	data, err := loadWorkspace()
+	if err != nil {
+		http.Error(w, "Could not load tasks", http.StatusInternalServerError)
+		return
+	}
+	group := &data.Tasks
+	if category == "groceries" {
+		group = &data.Groceries
+	} else if category == "shopping" {
+		group = &data.Buys
+	} else if projectID != 0 {
+		group = nil
+		for i := range data.Projects {
+			if data.Projects[i].ID != projectID {
+				continue
+			}
+			group = &data.Projects[i].Group
+			if stageID != 0 {
+				for j := range data.Projects[i].Stages {
+					if data.Projects[i].Stages[j].ID == stageID {
+						group = &data.Projects[i].Stages[j].Group
+						break
+					}
+				}
+			}
+			break
+		}
+	}
+	if group == nil {
+		http.Error(w, "Task group unavailable", http.StatusNotFound)
+		return
+	}
+	renderTemplate(w, "task-group", *group)
+}
+
 // A stage can only belong to its selected active project. Zero means standalone.
 func validMembership(tx *sql.Tx, projectRaw, stageRaw string) (int, int, error) {
 	parse := func(s string) (int, error) {

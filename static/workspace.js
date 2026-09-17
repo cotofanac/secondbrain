@@ -122,7 +122,7 @@ document.body.addEventListener('htmx:beforeRequest',e=>{
  const form=e.detail.elt;
  if(form?.getAttribute('hx-post')==='/todos/toggle'){
   const row=form.closest('.todo-item');
-  if(row&&!row.classList.contains('done'))row.classList.add('is-completing');
+  if(row){form._toggleDelta=row.classList.contains('done')?-1:1;form._toggleStage=row.closest('.stage-group');form._toggleProject=row.closest('.project-group');form._toggleSection=row.closest('.workspace-section');if(form._toggleDelta>0)row.classList.add('is-completing');}
  }
  if(!form?.classList.contains('capture-form'))return;
  const input=form.elements.text;
@@ -164,6 +164,15 @@ document.addEventListener('keydown',e=>{
 document.body.addEventListener('htmx:afterSwap',e=>{
  const id=e.detail.target.id;
  if(id==='todo-items'){restoreWorkspace();if(detailSelection?.kind==='task')document.getElementById('task-'+detailSelection.id)?.classList.add('selected');if(detailSelection?.kind==='project')showDetail('/projects/detail?id='+detailSelection.id);}
+ const toggleForm=e.detail.requestConfig?.elt;
+ if(toggleForm?.getAttribute('hx-post')==='/todos/toggle'){
+  const bump=(container,selector,ratio=false)=>{const el=container?.querySelector(selector);if(!el)return;if(ratio){const parts=el.textContent.split('/').map(Number);if(parts.length===2&&!parts.some(Number.isNaN)){parts[0]+=toggleForm._toggleDelta;el.textContent=parts.join('/');container.querySelector('.project-progress')?.style.setProperty('--progress',parts[0]);}}else{const value=Number(el.textContent);if(!Number.isNaN(value))el.textContent=String(value-toggleForm._toggleDelta);}};
+  bump(toggleForm._toggleStage,':scope > summary .section-count',true);
+  bump(toggleForm._toggleProject,':scope > summary .section-count',true);
+  if(toggleForm._toggleSection?.id==='section-tasks'&&!toggleForm._toggleProject)bump(toggleForm._toggleSection,'.inbox-group > .workspace-subheading .section-count');
+  else if(!toggleForm._toggleProject)bump(toggleForm._toggleSection,':scope > summary .section-count');
+  restoreSections();restoreCaptureDrafts(e.detail.target);
+ }
  if(e.detail.target.matches?.('[data-lazy-project]')){e.detail.target.dataset.loaded='1';restoreSections();restoreCaptureDrafts(e.detail.target);}
  if(id==='detail-pane'){filterStageOptions(document.getElementById('task-detail-form'));const pane=document.getElementById('detail-pane');if(pane.dataset.focusAfterLoad){delete pane.dataset.focusAfterLoad;pane.focus({preventScroll:true});}}
  if(id==='notes-content'){initNoteEditor();const editor=document.getElementById('note-editor');if(editor&&document.body.dataset.mode==='notes')setDestination({view:'notes',note:editor.dataset.noteId});if(editor&&noteViewState?.id===editor.dataset.noteId){editor.setSelectionRange(noteViewState.start,noteViewState.end);editor.scrollTop=noteViewState.scroll;if(noteViewState.focused)editor.focus({preventScroll:true});}noteViewState=null;}

@@ -1090,7 +1090,8 @@ func handleToggleTodo(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var category string
-	err := db.QueryRow(`SELECT t.category FROM todos t WHERE t.id=? AND `+activeTaskSQL, id).Scan(&category)
+	var projectID, stageID int
+	err := db.QueryRow(`SELECT t.category,COALESCE(t.project_id,0),COALESCE(t.stage_id,0) FROM todos t WHERE t.id=? AND `+activeTaskSQL, id).Scan(&category, &projectID, &stageID)
 	if err != nil {
 		http.Error(w, "Not found", http.StatusNotFound)
 		return
@@ -1105,6 +1106,10 @@ func handleToggleTodo(w http.ResponseWriter, r *http.Request) {
 
 	if r.Header.Get("HX-Target") == "today-content" {
 		handleToday(w, r)
+		return
+	}
+	if r.FormValue("response") == "task-group" {
+		handleTaskGroup(w, category, projectID, stageID)
 		return
 	}
 	r.URL.RawQuery = "category=" + category
