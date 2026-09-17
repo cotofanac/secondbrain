@@ -20,6 +20,7 @@ type TaskGroup struct {
 type Stage struct {
 	ID, ProjectID int
 	Name          string
+	ProjectName   string
 	Archived      bool
 	Group         TaskGroup
 }
@@ -193,9 +194,76 @@ func validMembership(tx *sql.Tx, projectRaw, stageRaw string) (int, int, error) 
 	return p, s, nil
 }
 func registerWorkspaceRoutes() {
-	for path, h := range map[string]http.HandlerFunc{"/workspace": handleWorkspace, "/projects/action": handleProjectAction, "/stages/action": handleStageAction, "/task/detail": handleTaskDetail, "/task/save": handleTaskSave, "/projects/detail": handleProjectDetail, "/projects/notes": handleProjectNotes} {
+	for path, h := range map[string]http.HandlerFunc{"/workspace": handleWorkspace, "/workspace/project": handleWorkspaceProject, "/projects/action": handleProjectAction, "/stages/action": handleStageAction, "/task/detail": handleTaskDetail, "/task/save": handleTaskSave, "/projects/detail": handleProjectDetail, "/projects/notes": handleProjectNotes} {
 		http.HandleFunc(path, authMiddleware(h))
 	}
+}
+func handleWorkspaceProject(w http.ResponseWriter, r *http.Request) {
+	id, _ := strconv.Atoi(r.URL.Query().Get("id"))
+	var p Project
+	if err := db.QueryRow(`SELECT id,name FROM projects WHERE id=? AND archived=0 AND completed=0`, id).Scan(&p.ID, &p.Name); err != nil {
+		http.Error(w, "Project unavailable", 404)
+		return
+	}
+	p.Group = TaskGroup{Key: fmt.Sprint("project-", id), Category: "todo", ProjectID: id}
+	rows, err := db.Query(`SELECT id,name,archived FROM stages WHERE project_id=? ORDER BY position,id`, id)
+	if err != nil {
+		http.Error(w, "Could not load project", 500)
+		return
+	}
+	stageIndex := map[int]int{}
+	for rows.Next() {
+		var s Stage
+		if err = rows.Scan(&s.ID, &s.Name, &s.Archived); err != nil {
+			rows.Close()
+			http.Error(w, "Could not load project", 500)
+			return
+		}
+		s.ProjectID = id
+		s.Group = TaskGroup{Key: fmt.Sprint("stage-", s.ID), Name: s.Name, Category: "todo", ProjectID: id, StageID: s.ID}
+		stageIndex[s.ID] = len(p.Stages)
+		p.Stages = append(p.Stages, s)
+	}
+	if err = rows.Err(); err != nil {
+		rows.Close()
+		http.Error(w, "Could not load project", 500)
+		return
+	}
+	rows.Close()
+	rows, err = db.Query(`SELECT id,category,text,due_date,done,COALESCE(stage_id,0),revision FROM todos WHERE project_id=? AND archived=0 ORDER BY done,position,created_at DESC,id DESC`, id)
+	if err != nil {
+		http.Error(w, "Could not load project", 500)
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var t Todo
+		if err = rows.Scan(&t.ID, &t.Category, &t.Text, &t.DueDate, &t.Done, &t.StageID, &t.Revision); err != nil {
+			http.Error(w, "Could not load project", 500)
+			return
+		}
+		t.ProjectID = id
+		g := &p.Group
+		if i, ok := stageIndex[t.StageID]; ok {
+			g = &p.Stages[i].Group
+			p.Group.Total++
+			if t.Done {
+				p.Group.Completed++
+			}
+		}
+		g.Total++
+		if t.Done {
+			g.Completed++
+			g.Done = append(g.Done, t)
+		} else {
+			g.Tasks = append(g.Tasks, t)
+		}
+	}
+	if err = rows.Err(); err != nil {
+		http.Error(w, "Could not load project", 500)
+		return
+	}
+	renderTemplate(w, "project-body", p)
 }
 func handleProjectAction(w http.ResponseWriter, r *http.Request) { handleStructureAction(w, r, false) }
 func handleStageAction(w http.ResponseWriter, r *http.Request)   { handleStructureAction(w, r, true) }
@@ -340,6 +408,44 @@ type TaskDetail struct {
 	Projects []Project
 }
 
+func loadTaskChoices() ([]Project, error) {
+	rows, err := db.Query(`SELECT id,name FROM projects WHERE archived=0 AND completed=0 ORDER BY position,id`)
+	if err != nil {
+		return nil, err
+	}
+	var projects []Project
+	index := map[int]int{}
+	for rows.Next() {
+		var p Project
+		if err = rows.Scan(&p.ID, &p.Name); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		index[p.ID] = len(projects)
+		projects = append(projects, p)
+	}
+	if err = rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
+	rows.Close()
+	rows, err = db.Query(`SELECT id,project_id,name FROM stages WHERE archived=0 ORDER BY position,id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var s Stage
+		if err = rows.Scan(&s.ID, &s.ProjectID, &s.Name); err != nil {
+			return nil, err
+		}
+		if i, ok := index[s.ProjectID]; ok {
+			projects[i].Stages = append(projects[i].Stages, s)
+		}
+	}
+	return projects, rows.Err()
+}
+
 func getTask(id int) (Todo, error) {
 	var t Todo
 	err := db.QueryRow(`SELECT id,category,text,due_date,done,COALESCE(project_id,0),COALESCE(stage_id,0),revision FROM todos t WHERE t.id=? AND `+activeTaskSQL, id).Scan(&t.ID, &t.Category, &t.Text, &t.DueDate, &t.Done, &t.ProjectID, &t.StageID, &t.Revision)
@@ -352,12 +458,12 @@ func handleTaskDetail(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Task unavailable. It may have been archived.", 404)
 		return
 	}
-	ws, err := loadWorkspace()
+	projects, err := loadTaskChoices()
 	if err != nil {
 		http.Error(w, "DB error", 500)
 		return
 	}
-	renderTemplate(w, "task-detail.html", TaskDetail{t, ws.Projects})
+	renderTemplate(w, "task-detail.html", TaskDetail{t, projects})
 }
 func handleTaskSave(w http.ResponseWriter, r *http.Request) {
 	if !requirePost(w, r) {

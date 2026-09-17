@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net"
@@ -36,8 +37,41 @@ var (
 
 	// Bounded client so a slow push service can't hang a reminder run or the
 	// /push/test request forever.
-	pushHTTPClient = &http.Client{Timeout: 15 * time.Second}
+	pushHTTPClient = newPushHTTPClient()
 )
+
+func newPushHTTPClient() *http.Client {
+	dialer := &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}
+	transport := &http.Transport{
+		// Push endpoints are untrusted input. Avoid environment proxies and pin
+		// each connection to an address that was checked immediately before dial.
+		DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
+			host, port, err := net.SplitHostPort(address)
+			if err != nil || port != "443" {
+				return nil, fmt.Errorf("push endpoint must use port 443")
+			}
+			ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+			if err != nil || len(ips) == 0 {
+				return nil, fmt.Errorf("push host does not resolve")
+			}
+			for _, candidate := range ips {
+				if !isPublicIP(candidate.IP) {
+					return nil, fmt.Errorf("push host resolved to a non-public address")
+				}
+			}
+			return dialer.DialContext(ctx, network, net.JoinHostPort(ips[0].IP.String(), port))
+		},
+		TLSHandshakeTimeout:   10 * time.Second,
+		ResponseHeaderTimeout: 10 * time.Second,
+	}
+	return &http.Client{
+		Transport: transport,
+		Timeout:   15 * time.Second,
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+}
 
 // parseReminderTime parses an "HH:MM" (24-hour) value or "off". An empty string
 // keeps def. It returns an error on malformed input so main() can fail loudly,
@@ -145,6 +179,12 @@ func validatePushEndpoint(raw string) error {
 	}
 	if u.Scheme != "https" {
 		return fmt.Errorf("scheme must be https, got %q", u.Scheme)
+	}
+	if u.User != nil || u.Fragment != "" {
+		return fmt.Errorf("credentials and fragments are not allowed")
+	}
+	if port := u.Port(); port != "" && port != "443" {
+		return fmt.Errorf("port must be 443")
 	}
 	host := u.Hostname()
 	if host == "" {

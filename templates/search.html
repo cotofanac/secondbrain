@@ -1,4 +1,4 @@
-{{if and (not .Notes) (not .Todos) (not .Projects) (not .Stages)}}
+{{if and (not .Notes) (not .Todos) (not .Habits) (not .Projects) (not .Stages)}}
 <div class="search-empty">No results for "{{.Query}}"</div>
 {{else}}
 {{if .Notes}}
@@ -14,11 +14,11 @@
 {{range .Todos}}
 <button type="button" class="search-result-item" onclick="openTodoResult('{{.Category}}',{{.ID}})">
     <span class="search-result-text">{{.Text}}</span>
-    <span class="search-result-cat">{{.Category}}</span>
+    <span class="search-result-cat">{{if .Done}}completed{{else}}{{.Category}}{{end}}</span>
 </button>
 {{end}}
 {{end}}
-{{end}}
-
 {{if .Projects}}<div class="search-section-label">Projects</div>{{range .Projects}}<button class="search-result-item" onclick="closeSearch();openProject({{.ID}})">{{.Name}}</button>{{end}}{{end}}
-{{if .Stages}}<div class="search-section-label">Stages</div>{{range .Stages}}<button class="search-result-item" onclick="openStageResult({{.ID}})">{{.Name}}</button>{{end}}{{end}}
+{{if .Stages}}<div class="search-section-label">Stages</div>{{range .Stages}}<button class="search-result-item" onclick="openStageResult({{.ID}})"><span class="search-result-text">{{.Name}}</span><span class="search-result-cat">{{.ProjectName}}</span></button>{{end}}{{end}}
+{{if .Habits}}<div class="search-section-label">Habits</div>{{range .Habits}}<button class="search-result-item" onclick="closeSearch();switchMode('habits')"><span class="search-result-text">{{.Name}}</span><span class="search-result-cat">{{.Period}}</span></button>{{end}}{{end}}
+{{end}}

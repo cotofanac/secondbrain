@@ -26,24 +26,34 @@
  <div class="section-footer"><button class="action-with-icon" onclick="openTaskArchive('{{.Category}}')">{{template "icon-archive"}}<span>Archive</span></button>{{if ne .Category "todo"}}<button class="action-with-icon" hx-post="/todos/clear-checked" hx-target="#todo-items" hx-vals='{"category":"{{.Category}}"}'>{{template "icon-reset"}}<span>Reset checks</span></button>{{end}}</div>
 </details>
 {{end}}
-{{template "list-section" .Tasks}}
-<details class="workspace-section" id="section-projects" data-persist="projects">
- <summary><span class="disclosure-icon">{{template "icon-chevron"}}</span><span class="section-kind-icon project-icon">{{template "icon-folder"}}</span><span class="section-title">Projects</span><span class="section-count">{{len .Projects}}</span></summary>
- <div class="section-footer"><button class="action-with-icon" onclick="structureCreate('project',0)">{{template "icon-plus"}}<span>New project</span></button></div>
+{{define "project-body"}}
+<div class="section-footer"><button class="action-with-icon" onclick="openProject({{.ID}})">{{template "icon-edit"}}<span>Project details</span></button><button class="action-with-icon" onclick="structureCreate('stage',{{.ID}})">{{template "icon-plus"}}<span>Stage</span></button></div>
+{{template "task-group" .Group}}
+{{range .Stages}}{{if not .Archived}}
+<details class="stage-group" id="stage-{{.ID}}" data-persist="stage-{{.ID}}"><summary><span class="disclosure-icon">{{template "icon-chevron"}}</span><span>{{.Name}}</span><span class="section-count">{{.Group.Completed}}/{{.Group.Total}}</span></summary>
+ {{template "task-group" .Group}}
+ <div class="section-footer"><button class="action-with-icon" onclick="structureRename('stage',{{.ID}},this)" data-name="{{.Name}}">{{template "icon-edit"}}<span>Rename</span></button><button class="icon-button" onclick="structureAction('stage',{{.ID}},'up')" aria-label="Move {{.Name}} up">{{template "icon-up"}}</button><button class="icon-button" onclick="structureAction('stage',{{.ID}},'down')" aria-label="Move {{.Name}} down">{{template "icon-down"}}</button><button class="action-with-icon" onclick="structureAction('stage',{{.ID}},'archive')">{{template "icon-archive"}}<span>Archive stage</span></button></div>
+</details>
+{{end}}{{end}}
+{{end}}
+<details class="workspace-section unified-tasks" id="section-tasks" data-persist="tasks" open>
+ <summary><span class="disclosure-icon">{{template "icon-chevron"}}</span><span class="section-kind-icon">{{template "icon-tasks"}}</span><span class="section-title">Tasks</span></summary>
+ <section class="inbox-group" aria-labelledby="inbox-heading">
+  <div class="workspace-subheading"><span class="section-kind-icon">{{template "icon-inbox"}}</span><h2 id="inbox-heading">Inbox</h2><span class="section-count">{{len .Tasks.Tasks}}</span></div>
+  {{template "task-group" .Tasks}}
+  <div class="section-footer"><button class="action-with-icon" onclick="openTaskArchive('todo')">{{template "icon-archive"}}<span>Archive</span></button></div>
+ </section>
+ <section class="projects-group" aria-labelledby="projects-heading">
+  <div class="workspace-subheading"><span class="section-kind-icon project-icon">{{template "icon-folder"}}</span><h2 id="projects-heading">Projects</h2><span class="section-count">{{len .Projects}}</span></div>
+  <div class="section-footer projects-actions"><button class="action-with-icon" onclick="structureCreate('project',0)">{{template "icon-plus"}}<span>New project</span></button></div>
  {{range .Projects}}
- <details class="project-group" id="project-{{.ID}}" data-persist="project-{{.ID}}">
+ <details class="project-group" id="project-{{.ID}}" data-persist="project-{{.ID}}" data-stage-ids="{{range .Stages}} {{.ID}}{{end}}">
   <summary><span class="disclosure-icon">{{template "icon-chevron"}}</span><span>{{.Name}}</span><span class="project-progress" style="--progress:{{if .Group.Total}}{{.Group.Completed}}{{else}}0{{end}};--total:{{if .Group.Total}}{{.Group.Total}}{{else}}1{{end}}" aria-label="{{.Group.Completed}} of {{.Group.Total}} complete"></span><span class="section-count">{{.Group.Completed}}/{{.Group.Total}}</span></summary>
-  <div class="section-footer"><button class="action-with-icon" onclick="openProject({{.ID}})">{{template "icon-edit"}}<span>Project details</span></button><button class="action-with-icon" onclick="structureCreate('stage',{{.ID}})">{{template "icon-plus"}}<span>Stage</span></button></div>
-  {{template "task-group" .Group}}
-  {{range .Stages}}{{if not .Archived}}
-  <details class="stage-group" id="stage-{{.ID}}" data-persist="stage-{{.ID}}"><summary><span class="disclosure-icon">{{template "icon-chevron"}}</span><span>{{.Name}}</span><span class="section-count">{{.Group.Completed}}/{{.Group.Total}}</span></summary>
-   {{template "task-group" .Group}}
-   <div class="section-footer"><button class="action-with-icon" onclick="structureRename('stage',{{.ID}},this)" data-name="{{.Name}}">{{template "icon-edit"}}<span>Rename</span></button><button class="icon-button" onclick="structureAction('stage',{{.ID}},'up')" aria-label="Move {{.Name}} up">{{template "icon-up"}}</button><button class="icon-button" onclick="structureAction('stage',{{.ID}},'down')" aria-label="Move {{.Name}} down">{{template "icon-down"}}</button><button class="action-with-icon" onclick="structureAction('stage',{{.ID}},'archive')">{{template "icon-archive"}}<span>Archive stage</span></button></div>
-  </details>
-  {{end}}{{end}}
+  <div id="project-body-{{.ID}}" data-lazy-project="{{.ID}}"></div>
  </details>
  {{else}}<p class="quiet-empty">A goal can start with one small task.</p>{{end}}
  {{if .ArchivedProjects}}<details class="completed-group" data-persist="archived-projects"><summary>Completed &amp; archived projects</summary>{{range .ArchivedProjects}}<div class="archive-project"><button onclick="openProject({{.ID}})">{{.Name}}</button><button onclick="structureAction('project',{{.ID}},'{{if .Completed}}reopen{{else}}restore{{end}}')">{{if .Completed}}Reopen{{else}}Restore{{end}}</button></div>{{end}}</details>{{end}}
+ </section>
 </details>
 {{template "list-section" .Groceries}}
 {{template "list-section" .Buys}}

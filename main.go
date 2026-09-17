@@ -399,6 +399,7 @@ func main() {
 	// Habits API
 	http.HandleFunc("/habits", authMiddleware(handleHabits))
 	http.HandleFunc("/habits/add", authMiddleware(handleAddHabit))
+	http.HandleFunc("/habits/update", authMiddleware(handleUpdateHabit))
 	http.HandleFunc("/habits/rename", authMiddleware(handleRenameHabit))
 	http.HandleFunc("/habits/toggle", authMiddleware(handleToggleHabit))
 	http.HandleFunc("/habits/increment", authMiddleware(handleIncrementHabit))
@@ -836,6 +837,11 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Could not load workspace", 500)
 		return
 	}
+	today, err := loadToday(appNow())
+	if err != nil {
+		http.Error(w, "Could not load Today", 500)
+		return
+	}
 
 	data := struct {
 		Notes                    []Note
@@ -844,11 +850,13 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 		InactivityTimeoutSeconds int
 		Timezone                 string
 		Workspace                Workspace
+		Today                    TodayView
 		GrocerySuggestions       []string
 		ShoppingSuggestions      []string
 	}{
 		Timezone:                 appLocation().String(),
 		Workspace:                workspace,
+		Today:                    today,
 		Notes:                    notesList,
 		CurrentNote:              currentNote,
 		Habits:                   groupHabits(habits),
@@ -1011,7 +1019,7 @@ func handleAddTodo(w http.ResponseWriter, r *http.Request) {
 		}
 		action = "added"
 	}
-	log.Printf("Todo %s: [%s] %q", action, category, text)
+	log.Printf("Todo %s: category=%s text_bytes=%d", action, category, len(text))
 
 	// Return updated list
 	r.URL.RawQuery = "category=" + category
@@ -1067,7 +1075,7 @@ func handleEditTodo(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusConflict, map[string]any{"status": "conflict", "task": latest})
 		return
 	}
-	log.Printf("Todo edited: id=%d %q", id, text)
+	log.Printf("Todo edited: id=%d text_bytes=%d", id, len(text))
 	writeJSON(w, http.StatusOK, map[string]any{"status": "saved", "revision": revision + 1, "text": text})
 }
 
@@ -1162,7 +1170,7 @@ func handleArchiveTodos(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rows, err := db.Query(
-		"SELECT id, category, text, due_date, done, COALESCE(archived_at, '') FROM todos WHERE category = ? AND archived = 1 ORDER BY COALESCE(archived_at, created_at) DESC",
+		"SELECT id, category, text, due_date, done, COALESCE(archived_at, '') FROM todos WHERE category = ? AND archived = 1 ORDER BY COALESCE(archived_at, created_at) DESC LIMIT 200",
 		category,
 	)
 	if err != nil {
@@ -1500,12 +1508,12 @@ func handleCreateNote(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if restored {
-		log.Printf("Note restored from archive by name: %q (id=%d)", title, noteID)
+		log.Printf("Note restored from archive: id=%d", noteID)
 		hxTrigger(w, "sbNotice", map[string]string{
 			"message": "Restored an archived note with that name",
 		})
 	} else {
-		log.Printf("Note created: %q (id=%d)", title, noteID)
+		log.Printf("Note created: id=%d", noteID)
 	}
 	r.URL.RawQuery = "id=" + strconv.FormatInt(noteID, 10)
 	handleNotes(w, r)
@@ -1593,84 +1601,14 @@ func handleRenameNote(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "DB error", http.StatusInternalServerError)
 		return
 	}
-	log.Printf("Note renamed: id=%d -> %q", id, title)
+	log.Printf("Note renamed: id=%d", id)
 
 	r.URL.RawQuery = "id=" + strconv.Itoa(id)
 	handleNotes(w, r)
 }
 
-type SearchResultData struct {
-	Query    string
-	Notes    []Note
-	Todos    []Todo
-	Projects []Project
-	Stages   []Stage
-}
-
-func handleSearch(w http.ResponseWriter, r *http.Request) {
-	q := strings.TrimSpace(r.URL.Query().Get("q"))
-	if q == "" {
-		w.Write([]byte(""))
-		return
-	}
-
-	pattern := "%" + q + "%"
-
-	noteRows, err := db.Query(
-		"SELECT id, title FROM notes WHERE archived = 0 AND (title LIKE ? OR content LIKE ?) ORDER BY updated_at DESC LIMIT 10",
-		pattern, pattern,
-	)
-	var notes []Note
-	if err == nil {
-		defer noteRows.Close()
-		for noteRows.Next() {
-			var n Note
-			noteRows.Scan(&n.ID, &n.Title)
-			notes = append(notes, n)
-		}
-	}
-
-	todoRows, err := db.Query(
-		`SELECT t.id, t.category, t.text FROM todos t WHERE `+activeTaskSQL+` AND done=0 AND text LIKE ? ORDER BY created_at DESC LIMIT 10`,
-		pattern,
-	)
-	var todos []Todo
-	if err == nil {
-		defer todoRows.Close()
-		for todoRows.Next() {
-			var t Todo
-			todoRows.Scan(&t.ID, &t.Category, &t.Text)
-			todos = append(todos, t)
-		}
-	}
-
-	var projects []Project
-	var stages []Stage
-	rows, err := db.Query(`SELECT id,name FROM projects WHERE archived=0 AND completed=0 AND name LIKE ? ORDER BY position,id LIMIT 10`, pattern)
-	if err == nil {
-		for rows.Next() {
-			var p Project
-			if rows.Scan(&p.ID, &p.Name) == nil {
-				projects = append(projects, p)
-			}
-		}
-		rows.Close()
-	}
-	rows, err = db.Query(`SELECT s.id,s.name FROM stages s JOIN projects p ON p.id=s.project_id WHERE s.archived=0 AND p.archived=0 AND p.completed=0 AND s.name LIKE ? ORDER BY s.position,s.id LIMIT 10`, pattern)
-	if err == nil {
-		for rows.Next() {
-			var s Stage
-			if rows.Scan(&s.ID, &s.Name) == nil {
-				stages = append(stages, s)
-			}
-		}
-		rows.Close()
-	}
-	renderTemplate(w, "search.html", SearchResultData{Query: q, Notes: notes, Todos: todos, Projects: projects, Stages: stages})
-}
-
 func handleArchiveNotes(w http.ResponseWriter, r *http.Request) {
-	rows, err := db.Query("SELECT id, title FROM notes WHERE archived = 1 ORDER BY title ASC")
+	rows, err := db.Query("SELECT id, title FROM notes WHERE archived = 1 ORDER BY title ASC LIMIT 200")
 	if err != nil {
 		http.Error(w, "DB error", http.StatusInternalServerError)
 		return
@@ -2003,12 +1941,12 @@ func handleAddHabit(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if restored {
-		log.Printf("Habit restored from archive by name: %q (id=%d)", name, existingID)
+		log.Printf("Habit restored from archive: id=%d", existingID)
 		hxTrigger(w, "sbNotice", map[string]string{
 			"message": "Restored an archived habit with that name",
 		})
 	} else {
-		log.Printf("Habit added: %q period=%s target=%d", name, period, target)
+		log.Printf("Habit added: period=%s target=%d", period, target)
 	}
 
 	if r.Header.Get("HX-Target") == "today-content" {
@@ -2047,8 +1985,52 @@ func handleRenameHabit(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "DB error", http.StatusInternalServerError)
 		return
 	}
-	log.Printf("Habit renamed: id=%d -> %q", id, name)
+	log.Printf("Habit renamed: id=%d", id)
 
+	handleHabits(w, r)
+}
+
+func handleUpdateHabit(w http.ResponseWriter, r *http.Request) {
+	if !requirePost(w, r) {
+		return
+	}
+	id, ok := parseID(w, r)
+	if !ok {
+		return
+	}
+	name := strings.TrimSpace(r.FormValue("name"))
+	if name == "" || len(name) > 120 || !validNameRe.MatchString(name) {
+		http.Error(w, "Invalid habit name", http.StatusBadRequest)
+		return
+	}
+	period := r.FormValue("period")
+	if period != "day" && period != "week" && period != "month" && period != "year" {
+		http.Error(w, "Invalid period", http.StatusBadRequest)
+		return
+	}
+	target := 1
+	if period != "day" {
+		var err error
+		target, err = strconv.Atoi(r.FormValue("target"))
+		if err != nil || target < 1 || target > 1000 {
+			http.Error(w, "Invalid target", http.StatusBadRequest)
+			return
+		}
+	}
+	res, err := db.Exec("UPDATE habits SET name=?,period=?,target=? WHERE id=? AND archived=0", name, period, target, id)
+	if err != nil {
+		if strings.Contains(err.Error(), "UNIQUE") {
+			http.Error(w, nameConflictMessage("habits", "name", name, "habit"), http.StatusConflict)
+			return
+		}
+		http.Error(w, "DB error", http.StatusInternalServerError)
+		return
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		http.Error(w, "Habit not found", http.StatusNotFound)
+		return
+	}
+	log.Printf("Habit updated: id=%d period=%s target=%d", id, period, target)
 	handleHabits(w, r)
 }
 
@@ -2107,6 +2089,14 @@ func handleToggleHabit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	renderHabitMutation(w, r)
+}
+
+func renderHabitMutation(w http.ResponseWriter, r *http.Request) {
+	if r.Header.Get("HX-Target") == "today-content" {
+		handleToday(w, r)
+		return
+	}
 	handleHabits(w, r)
 }
 
@@ -2134,7 +2124,7 @@ func handleIncrementHabit(w http.ResponseWriter, r *http.Request) {
 	}
 	log.Printf("Habit incremented: id=%d date=%s", id, today)
 
-	handleHabits(w, r)
+	renderHabitMutation(w, r)
 }
 
 // handleDecrementHabit undoes the most recent completion of a periodic goal
@@ -2171,7 +2161,8 @@ func handleDecrementHabit(w http.ResponseWriter, r *http.Request) {
 		ORDER BY date DESC LIMIT 1
 	`, id, startStr).Scan(&date, &count)
 	if errors.Is(err, sql.ErrNoRows) {
-		handleHabits(w, r) // nothing to undo this period
+		tx.Rollback()
+		renderHabitMutation(w, r) // nothing to undo this period
 		return
 	}
 	if err != nil {
@@ -2194,7 +2185,7 @@ func handleDecrementHabit(w http.ResponseWriter, r *http.Request) {
 	}
 	log.Printf("Habit decremented: id=%d date=%s", id, date)
 
-	handleHabits(w, r)
+	renderHabitMutation(w, r)
 }
 
 func handleDeleteHabit(w http.ResponseWriter, r *http.Request) {
@@ -2227,6 +2218,7 @@ func handleArchiveHabits(w http.ResponseWriter, r *http.Request) {
 		FROM habits h
 		WHERE h.archived = 1
 		ORDER BY h.created_at DESC
+		LIMIT 200
 	`)
 	if err != nil {
 		http.Error(w, "DB error", http.StatusInternalServerError)

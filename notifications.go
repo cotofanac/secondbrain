@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 
@@ -44,8 +43,7 @@ func expireSubscription(endpoint string) error {
 }
 
 func sendDevicePush(endpoint, p256dh, auth string, p pushPayload) PushResult {
-	parsed, err := url.Parse(endpoint)
-	if err != nil || parsed.Scheme != "https" {
+	if err := validatePushEndpoint(endpoint); err != nil {
 		return PushResult{Message: "Invalid push endpoint. Enable this device again."}
 	}
 	body, err := json.Marshal(p)

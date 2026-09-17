@@ -46,11 +46,11 @@ No live database, deployment, image publication, or repository push was performe
 
 ## Schedule and PWA changes
 
-On first startup, existing `TASK_REMINDER_TIME` and `HABIT_REMINDER_TIME` values seed the shared reminder schedule. After initialization, the saved schedule under Notifications is authoritative; changing these environment variables does not overwrite saved preferences. Existing daily sent markers are retained to avoid duplicate reminders on migration day.
+On first startup, existing `TASK_REMINDER_TIME` and `HABIT_REMINDER_TIME` values seed the shared reminder schedule. After initialization, the saved schedule under Today → Reminders & notifications is authoritative; changing these environment variables does not overwrite saved preferences. Existing daily sent markers are retained to avoid duplicate reminders on migration day.
 
-The shared calendar time zone defaults to Europe/Bucharest and is editable under Notifications → Reminder schedule. It determines due-date comparisons, habit days, and reminder times. The weekly review is initially disabled; its default schedule is Sunday 18:00. Enabling it starts with the next scheduled occurrence. After downtime, only the most recent missed occurrence is generated, not a backlog. Saved reviews can be opened from the review selector or notification link.
+The shared calendar time zone defaults to Europe/Bucharest and is editable under Today → Reminders & notifications. It determines due-date comparisons, habit days, and daily reminder times. Scheduled weekly reviews are retired; existing saved reviews remain readable from their old links and their database rows are preserved.
 
-Each device opts into delivery separately. Subscription registration is confirmed by the server. Revoked subscriptions are removed and remembered by an endpoint hash in settings, so resuming the app cannot silently re-register a revoked endpoint. Failed transient deliveries retry at most twice, after one and then five minutes; successful devices are not retried. Queued daily delivery attempts expire at the next local midnight. Queued weekly delivery attempts expire at the next scheduled weekly occurrence. Server acceptance cannot establish that an Apple device actually displayed a banner.
+Each device opts into delivery separately. Subscription registration is confirmed by the server. Revoked subscriptions are removed and remembered by an endpoint hash in settings, so resuming the app cannot silently re-register a revoked endpoint. Failed transient deliveries retry at most twice, after one and then five minutes; successful devices are not retried. Queued daily delivery attempts expire at the next local midnight. Legacy queued weekly deliveries are skipped. Server acceptance cannot establish that an Apple device actually displayed a banner.
 
 The service worker retains `/static/sw.js` but gains `/` scope through `Service-Worker-Allowed: /`. The old `/static/` registration is removed only after a working root subscription has been saved. PNG icons and a stable manifest identity are included. A device may need to be enabled again after updating. VAPID keys remain in the existing database and must be retained across deploys.
 
@@ -62,14 +62,14 @@ Brave requires **Use Google services for push messaging** under `brave://setting
 
 Local verification passed with `go test -race ./...`, the notification client checks, and the full browser workflow. Automated checks use disposable temporary databases, never `./data/secondbrain.db`:
 
-- Go tests: legacy migration and idempotence, revision conflicts, large-note saves, membership validation, reassignment, completion/archival, shared note links, ordering, template rendering/search, weekly snapshots/DST, per-device retry limits, push test targeting, and expired-session errors.
+- Go tests: legacy migration and idempotence, Today grouping and suggestions, revision conflicts, large-note saves, membership validation, reassignment, completion/archival, shared note links, ordering, template rendering/search, weekly-review retirement, per-device retry limits, push test targeting, and expired-session errors.
 - `node scripts/push-smoke.cjs`: direct user activation, denied permission, rejected subscription storage, test status, and expired-subscription renewal.
-- `scripts/ui-smoke.cjs`: real Chromium interactions for tasks/projects/stages, completion, due-date editing, capture/notes preservation including delayed responses and cursor selection, mobile detail panels, larger text, keyboard search, settings, review, root worker readiness, and 320/375/390/430/1024/1440px layouts. Playwright is a development-only tool; it is not added to the application dependencies. See the script for optional `PLAYWRIGHT_MODULE`, `TEST_BROWSER`, `TEST_BASE_URL`, and `TEST_PASSCODE` environment variables. Run it only against a fresh disposable database.
+- `scripts/ui-smoke.cjs`: real Chromium interactions for Today, tasks/projects/stages, completion, due-date editing, capture/notes preservation including delayed responses and cursor selection, mobile detail panels and navigation geometry, larger text, keyboard search, reminders, root worker readiness, and 320/375/390/430/1024/1440px layouts. Playwright is a development-only tool; it is not added to the application dependencies. See the script for optional `PLAYWRIGHT_MODULE`, `TEST_BROWSER`, `TEST_BASE_URL`, and `TEST_PASSCODE` environment variables. Run it only against a fresh disposable database.
 
 Still required on real devices before rollout is considered verified:
 
 - Installed iPhone PWA: initial permission tap, blocked-permission guidance, test delivery with the app closed, notification opening, Home Screen icon, software keyboard, safe areas, and larger system text.
 - Installed Mac PWA: permission/test delivery with the app closed, Focus/notification settings, keyboard navigation, and existing service-worker/subscription upgrade.
-- Open a task or saved review notification after session expiry and verify login returns to its destination.
+- Open a task or reminder notification after session expiry and verify login returns to its destination.
 
 These Apple checks cannot be replaced by Chromium emulation or mocked push responses. Reference: [Apple Web Push requirements](https://webkit.org/blog/13878/web-push-for-web-apps-on-ios-and-ipados/).

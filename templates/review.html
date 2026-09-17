@@ -1,6 +1,6 @@
 <article class="review-card">
  <div class="detail-heading"><h2>{{if .Preview}}Your week so far{{else}}Weekly review{{end}}</h2><button type="button" onclick="openToday()" aria-label="Back to Today">{{template "icon-close"}}</button></div>
- {{if .Saved}}<label class="review-history">Saved reviews <select onchange="openReview(this.value)"><option value="">Current week</option>{{range .Saved}}<option value="{{.ID}}" {{if eq .ID $.ID}}selected{{end}}>{{.Label}}</option>{{end}}</select></label>{{end}}
+ {{if .Saved}}<label class="review-history">Saved reviews <select onchange="openReview(this.value)"><option value="">Back to Today</option>{{range .Saved}}<option value="{{.ID}}" {{if eq .ID $.ID}}selected{{end}}>{{.Label}}</option>{{end}}</select></label>{{end}}
  <p class="muted">{{.Start}} – {{.End}}</p>
  {{if .Preview}}<p class="muted">A live look at the past seven days. Scheduled reviews create a saved summary.</p>{{end}}
  <h2>Completed · {{len .Completed}}</h2><ul>{{range .Completed}}<li>{{.Text}}</li>{{else}}<li>No completed tasks in this period. Small steps still count.</li>{{end}}</ul>

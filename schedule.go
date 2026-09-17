@@ -1,7 +1,6 @@
 package main
 
 import (
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -25,18 +24,21 @@ func appLocation() *time.Location {
 func appNow() time.Time { return time.Now().In(appLocation()) }
 
 type ScheduleSettings struct {
-	TaskEnabled, HabitEnabled, ReviewEnabled  bool
-	TaskTime, HabitTime, ReviewTime, Timezone string
-	ReviewDay                                 int
-	ReviewEnabledAt                           string
+	TaskEnabled, HabitEnabled     bool
+	TaskTime, HabitTime, Timezone string
 }
 
 func initScheduleSettings() {
-	defaults := map[string]string{"task_enabled": strconv.FormatBool(taskReminder.enabled), "habit_enabled": strconv.FormatBool(habitReminder.enabled), "review_enabled": "false", "task_time": fmt.Sprintf("%02d:%02d", taskReminder.hour, taskReminder.min), "habit_time": fmt.Sprintf("%02d:%02d", habitReminder.hour, habitReminder.min), "review_time": "18:00", "review_day": "0", "timezone": "Europe/Bucharest", "queued_task": getSetting("task_reminder_sent"), "queued_habit": getSetting("habit_reminder_sent")}
+	defaults := map[string]string{"task_enabled": strconv.FormatBool(taskReminder.enabled), "habit_enabled": strconv.FormatBool(habitReminder.enabled), "review_enabled": "false", "task_time": fmt.Sprintf("%02d:%02d", taskReminder.hour, taskReminder.min), "habit_time": fmt.Sprintf("%02d:%02d", habitReminder.hour, habitReminder.min), "timezone": "Europe/Bucharest", "queued_task": getSetting("task_reminder_sent"), "queued_habit": getSetting("habit_reminder_sent")}
 	for k, v := range defaults {
 		if _, err := db.Exec(`INSERT OR IGNORE INTO settings(key,value) VALUES(?,?)`, k, v); err != nil {
 			log.Fatalf("Initialize schedules: %v", err)
 		}
+	}
+	// Weekly reviews are historical only. Disable a legacy installation's
+	// setting without deleting its saved reviews or delivery history.
+	if _, err := db.Exec(`UPDATE settings SET value='false' WHERE key='review_enabled'`); err != nil {
+		log.Fatal(err)
 	}
 	settings, err := loadSchedule()
 	if err != nil {
@@ -51,7 +53,7 @@ func initScheduleSettings() {
 func loadSchedule() (ScheduleSettings, error) {
 	var s ScheduleSettings
 	values := map[string]string{}
-	rows, err := db.Query(`SELECT key,value FROM settings WHERE key IN ('task_enabled','habit_enabled','review_enabled','task_time','habit_time','review_time','review_day','timezone','review_enabled_at')`)
+	rows, err := db.Query(`SELECT key,value FROM settings WHERE key IN ('task_enabled','habit_enabled','task_time','habit_time','timezone')`)
 	if err != nil {
 		return s, err
 	}
@@ -68,47 +70,104 @@ func loadSchedule() (ScheduleSettings, error) {
 	}
 	s.TaskEnabled = values["task_enabled"] == "true"
 	s.HabitEnabled = values["habit_enabled"] == "true"
-	s.ReviewEnabled = values["review_enabled"] == "true"
 	s.TaskTime = values["task_time"]
 	s.HabitTime = values["habit_time"]
-	s.ReviewTime = values["review_time"]
 	s.Timezone = values["timezone"]
-	s.ReviewDay, _ = strconv.Atoi(values["review_day"])
-	s.ReviewEnabledAt = values["review_enabled_at"]
 	return s, nil
 }
 func registerScheduleRoutes() {
 	http.HandleFunc("/settings", authMiddleware(handleSettings))
 	http.HandleFunc("/settings/save", authMiddleware(handleSaveSettings))
 	http.HandleFunc("/today", authMiddleware(handleToday))
+	http.HandleFunc("/today/reschedule", authMiddleware(handleTodayReschedule))
 	http.HandleFunc("/review", authMiddleware(handleReview))
 	http.HandleFunc("/push/status", authMiddleware(handlePushStatus))
 }
 
+type TodayItem struct {
+	ID, Revision                int
+	Text, Date, Today, Tomorrow string
+	Project, Stage              string
+}
+
 type TodayView struct {
-	Date, ISODate          string
-	Overdue, Due, Upcoming []ReviewItem
-	Habits                 []Habit
-	Week                   WeeklyReview
+	Date, ISODate               string
+	Overdue, Due, Upcoming      []TodayItem
+	Suggestions                 []TodayItem
+	DailyHabits, PeriodicHabits []Habit
+	CompletedToday, DueLeft     int
+	DailyDone, DailyTotal       int
+}
+
+func scanTodayItems(query string, args ...any) ([]TodayItem, error) {
+	rows, err := db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []TodayItem
+	for rows.Next() {
+		var item TodayItem
+		if err = rows.Scan(&item.ID, &item.Text, &item.Date, &item.Revision, &item.Project, &item.Stage); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
 }
 
 func loadToday(now time.Time) (TodayView, error) {
-	week, err := buildReview(now)
-	if err != nil {
-		return TodayView{}, err
-	}
 	today := now.Format("2006-01-02")
-	view := TodayView{Date: now.Format("Monday, 2 January"), ISODate: today, Overdue: week.Overdue, Week: week}
-	for _, item := range week.Upcoming {
-		if item.Date == today {
-			view.Due = append(view.Due, item)
-		} else {
-			view.Upcoming = append(view.Upcoming, item)
+	tomorrow := now.AddDate(0, 0, 1).Format("2006-01-02")
+	limit := now.AddDate(0, 0, 8).Format("2006-01-02")
+	view := TodayView{Date: now.Format("Monday, 2 January"), ISODate: today}
+	base := `SELECT t.id,t.text,t.due_date,t.revision,COALESCE(p.name,''),COALESCE(s.name,'')
+		FROM todos t LEFT JOIN projects p ON p.id=t.project_id LEFT JOIN stages s ON s.id=t.stage_id
+		WHERE t.category='todo' AND t.done=0 AND ` + activeTaskSQL
+	var err error
+	view.Overdue, err = scanTodayItems(base+` AND t.due_date!='' AND t.due_date<? ORDER BY t.due_date,t.position,t.id`, today)
+	if err != nil {
+		return view, err
+	}
+	view.Due, err = scanTodayItems(base+` AND t.due_date=? ORDER BY t.position,t.id`, today)
+	if err != nil {
+		return view, err
+	}
+	view.Upcoming, err = scanTodayItems(base+` AND t.due_date>? AND t.due_date<? ORDER BY t.due_date,t.position,t.id`, today, limit)
+	if err != nil {
+		return view, err
+	}
+	// Suggestions are deterministic and transparent: one unscheduled task from
+	// each project first, followed by standalone tasks, in the user's list order.
+	view.Suggestions, err = scanTodayItems(base + ` AND t.due_date='' AND (t.project_id IS NULL OR t.id=(
+		SELECT t2.id FROM todos t2 WHERE t2.project_id=t.project_id AND t2.category='todo' AND t2.done=0
+		AND t2.archived=0 AND t2.due_date='' AND (t2.stage_id IS NULL OR EXISTS(
+			SELECT 1 FROM stages s2 WHERE s2.id=t2.stage_id AND s2.archived=0))
+		ORDER BY t2.position,t2.id LIMIT 1))
+		ORDER BY CASE WHEN t.project_id IS NULL THEN 1 ELSE 0 END,COALESCE(p.position,0),t.position,t.id LIMIT 3`)
+	if err != nil {
+		return view, err
+	}
+	for _, list := range [][]TodayItem{view.Overdue, view.Due, view.Upcoming, view.Suggestions} {
+		for i := range list {
+			list[i].Today, list[i].Tomorrow = today, tomorrow
 		}
 	}
+	if err = db.QueryRow(`SELECT COUNT(*) FROM todos WHERE category='todo' AND done=1 AND completed_at>=? AND completed_at<?`,
+		time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).UTC().Format(time.RFC3339),
+		time.Date(now.Year(), now.Month(), now.Day()+1, 0, 0, 0, 0, now.Location()).UTC().Format(time.RFC3339)).Scan(&view.CompletedToday); err != nil {
+		return view, err
+	}
+	view.DueLeft = len(view.Overdue) + len(view.Due)
 	for _, habit := range loadHabitsAt(now) {
 		if habit.Period == "day" {
-			view.Habits = append(view.Habits, habit)
+			view.DailyHabits = append(view.DailyHabits, habit)
+			view.DailyTotal++
+			if habit.Done {
+				view.DailyDone++
+			}
+		} else {
+			view.PeriodicHabits = append(view.PeriodicHabits, habit)
 		}
 	}
 	return view, nil
@@ -121,6 +180,39 @@ func handleToday(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	renderTemplate(w, "today.html", view)
+}
+func handleTodayReschedule(w http.ResponseWriter, r *http.Request) {
+	if !requirePost(w, r) {
+		return
+	}
+	id, ok := parseID(w, r)
+	if !ok {
+		return
+	}
+	revision, err := strconv.Atoi(r.FormValue("revision"))
+	if err != nil {
+		http.Error(w, "Invalid revision", 400)
+		return
+	}
+	due := r.FormValue("due_date")
+	if due != "" {
+		if _, err = time.Parse("2006-01-02", due); err != nil {
+			http.Error(w, "Invalid date", 400)
+			return
+		}
+	}
+	result, err := db.Exec(`UPDATE todos AS t SET due_date=?,revision=revision+1 WHERE id=? AND revision=? AND category='todo' AND done=0 AND `+activeTaskSQL, due, id, revision)
+	if err != nil {
+		http.Error(w, "Could not reschedule task", 500)
+		return
+	}
+	changed, _ := result.RowsAffected()
+	if changed == 0 {
+		http.Error(w, "This task changed elsewhere. Refresh and try again.", 409)
+		return
+	}
+	hxTrigger(w, "sbWorkspaceChanged", map[string]any{"message": "Task scheduled"})
+	handleToday(w, r)
 }
 func handleSettings(w http.ResponseWriter, r *http.Request) {
 	s, err := loadSchedule()
@@ -145,7 +237,7 @@ func handleSaveSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	vals := map[string]string{"timezone": loc.String()}
-	for _, kind := range []string{"task", "habit", "review"} {
+	for _, kind := range []string{"task", "habit"} {
 		raw := r.FormValue(kind + "_time")
 		rt, e := parseReminderTime(raw, reminderTime{})
 		if e != nil || !rt.enabled {
@@ -155,27 +247,13 @@ func handleSaveSettings(w http.ResponseWriter, r *http.Request) {
 		vals[kind+"_time"] = fmt.Sprintf("%02d:%02d", rt.hour, rt.min)
 		vals[kind+"_enabled"] = strconv.FormatBool(r.FormValue(kind+"_enabled") == "on")
 	}
-	day, err := strconv.Atoi(r.FormValue("review_day"))
-	if err != nil || day < 0 || day > 6 {
-		http.Error(w, "Choose a weekday", 400)
-		return
-	}
-	vals["review_day"] = strconv.Itoa(day)
 	tx, err := db.Begin()
 	if err != nil {
 		http.Error(w, "DB error", 500)
 		return
 	}
 	defer tx.Rollback()
-	var old string
-	err = tx.QueryRow(`SELECT value FROM settings WHERE key='review_enabled'`).Scan(&old)
-	if err != nil && err != sql.ErrNoRows {
-		http.Error(w, "DB error", 500)
-		return
-	}
-	if vals["review_enabled"] == "true" && old != "true" {
-		vals["review_enabled_at"] = time.Now().UTC().Format(time.RFC3339)
-	}
+	vals["review_enabled"] = "false"
 	for k, v := range vals {
 		if _, err = tx.Exec(`INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, k, v); err != nil {
 			http.Error(w, "Could not save settings", 500)
@@ -189,18 +267,6 @@ func handleSaveSettings(w http.ResponseWriter, r *http.Request) {
 	calendarZone.Store(loc)
 	hxTrigger(w, "sbNotice", map[string]any{"message": "Settings saved"})
 	handleSettings(w, r)
-}
-
-// latestWeeklyOccurrence uses calendar arithmetic so DST does not move wall time.
-func latestWeeklyOccurrence(now time.Time, day int, clock string) time.Time {
-	rt, _ := parseReminderTime(clock, reminderTime{hour: 18, enabled: true})
-	delta := (int(now.Weekday()) - day + 7) % 7
-	date := now.AddDate(0, 0, -delta)
-	at := time.Date(date.Year(), date.Month(), date.Day(), rt.hour, rt.min, 0, 0, now.Location())
-	if at.After(now) {
-		at = at.AddDate(0, 0, -7)
-	}
-	return at
 }
 
 type ReviewItem struct {
@@ -226,89 +292,14 @@ type WeeklyReview struct {
 	Preview                      bool
 }
 
-func buildReview(end time.Time) (WeeklyReview, error) {
-	start := end.AddDate(0, 0, -7)
-	review := WeeklyReview{Start: start.Format("2 Jan 2006"), End: end.Format("2 Jan 2006 15:04 MST")}
-	rows, err := db.Query(`SELECT id,text FROM todos WHERE category='todo' AND done=1 AND completed_at>=? AND completed_at<? ORDER BY completed_at DESC`, start.UTC().Format(time.RFC3339), end.UTC().Format(time.RFC3339))
-	if err != nil {
-		return review, err
-	}
-	for rows.Next() {
-		var item ReviewItem
-		if err = rows.Scan(&item.ID, &item.Text); err != nil {
-			break
-		}
-		review.Completed = append(review.Completed, item)
-	}
-	if err == nil {
-		err = rows.Err()
-	}
-	rows.Close()
-	if err != nil {
-		return review, err
-	}
-	rows, err = db.Query(`SELECT t.id,t.text,t.due_date FROM todos t WHERE t.category='todo' AND t.done=0 AND t.due_date!='' AND t.due_date<? AND `+activeTaskSQL+` ORDER BY t.due_date,t.id`, end.AddDate(0, 0, 7).Format("2006-01-02"))
-	if err != nil {
-		return review, err
-	}
-	today := end.Format("2006-01-02")
-	for rows.Next() {
-		var item ReviewItem
-		if err = rows.Scan(&item.ID, &item.Text, &item.Date); err != nil {
-			break
-		}
-		if item.Date < today {
-			review.Overdue = append(review.Overdue, item)
-		} else {
-			review.Upcoming = append(review.Upcoming, item)
-		}
-	}
-	if err == nil {
-		err = rows.Err()
-	}
-	rows.Close()
-	if err != nil {
-		return review, err
-	}
-	ws, err := loadWorkspace()
-	if err != nil {
-		return review, err
-	}
-	for _, p := range ws.Projects {
-		review.Projects = append(review.Projects, ReviewProgress{p.ID, p.Name, p.Group.Completed, p.Group.Total})
-	}
-	err = db.QueryRow(`SELECT COALESCE(SUM(count),0) FROM habit_logs WHERE date>=? AND date<?`, start.Format("2006-01-02"), end.Format("2006-01-02")).Scan(&review.HabitActivity)
-	return review, err
-}
-func snapshotReview(end time.Time) (int, error) {
-	var id int
-	key := end.UTC().Format(time.RFC3339)
-	err := db.QueryRow(`SELECT id FROM weekly_reviews WHERE period_end=?`, key).Scan(&id)
-	if err == nil {
-		return id, nil
-	}
-	if err != sql.ErrNoRows {
-		return 0, err
-	}
-	review, err := buildReview(end)
-	if err != nil {
-		return 0, err
-	}
-	body, err := json.Marshal(review)
-	if err != nil {
-		return 0, err
-	}
-	_, err = db.Exec(`INSERT OR IGNORE INTO weekly_reviews(period_end,content,created_at) VALUES(?,?,?)`, key, string(body), time.Now().UTC().Format(time.RFC3339))
-	if err != nil {
-		return 0, err
-	}
-	err = db.QueryRow(`SELECT id FROM weekly_reviews WHERE period_end=?`, key).Scan(&id)
-	return id, err
-}
 func handleReview(w http.ResponseWriter, r *http.Request) {
 	var review WeeklyReview
 	var err error
 	id := r.URL.Query().Get("id")
+	if id == "" {
+		handleToday(w, r)
+		return
+	}
 	if id != "" {
 		var content string
 		err = db.QueryRow(`SELECT id,content FROM weekly_reviews WHERE id=?`, id).Scan(&review.ID, &content)
@@ -317,9 +308,6 @@ func handleReview(w http.ResponseWriter, r *http.Request) {
 			err = json.Unmarshal([]byte(content), &review)
 			review.ID = storedID
 		}
-	} else {
-		review, err = buildReview(appNow())
-		review.Preview = true
 	}
 	if err != nil {
 		http.Error(w, "Review unavailable", 404)
@@ -417,20 +405,6 @@ func runScheduleTick(now time.Time) error {
 		}
 		setSetting("queued_"+kind, today)
 	}
-	if settings.ReviewEnabled {
-		at := latestWeeklyOccurrence(now, settings.ReviewDay, settings.ReviewTime)
-		enabledAt, _ := time.Parse(time.RFC3339, settings.ReviewEnabledAt)
-		if !at.Before(enabledAt) {
-			id, e := snapshotReview(at)
-			if e != nil {
-				return e
-			}
-			key := "review:" + at.UTC().Format(time.RFC3339)
-			if err = queueNotification(key, pushPayload{Title: "Your weekly review", Body: "A quiet look back, and what’s coming next.", Tag: "review", URL: fmt.Sprintf("/?view=review&review=%d", id)}, now, at.AddDate(0, 0, 7)); err != nil {
-				return err
-			}
-		}
-	}
 	return processDeliveries(now, settings)
 }
 func processDeliveries(now time.Time, settings ScheduleSettings) error {
@@ -458,7 +432,7 @@ func processDeliveries(now time.Time, settings ScheduleSettings) error {
 		return err
 	}
 	for _, d := range ds {
-		enabled := strings.HasPrefix(d.Key, "task:") && settings.TaskEnabled || strings.HasPrefix(d.Key, "habit:") && settings.HabitEnabled || strings.HasPrefix(d.Key, "review:") && settings.ReviewEnabled
+		enabled := strings.HasPrefix(d.Key, "task:") && settings.TaskEnabled || strings.HasPrefix(d.Key, "habit:") && settings.HabitEnabled
 		expiry, _ := time.Parse(time.RFC3339, d.Expires)
 		if !enabled || !now.Before(expiry) {
 			_, err = db.Exec(`UPDATE push_deliveries SET status='skipped',result='Disabled or expired' WHERE endpoint=? AND event_key=?`, d.Endpoint, d.Key)

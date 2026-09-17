@@ -10,7 +10,7 @@ services:
       - PORT=8080
       - DATA_DIR=/app/data
       # Set TZ to your local zone (e.g. Europe/Bucharest) so dates, "today" for
-      # habits, and note timestamps match your wall clock. Defaults to Europe/Bucharest. The app calendar zone is editable under Notifications → Reminder schedule.
+      # habits, and note timestamps match your wall clock. Defaults to Europe/Bucharest. The app calendar zone is editable from Today → Reminders & notifications.
       - TZ=${TZ:-Europe/Bucharest}
       # Initial push-reminder settings (24h HH:MM); edit them in the app afterward. Set either to
       # "off" to disable that reminder. Requires HTTPS and, on iOS, installing

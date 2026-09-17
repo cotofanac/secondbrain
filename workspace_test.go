@@ -310,21 +310,6 @@ func TestConcurrentNoteArchiveKeepsOneActive(t *testing.T) {
 	}
 }
 
-func TestWeeklyCalendarDST(t *testing.T) {
-	loc, _ := time.LoadLocation("Europe/Bucharest")
-	for _, dateRaw := range []string{"2026-03-29T19:00:00", "2026-10-25T19:00:00", "2026-09-14T09:00:00"} {
-		now, _ := time.ParseInLocation("2006-01-02T15:04:05", dateRaw, loc)
-		at := latestWeeklyOccurrence(now, 0, "18:00")
-		if at.Weekday() != time.Sunday || at.Hour() != 18 || at.After(now) || now.Sub(at) > 7*24*time.Hour {
-			t.Fatalf("bad wall time %v -> %v", now, at)
-		}
-	}
-	now, _ := time.ParseInLocation("2006-01-02 15:04", "2026-09-13 17:00", loc)
-	if at := latestWeeklyOccurrence(now, 0, "18:00"); at.Day() != 6 {
-		t.Fatal("future occurrence used")
-	}
-}
-
 func TestDeliveryRetriesArePerDeviceAndBounded(t *testing.T) {
 	setupWorkspaceDB(t)
 	old := deliverPush
@@ -366,43 +351,64 @@ func TestDeliveryRetriesArePerDeviceAndBounded(t *testing.T) {
 	}
 }
 
-func TestWeeklyReviewSnapshotsAndLatestMissedOnly(t *testing.T) {
+func TestTodaySeparatesAttentionUpcomingAndSuggestions(t *testing.T) {
+	setupWorkspaceDB(t)
+	now := time.Date(2026, 9, 17, 10, 0, 0, 0, appLocation())
+	execSQL(t, `INSERT INTO projects(id,name,position) VALUES(1,'Car',1)`)
+	execSQL(t, `INSERT INTO todos(category,text,due_date,done,project_id,position,completed_at) VALUES
+		('todo','Late','2026-09-16',0,NULL,0,NULL),
+		('todo','Due','2026-09-17',0,NULL,0,NULL),
+		('todo','Soon','2026-09-20',0,NULL,0,NULL),
+		('todo','Project next','',0,1,0,NULL),
+		('todo','Project later','',0,1,1,NULL),
+		('todo','Standalone','',0,NULL,0,NULL),
+		('todo','Finished','',1,NULL,0,?)`, now.Add(-time.Hour).UTC().Format(time.RFC3339))
+	view, err := loadToday(now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(view.Overdue) != 1 || view.Overdue[0].Text != "Late" {
+		t.Fatalf("overdue = %+v", view.Overdue)
+	}
+	if len(view.Due) != 1 || view.Due[0].Text != "Due" {
+		t.Fatalf("due = %+v", view.Due)
+	}
+	if len(view.Upcoming) != 1 || view.Upcoming[0].Text != "Soon" {
+		t.Fatalf("upcoming = %+v", view.Upcoming)
+	}
+	if len(view.Suggestions) != 2 || view.Suggestions[0].Text != "Project next" || view.Suggestions[1].Text != "Standalone" {
+		t.Fatalf("suggestions = %+v", view.Suggestions)
+	}
+	if view.CompletedToday != 1 || view.DueLeft != 2 {
+		t.Fatalf("stats = completed %d attention %d", view.CompletedToday, view.DueLeft)
+	}
+	w := httptest.NewRecorder()
+	renderTemplate(w, "today.html", view)
+	requireOK(t, w)
+	if body := w.Body.String(); !strings.Contains(body, "What next") || !strings.Contains(body, `value="2026-09-17"`) {
+		t.Fatalf("Today actions missing from rendered view: %s", body)
+	}
+}
+
+func TestWeeklyReviewsAreRetiredWithoutDeletingHistory(t *testing.T) {
 	setupWorkspaceDB(t)
 	setSetting("task_enabled", "false")
 	setSetting("habit_enabled", "false")
 	setSetting("review_enabled", "true")
 	setSetting("review_enabled_at", "2026-08-01T00:00:00Z")
 	now := time.Date(2026, 9, 14, 9, 0, 0, 0, appLocation())
-	end := latestWeeklyOccurrence(now, 0, "18:00")
-	execSQL(t, `INSERT INTO todos(category,text,done,completed_at) VALUES('todo','Finished',1,?),('todo','Old unknown',1,NULL),('groceries','Milk',1,?)`, end.Add(-time.Hour).UTC().Format(time.RFC3339), end.Add(-time.Hour).UTC().Format(time.RFC3339))
+	execSQL(t, `INSERT INTO weekly_reviews(period_end,content,created_at) VALUES(?,?,?)`, now.UTC().Format(time.RFC3339), `{"Start":"legacy"}`, now.UTC().Format(time.RFC3339))
 	if err := runScheduleTick(now); err != nil {
-		t.Fatal(err)
-	}
-	if err := runScheduleTick(now.Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	var n int
 	db.QueryRow(`SELECT count(*) FROM weekly_reviews`).Scan(&n)
 	if n != 1 {
-		t.Fatalf("generated backlog/duplicate: %d", n)
+		t.Fatalf("historical reviews changed: %d", n)
 	}
-	var content string
-	db.QueryRow(`SELECT content FROM weekly_reviews`).Scan(&content)
-	var review WeeklyReview
-	if err := json.Unmarshal([]byte(content), &review); err != nil {
-		t.Fatal(err)
-	}
-	if len(review.Completed) != 1 || review.Completed[0].Text != "Finished" {
-		t.Fatalf("wrong completion history %+v", review.Completed)
-	}
-	execSQL(t, `UPDATE todos SET text='Changed' WHERE text='Finished'`)
-	if err := runScheduleTick(now.Add(2 * time.Hour)); err != nil {
-		t.Fatal(err)
-	}
-	var after string
-	db.QueryRow(`SELECT content FROM weekly_reviews`).Scan(&after)
-	if content != after {
-		t.Fatal("snapshot changed")
+	db.QueryRow(`SELECT count(*) FROM push_deliveries WHERE event_key LIKE 'review:%'`).Scan(&n)
+	if n != 0 {
+		t.Fatalf("weekly delivery was queued: %d", n)
 	}
 }
 
@@ -460,7 +466,7 @@ func TestDisabledExpiredDeliveryAndSettings(t *testing.T) {
 	if before.Timezone != "Europe/Bucharest" {
 		t.Fatal("invalid save altered timezone")
 	}
-	good := formRequest(t, handleSaveSettings, "/settings/save", url.Values{"timezone": {"Europe/London"}, "task_time": {"10:00"}, "habit_time": {"21:00"}, "review_time": {"18:00"}, "review_day": {"0"}, "task_enabled": {"on"}})
+	good := formRequest(t, handleSaveSettings, "/settings/save", url.Values{"timezone": {"Europe/London"}, "task_time": {"10:00"}, "habit_time": {"21:00"}, "task_enabled": {"on"}})
 	requireOK(t, good)
 	if appLocation().String() != "Europe/London" {
 		t.Fatal("shared calendar timezone was not updated")

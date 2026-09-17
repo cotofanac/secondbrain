@@ -52,17 +52,17 @@ and it opens like an app, without giving up ownership of your data.
 
 ## A Gentle Look Ahead
 
-Today brings due tasks, unfinished habits, and the next few days into one calm,
-actionable view. It is there when you want direction, while Second Brain still
-reopens the list you last used when you only need to capture something quickly.
+Today is the home view. It brings due tasks, habits, transparent suggestions
+from unscheduled work, and the next seven days into one calm, actionable place.
+Task lists remain available as one continuous, quickly scannable page on mobile.
 
 Due dates highlight what needs attention without making everything feel urgent.
 Optional reminders bring back tasks due today and habits still waiting for a
 check-in.
 
-The weekly review gathers the shape of your week in one place: what you
-finished, how projects moved, what is coming next, and the habits you showed up
-for. A useful pause, not another report to maintain.
+The “What next” section offers a few unscheduled tasks with a plain explanation
+of where each came from. One tap can bring a suggestion into Today, complete it,
+or open its details.
 
 ## Yours, Properly
 
@@ -76,7 +76,7 @@ It is intentionally small: one Go application, one database, one person.
 
 Version 4 is a new chapter for Second Brain. It brings a focused desktop
 workspace, a new Today view, thoughtful mobile navigation, faster capture,
-direct editing, stronger notes, richer habits, project details, weekly reviews,
+direct editing, stronger notes, richer habits, project details, daily planning,
 notifications, and a visual identity that finally feels like the product.
 
 The result is not a system you have to manage. It is simply a dependable place

@@ -12,13 +12,13 @@
     <link rel="apple-touch-icon" href="/static/icon-192.png">
     <link rel="stylesheet" href="/static/style.css?v={{assetVersion}}">
 </head>
-<body data-mode="todos" data-timezone="{{.Timezone}}" data-inactivity-timeout-seconds="{{.InactivityTimeoutSeconds}}">
+<body data-mode="today" data-timezone="{{.Timezone}}" data-inactivity-timeout-seconds="{{.InactivityTimeoutSeconds}}">
     <div id="app">
     <!-- Top nav: mode switcher -->
     <header class="topbar" id="topbar">
         <button type="button" class="topbar-back icon-button" id="topbar-back" onclick="leaveSecondaryView()" aria-label="Back" hidden>{{template "icon-back"}}</button>
-        <button type="button" class="topbar-title workspace-switcher" id="topbar-title" onclick="openMobileWorkspaceSwitcher()" aria-label="Choose task list" aria-haspopup="dialog">Tasks</button>
-        <span class="topbar-stat" id="topbar-stat"></span>
+        <button type="button" class="topbar-title workspace-switcher can-switch-workspace" id="topbar-title" onclick="openMobileWorkspaceSwitcher()" aria-label="Choose destination, current view Today" aria-haspopup="dialog">Today</button>
+        <button type="button" class="topbar-stat" id="topbar-stat" onclick="openToday()" aria-label="Open Today"></button>
         <button class="header-action icon-button" onclick="openSearch()" aria-label="Search">{{template "icon-search"}}</button>
         <form method="post" action="/logout" class="logout-form">
             <button type="submit" class="logout-btn" title="Logout" aria-label="Logout">
@@ -43,10 +43,10 @@
         <div id="search-results" class="search-results"></div>
     </div>
 
-    <main id="todos-view" class="view active"><div class="task-layout"><div id="todo-items">{{template "workspace.html" .Workspace}}</div><aside id="detail-pane" class="detail-pane" aria-label="Details" tabindex="-1" hidden></aside></div>
+    <main id="todos-view" class="view"><div class="task-layout"><div id="todo-items">{{template "workspace.html" .Workspace}}</div><aside id="detail-pane" class="detail-pane" aria-label="Details" tabindex="-1" hidden></aside></div>
     <datalist id="grocery-suggestions">{{range .GrocerySuggestions}}<option value="{{.}}">{{end}}</datalist><datalist id="shopping-suggestions">{{range .ShoppingSuggestions}}<option value="{{.}}">{{end}}</datalist></main>
     <main id="settings-view" class="view"><div id="settings-content"></div></main>
-    <main id="today-view" class="view"><div id="today-content"></div></main>
+    <main id="today-view" class="view active"><div id="today-content">{{template "today.html" .Today}}</div></main>
 
     <!-- Notes view -->
     <main id="notes-view" class="view">
@@ -105,12 +105,8 @@
             <div class="mobile-workspace-options">
                 <button type="button" data-mode-option="today" onclick="chooseMobileUtility('today')">{{template "icon-sun"}}<span>Today</span>{{template "icon-check"}}</button>
                 <button type="button" data-workspace-option="tasks" onclick="chooseMobileWorkspace('tasks')">{{template "icon-tasks"}}<span>Tasks</span>{{template "icon-check"}}</button>
-                <button type="button" data-workspace-option="projects" onclick="chooseMobileWorkspace('projects')">{{template "icon-folder"}}<span>Projects</span>{{template "icon-check"}}</button>
                 <button type="button" data-workspace-option="groceries" onclick="chooseMobileWorkspace('groceries')">{{template "icon-cart"}}<span>Groceries</span>{{template "icon-check"}}</button>
                 <button type="button" data-workspace-option="shopping" onclick="chooseMobileWorkspace('shopping')">{{template "icon-bag"}}<span>Buys</span>{{template "icon-check"}}</button>
-            </div>
-            <div class="mobile-workspace-utilities">
-                <button type="button" onclick="chooseMobileUtility('settings')">{{template "icon-settings"}}<span>Notifications</span></button>
             </div>
         </div>
     </div>
@@ -122,17 +118,13 @@
             </span>
             <span class="brand-name">Second Brain</span>
         </div>
-        <button class="bottom-nav-btn workspace-nav-btn" data-mode="today" onclick="openToday()">
+        <button class="bottom-nav-btn workspace-nav-btn active" data-mode="today" onclick="openToday()">
             {{template "icon-sun"}}
             <span>Today</span>
         </button>
-        <button class="bottom-nav-btn active" data-mode="todos" data-workspace="tasks" onclick="switchWorkspaceSection('tasks')">
+        <button class="bottom-nav-btn" data-mode="todos" data-workspace="tasks" onclick="switchWorkspaceSection('tasks')">
             {{template "icon-tasks"}}
             <span>Tasks</span>
-        </button>
-        <button class="bottom-nav-btn workspace-nav-btn" data-mode="todos" data-workspace="projects" onclick="switchWorkspaceSection('projects')">
-            {{template "icon-folder"}}
-            <span>Projects</span>
         </button>
         <button class="bottom-nav-btn workspace-nav-btn" data-mode="todos" data-workspace="groceries" onclick="switchWorkspaceSection('groceries')">
             {{template "icon-cart"}}
@@ -153,12 +145,6 @@
             </span>
             <span>Habits</span>
         </button>
-        <div class="desktop-secondary-nav">
-            <button class="bottom-nav-btn" data-mode="settings" onclick="openSettings()">
-                {{template "icon-settings"}}
-                <span>Notifications</span>
-            </button>
-        </div>
     </nav>
 
     <script src="/static/htmx.min.js?v={{assetVersion}}"></script>

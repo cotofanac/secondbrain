@@ -1,6 +1,6 @@
 // --- Mode switching (Tasks / Notes / Habits) ---
-const MODE_TITLES = { todos: 'Tasks', today: 'Today', notes: 'Notes', habits: 'Habits', settings: 'Notifications', review: 'Weekly review' };
-const WORKSPACE_TITLES = { tasks: 'Tasks', projects: 'Projects', groceries: 'Groceries', shopping: 'Buys' };
+const MODE_TITLES = { todos: 'Tasks', today: 'Today', notes: 'Notes', habits: 'Habits', settings: 'Reminders & notifications' };
+const WORKSPACE_TITLES = { tasks: 'Tasks', groceries: 'Groceries', shopping: 'Buys' };
 let secondaryReturnDestination = { mode: 'todos', workspace: 'tasks' };
 function currentWorkspaceSection() {
     return WORKSPACE_TITLES[document.body.dataset.workspaceSection] ? document.body.dataset.workspaceSection : 'tasks';
@@ -19,7 +19,7 @@ function updateNavigation(mode) {
 function switchMode(mode) {
     if (!MODE_TITLES[mode]) mode='todos';
     const previousMode = document.body.dataset.mode || 'todos';
-    if ((mode === 'settings' || mode === 'review') && previousMode !== 'settings' && previousMode !== 'review') {
+    if (mode === 'settings' && previousMode !== 'settings') {
         secondaryReturnDestination = { mode: previousMode, workspace: currentWorkspaceSection() };
     }
     flushPendingNoteSave();
@@ -31,7 +31,7 @@ function switchMode(mode) {
     title.setAttribute('aria-label', mode === 'todos' ? 'Choose task list, current list '+WORKSPACE_TITLES[currentWorkspaceSection()] : mode === 'today' ? 'Choose destination, current view Today' : MODE_TITLES[mode]);
     const back = document.getElementById('topbar-back');
     if (back) {
-        const secondary = mode === 'settings' || mode === 'review';
+        const secondary = mode === 'settings';
         back.hidden = !secondary;
         back.setAttribute('aria-label', 'Back to ' + (secondaryReturnDestination.mode === 'todos' ? WORKSPACE_TITLES[secondaryReturnDestination.workspace] : MODE_TITLES[secondaryReturnDestination.mode]));
     }
@@ -75,7 +75,6 @@ function chooseMobileWorkspace(section) {
 function chooseMobileUtility(mode) {
     closeMobileWorkspaceSwitcher();
     if (mode === 'today') openToday();
-    if (mode === 'review') openReview();
     if (mode === 'settings') openSettings();
 }
 document.addEventListener('click', function(e) {
@@ -96,12 +95,18 @@ function switchWorkspaceSection(section, options = {}) {
     if (target) target.open = true;
     switchMode('todos');
     if (target) {
+        target.open = true;
         target.classList.remove('workspace-entering');
         void target.offsetWidth;
         target.classList.add('workspace-entering');
         setTimeout(() => target.classList.remove('workspace-entering'), 220);
     }
-    if (!options.preserveScroll) window.scrollTo({ top: 0, behavior: 'auto' });
+    if (!options.preserveScroll) {
+        if (matchMedia('(max-width: 767px)').matches && target) {
+            const behavior = matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
+            requestAnimationFrame(() => target.scrollIntoView({ block: 'start', behavior }));
+        } else window.scrollTo({ top: 0, behavior: 'auto' });
+    }
     return true;
 }
 
@@ -443,7 +448,7 @@ function hideNotesArchive() {
 // Habit creation dialog: name plus an optional period + target for goals.
 // Reuses the shared #custom-dialog sheet, unhiding the extra fields and
 // restoring their hidden state on cleanup so plain showPrompt() stays pristine.
-function showHabitDialog() {
+function showHabitDialog(initial = {}) {
     return new Promise(resolve => {
         const dialog = document.getElementById('custom-dialog');
         const labelEl = document.getElementById('custom-dialog-label');
@@ -464,10 +469,10 @@ function showHabitDialog() {
             return active ? active.dataset.period : 'day';
         }
 
-        labelEl.textContent = 'New habit';
-        input.value = '';
-        targetInput.value = '1';
-        selectPeriod('day');
+        labelEl.textContent = initial.id ? 'Edit habit' : 'New habit';
+        input.value = initial.name || '';
+        targetInput.value = initial.target || '1';
+        selectPeriod(initial.period || 'day');
         extra.hidden = false;
         openModal(dialog, input);
         setTimeout(() => input.select(), 0);
@@ -520,6 +525,14 @@ async function addHabit() {
         target: '#habits-content',
         values: goal
     });
+}
+
+async function editHabit(button) {
+    const item = button.closest('.habit-item');
+    if (!item) return;
+    const goal = await showHabitDialog({ id: item.dataset.habitId, name: item.dataset.habitName, period: item.dataset.habitPeriod, target: item.dataset.habitTarget });
+    if (!goal) return;
+    htmx.ajax('POST', '/habits/update', { target: '#habits-content', values: { id: item.dataset.habitId, ...goal } });
 }
 
 function showHabitsArchive() {
@@ -615,6 +628,7 @@ function refreshCurrentView() {
         if(editor && !editor.dataset.dirty && !noteSavePending) { preserveScroll(); loadNote(editor.dataset.noteId); }
     }
     if(mode==='habits') { preserveScroll(); htmx.ajax('GET','/habits','#habits-content'); }
+    if(mode==='today') { preserveScroll(); htmx.ajax('GET','/today','#today-content'); }
     if(typeof preparePush==='function') preparePush();
 }
 
