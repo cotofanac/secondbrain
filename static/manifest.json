@@ -2,7 +2,10 @@
   "name": "SecondBrain",
   "short_name": "SecondBrain",
   "description": "A quiet place for tasks, projects, notes and habits",
-  "start_url": "/",
+  "start_url": "/?view=today",
+  "launch_handler": {
+    "client_mode": "navigate-existing"
+  },
   "display": "standalone",
   "background_color": "#111315",
   "theme_color": "#111315",

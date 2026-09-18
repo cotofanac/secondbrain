@@ -25,6 +25,18 @@ function switchMode(mode) {
     flushPendingNoteSave();
     updateNavigation(mode);
     document.querySelectorAll('.view').forEach(v => v.classList.toggle('active',v.id===mode+'-view'));
+    // Each mode owns an independent page-length layout. Keeping the previous
+    // mode's scroll offset while swapping a long view for a short one makes
+    // iOS Safari clamp the document after paint; fixed bottom navigation can
+    // then be left in the old composited position. Reset before the new view
+    // is painted so the viewport and its fixed chrome stay in sync.
+    if (mode !== previousMode) window.scrollTo(0, 0);
+    const activeView = document.getElementById(mode + '-view');
+    if (mode !== previousMode && activeView) {
+        activeView.classList.remove('view-entering');
+        void activeView.offsetWidth;
+        activeView.classList.add('view-entering');
+    }
     const title = document.getElementById('topbar-title');
     title.textContent=mode === 'todos' ? WORKSPACE_TITLES[currentWorkspaceSection()] : MODE_TITLES[mode];
     title.classList.toggle('can-switch-workspace', mode === 'todos' || mode === 'today');
@@ -206,6 +218,22 @@ document.body.addEventListener('htmx:afterSwap', function(e) {
     const id = e.detail.target?.id;
     if (id === 'todo-items' || id === 'habits-content') updateTopbarStat();
     if (id === 'habits-content') updateHabitsBadge();
+    const path = e.detail.requestConfig?.path;
+    if (path === '/todos/add' || path === '/habits/add') {
+        const selector = path === '/todos/add' ? '.todo-item[data-task-id]' : '.habit-item[data-habit-id]';
+        const previous = e.detail.target?._itemIDsBeforeSwap || new Set();
+        e.detail.target?.querySelectorAll(selector).forEach(item => {
+            const itemID = item.dataset.taskId || item.dataset.habitId;
+            if (!previous.has(itemID)) item.classList.add('item-entering');
+        });
+    }
+});
+
+document.body.addEventListener('htmx:beforeSwap', function(e) {
+    const path = e.detail.requestConfig?.path;
+    if (path !== '/todos/add' && path !== '/habits/add') return;
+    const selector = path === '/todos/add' ? '.todo-item[data-task-id]' : '.habit-item[data-habit-id]';
+    e.detail.target._itemIDsBeforeSwap = new Set([...e.detail.target.querySelectorAll(selector)].map(item => item.dataset.taskId || item.dataset.habitId));
 });
 
 document.body.addEventListener('htmx:afterRequest', function(e) {
