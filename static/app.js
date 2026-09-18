@@ -24,13 +24,16 @@ function switchMode(mode) {
     }
     flushPendingNoteSave();
     updateNavigation(mode);
-    document.querySelectorAll('.view').forEach(v => v.classList.toggle('active',v.id===mode+'-view'));
     // Each mode owns an independent page-length layout. Keeping the previous
     // mode's scroll offset while swapping a long view for a short one makes
-    // iOS Safari clamp the document after paint; fixed bottom navigation can
-    // then be left in the old composited position. Reset before the new view
-    // is painted so the viewport and its fixed chrome stay in sync.
+    // iOS Safari clamp the document as soon as the long view is hidden; fixed
+    // bottom navigation can then be left in the old composited position. The
+    // reset must happen before changing which view participates in layout.
     if (mode !== previousMode) window.scrollTo(0, 0);
+    document.querySelectorAll('.view').forEach(v => v.classList.toggle('active',v.id===mode+'-view'));
+    // Safari may defer scroll clamping until its next layout pass. Correct it
+    // once more there so the visual viewport and fixed chrome cannot diverge.
+    if (mode !== previousMode) requestAnimationFrame(() => window.scrollTo(0, 0));
     const activeView = document.getElementById(mode + '-view');
     if (mode !== previousMode && activeView) {
         activeView.classList.remove('view-entering');
