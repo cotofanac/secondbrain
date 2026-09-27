@@ -241,7 +241,9 @@ function toggleNotePicker() {
     if (opening && search) {
         search.value = '';
         filterNotes('');
-        search.focus();
+        // Focusing on touch screens raises the keyboard when the user usually
+        // just wants to tap another note; they can tap the filter to type.
+        if (matchMedia('(hover: hover) and (pointer: fine)').matches) search.focus();
     }
 }
 

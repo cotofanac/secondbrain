@@ -47,6 +47,10 @@ function loadProjectBody(details) {
     target.setAttribute('aria-busy', 'true');
     target._loadPromise = htmx
         .ajax('GET', '/workspace/project?id=' + target.dataset.lazyProject, {
+            // htmx queues requests per source element (document.body when none
+            // is given) and resolves a queued request's promise without sending
+            // it, so several projects opening at once must not share a source.
+            source: target,
             target: '#' + target.id,
             swap: 'innerHTML'
         })

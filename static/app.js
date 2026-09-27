@@ -28,21 +28,6 @@ function dispatchCall(e) {
 const MODE_TITLES = { todos: 'Tasks', today: 'Today', notes: 'Notes', habits: 'Habits', settings: 'Reminders & notifications' };
 const WORKSPACE_TITLES = { tasks: 'Tasks', groceries: 'Groceries', shopping: 'Buys' };
 let secondaryReturnDestination = { mode: 'todos', workspace: 'tasks' };
-function syncMobileBottomNav() {
-    const nav = document.getElementById('bottom-nav');
-    if (!nav || !window.visualViewport) return;
-    nav.style.transform = '';
-    if (!matchMedia('(max-width: 767px)').matches) return;
-    const viewportBottom = visualViewport.offsetTop + visualViewport.height;
-    const shift = Math.round(viewportBottom - nav.getBoundingClientRect().bottom);
-    if (shift) nav.style.transform = `translateY(${shift}px)`;
-}
-if (window.visualViewport) {
-    visualViewport.addEventListener('resize', syncMobileBottomNav);
-    visualViewport.addEventListener('scroll', syncMobileBottomNav);
-}
-window.addEventListener('DOMContentLoaded', syncMobileBottomNav);
-window.addEventListener('resize', syncMobileBottomNav);
 function currentWorkspaceSection() {
     return WORKSPACE_TITLES[document.body.dataset.workspaceSection] ? document.body.dataset.workspaceSection : 'tasks';
 }
@@ -74,10 +59,7 @@ function switchMode(mode) {
     document.querySelectorAll('.view').forEach(v => v.classList.toggle('active',v.id===mode+'-view'));
     // Safari may defer scroll clamping until its next layout pass. Correct it
     // once more there so the visual viewport and fixed chrome cannot diverge.
-    if (mode !== previousMode) requestAnimationFrame(() => {
-        window.scrollTo(0, 0);
-        syncMobileBottomNav();
-    });
+    if (mode !== previousMode) requestAnimationFrame(() => window.scrollTo(0, 0));
     const activeView = document.getElementById(mode + '-view');
     if (mode !== previousMode && activeView) {
         activeView.classList.remove('view-entering');

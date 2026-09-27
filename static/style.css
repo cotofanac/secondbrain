@@ -1628,6 +1628,14 @@ details[open] > summary > .disclosure-icon .icon { transform: rotate(90deg); }
     /* Mobile browsers move fixed elements above the software keyboard. The
        navigation is not useful while editing and looked like a floating bar,
        so hide it until the field loses focus. */
+    /* iOS standalone apps can lay out a page that does not scroll (e.g. an
+       empty Habits view) with a viewport shorter than the screen, which lifts
+       a bottom-anchored bar off the bottom edge. The large viewport height is
+       the full screen there, so anchor the bar from the top instead. */
+    @media (display-mode: standalone) {
+        body { min-height: 100lvh; }
+        .bottom-nav { top: calc(100lvh - 52px - var(--safe-bottom)); bottom: auto; }
+    }
     body.keyboard-open .bottom-nav {
         visibility: hidden;
         opacity: 0;
@@ -1651,8 +1659,7 @@ details[open] > summary > .disclosure-icon .icon { transform: rotate(90deg); }
     .note-conflict{position:sticky;bottom:0;}
     .bottom-nav-btn.active { font-weight: 600; }
     body[data-mode="settings"] .topbar-title,
-    body[data-mode="review"] .topbar-title,
-    body[data-mode="today"] .topbar-title { flex:1; }
+    body[data-mode="review"] .topbar-title { flex:1; }
     body[data-mode="settings"] .topbar-stat,
     body[data-mode="review"] .topbar-stat { display:none; }
 }
