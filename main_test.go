@@ -471,7 +471,6 @@ func setupTestTemplates(t *testing.T) {
 		"formatDate":      func(string) string { return "" },
 		"formatUpdated":   func(string) string { return "" },
 		"isOverdue":       func(string) bool { return false },
-		"todoArchiveHint": func(string, string) string { return "" },
 		"todoArchivedAgo": func(string) string { return "" },
 		"assetVersion":    func() string { return "test" },
 	}).ParseFS(templateFiles, "templates/*.html"))

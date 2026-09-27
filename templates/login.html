@@ -22,11 +22,7 @@
             <div id="error" class="error-msg">{{if .}}{{.}}{{end}}</div>
         </form>
     </div>
-    <script>
-        document.querySelector('.passcode-input').addEventListener('input', function() {
-            if (this.value.length === 8) this.closest('form').requestSubmit();
-        });
-    </script>
     <script src="/static/htmx.min.js?v={{assetVersion}}"></script>
+    <script src="/static/login.js?v={{assetVersion}}"></script>
 </body>
 </html>

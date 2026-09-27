@@ -4,34 +4,32 @@
             <span class="section-kind-icon notes-icon">{{template "icon-notes"}}</span>
             <span class="feature-title">Notes</span>
         </div>
-        <button type="button" class="note-picker-btn" onclick="toggleNotePicker()">
+        <button type="button" class="note-picker-btn" data-call="toggleNotePicker">
             <span class="note-picker-label">{{.CurrentNote.Title}}</span>
             {{template "icon-down"}}
         </button>
         <div class="note-picker-panel" id="note-picker-panel" hidden>
             <input type="text" class="note-picker-search" id="note-picker-search"
                    placeholder="Filter notes..." autocomplete="off"
-                   oninput="filterNotes(this.value)">
+                   data-call="filterNotes" data-args='["$value"]' data-event="input">
             <div class="note-picker-list">
                 {{range .Notes}}
                 <button type="button" class="note-picker-item {{if eq .ID $.CurrentNote.ID}}active{{end}}"
-                        data-title="{{.Title}}" onclick="selectNote({{.ID}})">{{.Title}}</button>
+                        data-title="{{.Title}}" data-call="selectNote" data-args='[{{.ID}}]'>{{.Title}}</button>
                 {{end}}
             </div>
+            <div class="section-footer note-picker-archived"><button type="button" class="action-with-icon" data-call="showNotesArchive">{{template "icon-archive"}}<span>Archived notes</span></button></div>
         </div>
     </div>
     <span class="note-current-title">{{.CurrentNote.Title}}</span>
     <div class="notes-actions">
-        <button class="icon-button" onclick="createNote()" title="New note" aria-label="New note">
+        <button class="icon-button" data-call="createNote" title="New note" aria-label="New note">
             {{template "icon-plus"}}
         </button>
-        <button class="icon-button" onclick="renameNote()" title="Rename note" aria-label="Rename note">
+        <button class="icon-button" data-call="renameNote" title="Rename note" aria-label="Rename note">
             {{template "icon-edit"}}
         </button>
-        <button class="icon-button danger-icon" onclick="deleteNote()" title="Delete note" aria-label="Delete note">
-            {{template "icon-delete"}}
-        </button>
-        <button class="icon-button" onclick="showNotesArchive()" title="Archived notes" aria-label="Archived notes">
+        <button class="icon-button" data-call="archiveNote" title="Archive note" aria-label="Archive note">
             {{template "icon-archive"}}
         </button>
     </div>

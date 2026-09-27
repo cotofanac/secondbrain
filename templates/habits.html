@@ -5,16 +5,14 @@
         <span class="feature-title">Habits</span>
     </div>
     <div class="habits-actions">
-        <button class="icon-button" onclick="addHabit()" title="New habit" aria-label="New habit">
+        <button class="icon-button" data-call="addHabit" title="New habit" aria-label="New habit">
             {{template "icon-plus"}}
-        </button>
-        <button class="icon-button" onclick="showHabitsArchive()" title="Archived habits" aria-label="Archived habits">
-            {{template "icon-archive"}}
         </button>
     </div>
 </div>
 {{if .Daily}}
 <div class="habit-section" data-period="day">
+    <div class="habit-section-header">Today</div>
     {{range .Daily}}
     <div class="habit-item {{if .Done}}done{{end}}" data-habit-id="{{.ID}}" data-habit-name="{{.Name}}" data-habit-period="{{.Period}}" data-habit-target="{{.Target}}">
         <form hx-post="/habits/toggle" hx-target="#habits-content" hx-swap="innerHTML" class="habit-check-form">
@@ -26,7 +24,7 @@
         </form>
         <button type="button" class="habit-name" data-action="rename-habit" aria-label="Rename {{.Name}}">{{.Name}}</button>
         {{if .StreakLabel}}<span class="habit-streak">{{.StreakLabel}}</span>{{end}}
-        <details class="row-menu"><summary class="icon-button" aria-label="Habit actions">{{template "icon-more"}}</summary><div class="menu-panel"><button type="button" class="action-with-icon" onclick="editHabit(this)">{{template "icon-edit"}}<span>Edit</span></button><form hx-post="/habits/delete" hx-target="#habits-content"><input type="hidden" name="id" value="{{.ID}}"><button class="action-with-icon">{{template "icon-archive"}}<span>Archive</span></button></form></div></details>
+        <details class="row-menu"><summary class="icon-button" aria-label="Habit actions">{{template "icon-more"}}</summary><div class="menu-panel"><button type="button" class="action-with-icon" data-call="editHabit" data-args='["$el"]'>{{template "icon-edit"}}<span>Edit</span></button><form hx-post="/habits/delete" hx-target="#habits-content"><input type="hidden" name="id" value="{{.ID}}"><button class="action-with-icon">{{template "icon-archive"}}<span>Archive</span></button></form></div></details>
     </div>
     {{end}}
 </div>
@@ -52,6 +50,7 @@
 {{if and (not .Daily) (not .Weekly) (not .Monthly) (not .Yearly)}}
 <div class="empty-state">No habits yet. Add one when you’re ready.</div>
 {{end}}
+<div class="section-footer"><button class="action-with-icon" data-call="showHabitsArchive">{{template "icon-archive"}}<span>Archived habits</span></button></div>
 {{end}}
 
 {{define "habit-goal"}}
@@ -75,6 +74,6 @@
         <button type="submit" class="habit-minus" aria-label="Undo progress">{{template "icon-minus"}}</button>
     </form>
     {{end}}
-    <details class="row-menu"><summary class="icon-button" aria-label="Habit actions">{{template "icon-more"}}</summary><div class="menu-panel"><button type="button" class="action-with-icon" onclick="editHabit(this)">{{template "icon-edit"}}<span>Edit</span></button><form hx-post="/habits/delete" hx-target="#habits-content"><input type="hidden" name="id" value="{{.ID}}"><button class="action-with-icon">{{template "icon-archive"}}<span>Archive</span></button></form></div></details>
+    <details class="row-menu"><summary class="icon-button" aria-label="Habit actions">{{template "icon-more"}}</summary><div class="menu-panel"><button type="button" class="action-with-icon" data-call="editHabit" data-args='["$el"]'>{{template "icon-edit"}}<span>Edit</span></button><form hx-post="/habits/delete" hx-target="#habits-content"><input type="hidden" name="id" value="{{.ID}}"><button class="action-with-icon">{{template "icon-archive"}}<span>Archive</span></button></form></div></details>
 </div>
 {{end}}

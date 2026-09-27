@@ -7,3 +7,4 @@ data/
 cmd/download/
 /tmp/
 .DS_Store
+AGENTS.md

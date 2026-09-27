@@ -73,5 +73,5 @@ func handleSearch(w http.ResponseWriter, r *http.Request) {
 		}
 		rows.Close()
 	}
-	renderTemplate(w, "search.html", data)
+	renderTemplate(w, r, "search.html", data)
 }

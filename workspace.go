@@ -89,47 +89,69 @@ func loadWorkspace() (Workspace, error) {
 			sm[s.ID] = s
 		}
 	}
-	rows, err = db.Query(`SELECT id,category,text,due_date,done,COALESCE(project_id,0),COALESCE(stage_id,0),archived,revision FROM todos WHERE archived=0 OR (done=1 AND project_id IS NOT NULL) ORDER BY done,position,created_at DESC,id DESC`)
+	// count adds n tasks to the group a task belongs to and, for tasks in an
+	// active stage, to the project's overall progress as well.
+	count := func(category string, projectID, stageID, n int, done bool) *TaskGroup {
+		group := &w.Tasks
+		if category == "groceries" {
+			group = &w.Groceries
+		} else if category == "shopping" {
+			group = &w.Buys
+		} else if p := pm[projectID]; p != nil {
+			group = &p.Group
+			if s := sm[stageID]; s != nil {
+				group = &s.Group
+				if !s.Archived {
+					p.Group.Total += n
+					if done {
+						p.Group.Completed += n
+					}
+				}
+			}
+		}
+		group.Total += n
+		if done {
+			group.Completed += n
+		}
+		return group
+	}
+	// Dated tasks first, soonest (so overdue) on top; undated tasks newest first.
+	rows, err = db.Query(`SELECT id,category,text,due_date,done,COALESCE(project_id,0),COALESCE(stage_id,0),revision FROM todos WHERE archived=0 ORDER BY done,due_date='',due_date,position,created_at DESC,id DESC`)
 	if err != nil {
 		return w, err
 	}
 	for rows.Next() {
 		var t Todo
-		var archived bool
-		if err = rows.Scan(&t.ID, &t.Category, &t.Text, &t.DueDate, &t.Done, &t.ProjectID, &t.StageID, &archived, &t.Revision); err != nil {
+		if err = rows.Scan(&t.ID, &t.Category, &t.Text, &t.DueDate, &t.Done, &t.ProjectID, &t.StageID, &t.Revision); err != nil {
 			rows.Close()
 			return w, err
 		}
-		group := &w.Tasks
-		if t.Category == "groceries" {
-			group = &w.Groceries
-		} else if t.Category == "shopping" {
-			group = &w.Buys
-		} else if p := pm[t.ProjectID]; p != nil {
-			group = &p.Group
-			if s := sm[t.StageID]; s != nil {
-				group = &s.Group
-				if !s.Archived && (!archived || t.Done) {
-					p.Group.Total++
-					if t.Done {
-						p.Group.Completed++
-					}
-				}
-			}
+		group := count(t.Category, t.ProjectID, t.StageID, 1, t.Done)
+		if t.Done {
+			group.Done = append(group.Done, t)
+		} else {
+			group.Tasks = append(group.Tasks, t)
 		}
-		if !archived || t.Done {
-			group.Total++
-			if t.Done {
-				group.Completed++
-			}
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return w, err
+	}
+	// Completed project work that has since been tidied into the archive still
+	// counts toward progress. Only the totals are needed, not the rows.
+	rows, err = db.Query(`SELECT category,project_id,COALESCE(stage_id,0),count(*) FROM todos WHERE archived=1 AND done=1 AND project_id IS NOT NULL GROUP BY category,project_id,stage_id`)
+	if err != nil {
+		return w, err
+	}
+	for rows.Next() {
+		var category string
+		var projectID, stageID, n int
+		if err = rows.Scan(&category, &projectID, &stageID, &n); err != nil {
+			rows.Close()
+			return w, err
 		}
-		if !archived {
-			if t.Done {
-				group.Done = append(group.Done, t)
-			} else {
-				group.Tasks = append(group.Tasks, t)
-			}
-		}
+		count(category, projectID, stageID, n, true)
 	}
 	err = rows.Err()
 	rows.Close()
@@ -151,10 +173,10 @@ func handleWorkspace(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Could not load tasks", 500)
 		return
 	}
-	renderTemplate(w, "workspace.html", data)
+	renderTemplate(w, r, "workspace.html", data)
 }
 
-func handleTaskGroup(w http.ResponseWriter, category string, projectID, stageID int) {
+func handleTaskGroup(w http.ResponseWriter, r *http.Request, category string, projectID, stageID int) {
 	data, err := loadWorkspace()
 	if err != nil {
 		http.Error(w, "Could not load tasks", http.StatusInternalServerError)
@@ -187,7 +209,7 @@ func handleTaskGroup(w http.ResponseWriter, category string, projectID, stageID 
 		http.Error(w, "Task group unavailable", http.StatusNotFound)
 		return
 	}
-	renderTemplate(w, "task-group", *group)
+	renderTemplate(w, r, "task-group", *group)
 }
 
 // A stage can only belong to its selected active project. Zero means standalone.
@@ -266,7 +288,7 @@ func handleWorkspaceProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rows.Close()
-	rows, err = db.Query(`SELECT id,category,text,due_date,done,COALESCE(stage_id,0),revision FROM todos WHERE project_id=? AND archived=0 ORDER BY done,position,created_at DESC,id DESC`, id)
+	rows, err = db.Query(`SELECT id,category,text,due_date,done,COALESCE(stage_id,0),revision FROM todos WHERE project_id=? AND archived=0 ORDER BY done,due_date='',due_date,position,created_at DESC,id DESC`, id)
 	if err != nil {
 		http.Error(w, "Could not load project", 500)
 		return
@@ -299,7 +321,35 @@ func handleWorkspaceProject(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Could not load project", 500)
 		return
 	}
-	renderTemplate(w, "project-body", p)
+	// Match loadWorkspace: archived completions still count toward progress.
+	rows, err = db.Query(`SELECT COALESCE(stage_id,0),count(*) FROM todos WHERE project_id=? AND archived=1 AND done=1 GROUP BY stage_id`, id)
+	if err != nil {
+		http.Error(w, "Could not load project", 500)
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var stageID, n int
+		if err = rows.Scan(&stageID, &n); err != nil {
+			http.Error(w, "Could not load project", 500)
+			return
+		}
+		g := &p.Group
+		if i, ok := stageIndex[stageID]; ok {
+			g = &p.Stages[i].Group
+			if !p.Stages[i].Archived {
+				p.Group.Total += n
+				p.Group.Completed += n
+			}
+		}
+		g.Total += n
+		g.Completed += n
+	}
+	if err = rows.Err(); err != nil {
+		http.Error(w, "Could not load project", 500)
+		return
+	}
+	renderTemplate(w, r, "project-body", p)
 }
 func handleProjectAction(w http.ResponseWriter, r *http.Request) { handleStructureAction(w, r, false) }
 func handleStageAction(w http.ResponseWriter, r *http.Request)   { handleStructureAction(w, r, true) }
@@ -499,7 +549,7 @@ func handleTaskDetail(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "DB error", 500)
 		return
 	}
-	renderTemplate(w, "task-detail.html", TaskDetail{t, projects})
+	renderTemplate(w, r, "task-detail.html", TaskDetail{t, projects})
 }
 func handleTaskSave(w http.ResponseWriter, r *http.Request) {
 	if !requirePost(w, r) {
@@ -569,7 +619,8 @@ func handleTaskSave(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Could not save task", 500)
 		return
 	}
-	hxTrigger(w, "sbWorkspaceChanged", map[string]any{"message": "Task saved"})
+	// Details save as you type; the pane shows the status, so no toast.
+	hxTrigger(w, "sbWorkspaceChanged", map[string]any{})
 	r.URL.RawQuery = "id=" + strconv.Itoa(id)
 	handleTaskDetail(w, r)
 }
@@ -618,7 +669,7 @@ func handleProjectDetail(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "DB error", 500)
 		return
 	}
-	renderTemplate(w, "project-detail.html", struct {
+	renderTemplate(w, r, "project-detail.html", struct {
 		Project   *Project
 		Available []Note
 	}{project, available})

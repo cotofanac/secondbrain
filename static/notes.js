@@ -344,7 +344,9 @@ function showConfirm(message) {
         function onConfirm() { finish(true); }
         function onCancel() { finish(false); }
         function onKey(e) {
-            if (e.key === 'Enter') { e.preventDefault(); finish(true); }
+            // A focused button activates itself on Enter; intercepting it here
+            // would turn Enter on Cancel into a confirmation.
+            if (e.key === 'Enter' && !(e.target instanceof HTMLButtonElement)) { e.preventDefault(); finish(true); }
             if (e.key === 'Escape') finish(false);
         }
         function onBackdrop(e) { if (e.target === dialog) finish(false); }
@@ -356,7 +358,7 @@ function showConfirm(message) {
     });
 }
 
-async function deleteNote() {
+async function archiveNote() {
     const editor = document.getElementById('note-editor');
     if (!editor) return;
     const ok = await showConfirm('Archive this note?');

@@ -7,13 +7,15 @@ const base = process.env.TEST_BASE_URL || 'http://127.0.0.1:18080';
  const context = await browser.newContext({viewport:{width:1280,height:900}});
  const page = await context.newPage(); const errors=[];
  async function openTaskDetails(name) {
-  const title=page.getByRole('button',{name,exact:true});
-  const row=title.locator('..');
-  await row.locator('.row-menu > summary').click();
-  await row.getByRole('button',{name:'Details',exact:true}).click();
+  await page.getByRole('button',{name,exact:true}).click();
   await page.locator('#task-detail-form').waitFor();
+  // htmx attaches the autosave trigger when the swap settles (~20ms), which
+  // is faster than a person but slower than Playwright's fill().
+  await page.waitForFunction(()=>document.getElementById('task-detail-form')?.['htmx-internal-data']?.listenerInfos);
  }
+ const saved=()=>page.locator('.detail-save-status').filter({hasText:/^Saved$/}).waitFor();
  page.on('pageerror',e=>errors.push(e.message));
+ page.on('console',m=>{if(/Content Security Policy/i.test(m.text()))errors.push(m.text());});
  await page.goto(base);
  await page.locator('[name=passcode]').fill(process.env.TEST_PASSCODE || '12345678');
  await page.waitForURL(url=>url.pathname==='/',{waitUntil:'networkidle'});
@@ -33,24 +35,23 @@ const base = process.env.TEST_BASE_URL || 'http://127.0.0.1:18080';
  await page.locator('#custom-dialog-input').fill('Driving licence');await page.locator('#custom-dialog-confirm').click();
  await page.locator('.stage-group > summary').filter({hasText:'Driving licence'}).click();
  const capture=page.locator('.stage-group .capture-form');await capture.locator('[name=text]').fill('Book lessons');await capture.locator('button.add-circle').click();
- // The primary title interaction is direct editing on pointer and keyboard.
- await page.getByRole('button',{name:'Book lessons',exact:true}).click();
- const inlineTitle=page.locator('.task-title-editor input');await inlineTitle.fill('Book practical lessons');await inlineTitle.press('Enter');
+ // Tapping a task opens its details, which save as you type.
+ await openTaskDetails('Book lessons');
+ const detailTitle=page.locator('#task-detail-form [name=text]');
+ await detailTitle.fill('Book practical lessons');await saved();
  await page.getByRole('button',{name:'Book practical lessons',exact:true}).waitFor();
- await page.getByRole('button',{name:'Book practical lessons',exact:true}).click();await page.locator('.task-title-editor input').press('Escape');
- await openTaskDetails('Book practical lessons');
- await page.locator('#task-detail-form [name=due_date]').fill('2026-10-01');await page.locator('#task-detail-form button.btn-primary').click();
- // A response must not overwrite text entered after the request was sent.
+ await page.locator('#task-detail-form [name=due_date]').fill('2026-10-01');await saved();
+ // A reply must not overwrite text typed after the request was sent, and
+ // focus stays in the field being edited.
  let releaseTask;const heldTask=new Promise(resolve=>releaseTask=resolve);
- await page.route('**/task/save',async route=>{const response=await route.fetch();await heldTask;await route.fulfill({response});});
+ await page.route('**/task/save',async route=>{const response=await route.fetch();await heldTask;await route.fulfill({response});},{times:1});
  const taskRequest=page.waitForRequest('**/task/save');
- await page.locator('#task-detail-form button.btn-primary').click();await taskRequest;
- await page.locator('#task-detail-form [name=text]').fill('Draft typed during save');releaseTask();
- await page.locator('.detail-save-status').filter({hasText:'newer edits'}).waitFor();
- assert.equal(await page.locator('#task-detail-form [name=text]').inputValue(),'Draft typed during save');
- await page.unroute('**/task/save');
- await page.getByRole('button',{name:'Discard',exact:true}).click();
- await page.waitForFunction(()=>document.querySelector('#task-detail-form [name=text]').value==='Book practical lessons');
+ await detailTitle.fill('Book lessons soon');await taskRequest;
+ await detailTitle.pressSequentially(' please');releaseTask();
+ await saved();
+ assert.equal(await detailTitle.inputValue(),'Book lessons soon please');
+ assert.equal(await detailTitle.evaluate(el=>el===document.activeElement),true,'autosave moved focus');
+ await detailTitle.fill('Book practical lessons');await saved();
  await page.getByRole('button',{name:'Close details',exact:true}).click();
  // Completion and reopening preserve the task and collapsed state.
  await page.locator('#section-tasks').evaluate(el=>el.dataset.testStable='true');
@@ -154,6 +155,17 @@ const base = process.env.TEST_BASE_URL || 'http://127.0.0.1:18080';
  assert.equal(manifest.start_url,'/?view=today','PWA does not launch into Today');
  assert.equal(manifest.launch_handler?.client_mode,'navigate-existing','desktop PWA can reopen on its stale view');
  await page.emulateMedia({colorScheme:'dark'});await page.screenshot({path:'/private/tmp/secondbrain-today-dark.png',fullPage:true});
+ // The last page loaded online stays readable offline, marked read-only,
+ // and logging out removes it from the device.
+ await page.goto(base+'/?view=todos');await page.evaluate(()=>navigator.serviceWorker.ready);
+ await page.waitForFunction(()=>caches.open('secondbrain-page').then(c=>c.match('/')).then(Boolean));
+ await context.setOffline(true);await page.reload();
+ assert.equal(await page.locator('body[data-offline-copy="1"]').count(),1,'offline copy not served');
+ assert.equal(await page.getByRole('button',{name:'Call the driving school',exact:true}).count()>0,true,'offline copy lost tasks');
+ assert.match(await page.locator('#topbar-stat').textContent(),/^Offline · /);
+ await context.setOffline(false);await page.goto(base+'/');
+ await page.evaluate(()=>doLogout());await page.waitForURL(url=>url.pathname==='/login');
+ assert.equal(await page.evaluate(()=>caches.has('secondbrain-page')),false,'offline copy survived logout');
  assert.deepEqual(errors,[],'browser errors');
- await browser.close();console.log('UI smoke passed: Today, projects, stages, task editing, completion, drafts, notes, notifications, root worker, six viewport widths.');
+ await browser.close();console.log('UI smoke passed: Today, projects, stages, task editing, completion, drafts, notes, notifications, root worker, offline copy, six viewport widths.');
 })().catch(error=>{console.error(error);process.exit(1)});

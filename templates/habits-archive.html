@@ -1,9 +1,9 @@
 <div class="archive-header">
-    <button class="btn btn-sm btn-back" onclick="hideHabitsArchive()">
+    <button class="btn btn-sm btn-back" data-call="hideHabitsArchive">
         {{template "icon-back"}}
         Back
     </button>
-    <span class="archive-title">Archived Habits</span>
+    <span class="archive-title">Archived habits</span>
 </div>
 
 {{range .}}
@@ -17,7 +17,7 @@
     <div class="archive-note-actions">
         <form hx-post="/habits/restore" hx-target="#habits-content" hx-swap="innerHTML" class="inline-form">
             <input type="hidden" name="id" value="{{.ID}}">
-            <button type="submit" class="btn-restore" title="Restore">
+            <button type="submit" class="btn-restore" title="Restore" aria-label="Restore">
                 {{template "icon-restore"}}
             </button>
         </form>

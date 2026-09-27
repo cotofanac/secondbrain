@@ -21,14 +21,53 @@ self.addEventListener('install', event => {
 self.addEventListener('activate', event => {
     event.waitUntil(
         caches.keys().then(keys =>
-            Promise.all(keys.filter(k => k.startsWith('secondbrain-') && k !== CACHE_NAME).map(k => caches.delete(k)))
+            Promise.all(keys.filter(k => k.startsWith('secondbrain-') && k !== CACHE_NAME && k !== PAGE_CACHE).map(k => caches.delete(k)))
         )
     );
     self.clients.claim();
 });
 
+// The last page loaded online is kept on this device so the lists can still be
+// read without a connection (a shop with no signal). It is dropped whenever the
+// login page loads or a logout is sent (even one that fails offline), which
+// covers logout, inactivity and expired sessions.
+const PAGE_CACHE = 'secondbrain-page';
+
+function offlineCopy(cached) {
+    // Mark the copy so the page can say it is read-only.
+    return cached.text().then(html => new Response(
+        html.replace('<body ', '<body data-offline-copy="1" '),
+        { headers: cached.headers }
+    ));
+}
+
 self.addEventListener('fetch', event => {
     const url = new URL(event.request.url);
+
+    if (event.request.mode === 'navigate' && url.origin === self.location.origin) {
+        if (url.pathname === '/login' || url.pathname === '/logout') {
+            event.waitUntil(caches.delete(PAGE_CACHE));
+            return;
+        }
+        if (url.pathname !== '/') return;
+        event.respondWith(
+            fetch(event.request)
+                .then(response => {
+                    if (response.ok && response.type === 'basic') {
+                        const copy = response.clone();
+                        event.waitUntil(caches.open(PAGE_CACHE).then(cache => cache.put('/', copy)));
+                    } else if (response.type === 'opaqueredirect') {
+                        // Signed out: the app page redirects to /login.
+                        event.waitUntil(caches.delete(PAGE_CACHE));
+                    }
+                    return response;
+                })
+                .catch(() => caches.open(PAGE_CACHE)
+                    .then(cache => cache.match('/'))
+                    .then(cached => cached ? offlineCopy(cached) : Response.error()))
+        );
+        return;
+    }
 
     if (url.pathname.startsWith('/static/')) {
         event.respondWith(

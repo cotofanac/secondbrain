@@ -1,7 +1,48 @@
+// --- Declarative handlers ---
+// Markup names a function with data-call (and optionally data-args, a JSON
+// array, and data-event, default "click") instead of inline on* attributes,
+// so the CSP can refuse inline script. "$el", "$value" and "$form" in
+// data-args stand for the element, its value and its form. Only functions
+// listed here can be called.
+const CALLABLE = new Set([
+    'addHabit', 'chooseMobileUtility', 'chooseMobileWorkspace', 'closeDetail', 'closeSearch', 'createNote',
+    'archiveNote', 'disablePush', 'editHabit', 'enablePush', 'filterNotes', 'filterStageOptions', 'hideArchive',
+    'hideHabitsArchive', 'hideNotesArchive', 'leaveSecondaryView', 'openHabitsResult', 'openMobileWorkspaceSwitcher',
+    'openNoteResult', 'openProject', 'openProjectResult', 'openReview', 'openSearch', 'openSettings',
+    'openStageResult', 'openTask', 'openTaskArchive', 'openToday', 'openTodayTask', 'openTodoResult', 'renameNote',
+    'selectNote', 'showHabitsArchive', 'showNotesArchive', 'structureAction', 'structureCreate', 'structureRename',
+    'switchMode', 'switchWorkspaceSection', 'testPush', 'toggleNotePicker'
+]);
+function dispatchCall(e) {
+    const el = e.target.closest?.('[data-call]');
+    if (!el || (el.dataset.event || 'click') !== e.type) return;
+    const fn = CALLABLE.has(el.dataset.call) ? window[el.dataset.call] : null;
+    if (typeof fn !== 'function') return;
+    let args;
+    try { args = JSON.parse(el.dataset.args || '[]'); } catch (_) { return; }
+    fn(...args.map(a => a === '$el' ? el : a === '$value' ? el.value : a === '$form' ? el.form : a));
+}
+['click', 'change', 'input'].forEach(type => document.addEventListener(type, dispatchCall));
+
 // --- Mode switching (Tasks / Notes / Habits) ---
 const MODE_TITLES = { todos: 'Tasks', today: 'Today', notes: 'Notes', habits: 'Habits', settings: 'Reminders & notifications' };
 const WORKSPACE_TITLES = { tasks: 'Tasks', groceries: 'Groceries', shopping: 'Buys' };
 let secondaryReturnDestination = { mode: 'todos', workspace: 'tasks' };
+function syncMobileBottomNav() {
+    const nav = document.getElementById('bottom-nav');
+    if (!nav || !window.visualViewport) return;
+    nav.style.transform = '';
+    if (!matchMedia('(max-width: 767px)').matches) return;
+    const viewportBottom = visualViewport.offsetTop + visualViewport.height;
+    const shift = Math.round(viewportBottom - nav.getBoundingClientRect().bottom);
+    if (shift) nav.style.transform = `translateY(${shift}px)`;
+}
+if (window.visualViewport) {
+    visualViewport.addEventListener('resize', syncMobileBottomNav);
+    visualViewport.addEventListener('scroll', syncMobileBottomNav);
+}
+window.addEventListener('DOMContentLoaded', syncMobileBottomNav);
+window.addEventListener('resize', syncMobileBottomNav);
 function currentWorkspaceSection() {
     return WORKSPACE_TITLES[document.body.dataset.workspaceSection] ? document.body.dataset.workspaceSection : 'tasks';
 }
@@ -33,7 +74,10 @@ function switchMode(mode) {
     document.querySelectorAll('.view').forEach(v => v.classList.toggle('active',v.id===mode+'-view'));
     // Safari may defer scroll clamping until its next layout pass. Correct it
     // once more there so the visual viewport and fixed chrome cannot diverge.
-    if (mode !== previousMode) requestAnimationFrame(() => window.scrollTo(0, 0));
+    if (mode !== previousMode) requestAnimationFrame(() => {
+        window.scrollTo(0, 0);
+        syncMobileBottomNav();
+    });
     const activeView = document.getElementById(mode + '-view');
     if (mode !== previousMode && activeView) {
         activeView.classList.remove('view-entering');
@@ -136,12 +180,9 @@ function updateTopbarStat() {
     let count = '';
 
     if (activeMode === 'todos') {
-        const archiveOpen = document.getElementById('archive-btn')?.classList.contains('active');
-        if (!archiveOpen) {
-            const section = document.getElementById('section-' + currentWorkspaceSection());
-            const pending = section?.querySelectorAll('.todo-item:not(.done):not(.archived-item)').length || 0;
-            if (pending > 0) count = pending + ' left';
-        }
+        const section = document.getElementById('section-' + currentWorkspaceSection());
+        const pending = section?.querySelectorAll('.todo-item:not(.done):not(.archived-item)').length || 0;
+        if (pending > 0) count = pending + ' left';
     } else if (activeMode === 'habits') {
         // Only daily habits feed the "done/total" stat; periodic goals track
         // their own per-period progress.
@@ -151,7 +192,8 @@ function updateTopbarStat() {
         if (total > 0) count = done + '/' + total;
     }
 
-    stat.textContent = count ? date + ' · ' + count : date;
+    const text = count ? date + ' · ' + count : date;
+    stat.textContent = document.body.dataset.offlineCopy ? 'Offline · ' + text : text;
 }
 
 function updateHabitsBadge() {
@@ -237,19 +279,6 @@ document.body.addEventListener('htmx:beforeSwap', function(e) {
     if (path !== '/todos/add' && path !== '/habits/add') return;
     const selector = path === '/todos/add' ? '.todo-item[data-task-id]' : '.habit-item[data-habit-id]';
     e.detail.target._itemIDsBeforeSwap = new Set([...e.detail.target.querySelectorAll(selector)].map(item => item.dataset.taskId || item.dataset.habitId));
-});
-
-document.body.addEventListener('htmx:afterRequest', function(e) {
-    if (!e.detail.successful) return;
-    const form = e.detail.elt;
-    if (!form || !form.closest('#add-form')) return;
-    const textInput = form.querySelector('[name=text]');
-    const dateInput = form.querySelector('[name=due_date]');
-    if (textInput) { textInput.value = ''; textInput.focus(); }
-    if (dateInput && dateInput.value) {
-        dateInput.value = '';
-        updateCalendarBtn(dateInput, document.getElementById('calendar-btn'));
-    }
 });
 
 // Route hx-confirm through the app's custom dialog instead of window.confirm,
@@ -380,93 +409,7 @@ function doLogout() {
     f.submit();
 }
 
-// --- Calendar button for todo due date ---
-const CALENDAR_ICON = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>`;
-
-function openDatePicker(dateInput) {
-    if (!dateInput) return;
-    if (typeof dateInput.showPicker === 'function') {
-        try {
-            dateInput.showPicker();
-            return;
-        } catch (e) { /* fall through to focus-based fallback */ }
-    }
-    dateInput.focus();
-    dateInput.click();
-}
-
-function updateCalendarBtn(dateInput, calendarBtn) {
-    if (!calendarBtn) return;
-    const val = dateInput ? dateInput.value : '';
-    if (val) {
-        const d = new Date(val + 'T12:00:00');
-        const label = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-        calendarBtn.innerHTML = `<span class="calendar-btn-label">${label}</span>`;
-        calendarBtn.classList.add('has-date');
-        calendarBtn.title = 'Clear due date';
-        calendarBtn.onclick = function() {
-            if (dateInput) dateInput.value = '';
-            updateCalendarBtn(dateInput, calendarBtn);
-        };
-    } else {
-        calendarBtn.innerHTML = CALENDAR_ICON;
-        calendarBtn.classList.remove('has-date');
-        calendarBtn.title = 'Due date';
-        calendarBtn.onclick = function() {
-            openDatePicker(dateInput);
-        };
-    }
-}
-
-function initCalendarBtn() {
-    const dateInput = document.getElementById('add-date');
-    const calendarBtn = document.getElementById('calendar-btn');
-    if (!dateInput || !calendarBtn) return;
-
-    updateCalendarBtn(dateInput, calendarBtn);
-
-    dateInput.addEventListener('change', function() {
-        updateCalendarBtn(dateInput, calendarBtn);
-    });
-
-    const addRow = document.querySelector('.add-row');
-    if (addRow) {
-        addRow.addEventListener('htmx:afterRequest', function() {
-            setTimeout(function() { updateCalendarBtn(dateInput, calendarBtn); }, 0);
-        });
-    }
-}
-
 // --- Archive ---
-function clearChecked() {
-    const category = document.getElementById('add-category').value;
-    htmx.ajax('POST', '/todos/clear-checked', {
-        target: '#todo-items',
-        swap: 'innerHTML',
-        values: { category }
-    });
-}
-
-function showArchive() {
-    hideToast(); // an undo would render the live list back over the archive
-    const cat = document.getElementById('add-category').value;
-    htmx.ajax('GET', '/todos/archive?category=' + cat, '#todo-items');
-    document.getElementById('add-form').style.display = 'none';
-    document.getElementById('archive-btn').classList.add('active');
-    const clearBtn = document.getElementById('clear-checked-btn');
-    if (clearBtn) {
-        clearBtn.style.visibility = 'hidden';
-        clearBtn.style.pointerEvents = 'none';
-    }
-}
-
-function hideArchive() {
-    const cat = document.getElementById('add-category').value;
-    htmx.ajax('GET', '/todos?category=' + cat, '#todo-items');
-    document.getElementById('add-form').style.display = '';
-    document.getElementById('archive-btn').classList.remove('active');
-}
-
 async function showNotesArchive() {
     if (!await saveBeforeNoteAction()) return;
     htmx.ajax('GET', '/notes/archive', '#notes-content');
@@ -567,7 +510,7 @@ async function editHabit(button) {
 }
 
 function showHabitsArchive() {
-    hideToast(); // see showArchive
+    hideToast(); // an undo would render the live list back over the archive
     htmx.ajax('GET', '/habits/archive', '#habits-content');
 }
 
@@ -933,6 +876,8 @@ function openNoteResult(id) {
 }
 
 function openTodoResult(category,id) { closeSearch(); switchMode('todos'); openTask(id); }
+function openProjectResult(id) { closeSearch(); openProject(id); }
+function openHabitsResult() { closeSearch(); switchMode('habits'); }
 
 document.addEventListener('keydown', function(e) {
     if (e.key !== 'Escape') return;
@@ -947,7 +892,11 @@ document.addEventListener('DOMContentLoaded', function() {
     try { savedWorkspace = localStorage.getItem('desktop-workspace') || 'tasks'; } catch (_) {}
     document.body.dataset.workspaceSection = WORKSPACE_TITLES[savedWorkspace] ? savedWorkspace : 'tasks';
     initNoteEditor();
-    initCalendarBtn();
+    if (document.body.dataset.offlineCopy) {
+        // Served by the service worker from the last page loaded online.
+        showToast('Offline. Showing the last copy saved on this device; changes will not save.');
+        window.addEventListener('online', () => showToast('Back online', { label: 'Reload', onClick: () => location.reload() }), { once: true });
+    }
     setupInactivityLogout();
     updateTopbarStat();
     updateHabitsBadge();

@@ -16,15 +16,10 @@
     <div id="app">
     <!-- Top nav: mode switcher -->
     <header class="topbar" id="topbar">
-        <button type="button" class="topbar-back icon-button" id="topbar-back" onclick="leaveSecondaryView()" aria-label="Back" hidden>{{template "icon-back"}}</button>
-        <button type="button" class="topbar-title workspace-switcher can-switch-workspace" id="topbar-title" onclick="openMobileWorkspaceSwitcher()" aria-label="Choose destination, current view Today" aria-haspopup="dialog">Today</button>
-        <button type="button" class="topbar-stat" id="topbar-stat" onclick="openToday()" aria-label="Open Today"></button>
-        <button class="header-action icon-button" onclick="openSearch()" aria-label="Search">{{template "icon-search"}}</button>
-        <form method="post" action="/logout" class="logout-form">
-            <button type="submit" class="logout-btn" title="Logout" aria-label="Logout">
-                {{template "icon-logout"}}
-            </button>
-        </form>
+        <button type="button" class="topbar-back icon-button" id="topbar-back" data-call="leaveSecondaryView" aria-label="Back" hidden>{{template "icon-back"}}</button>
+        <button type="button" class="topbar-title workspace-switcher can-switch-workspace" id="topbar-title" data-call="openMobileWorkspaceSwitcher" aria-label="Choose destination, current view Today" aria-haspopup="dialog">Today</button>
+        <button type="button" class="topbar-stat" id="topbar-stat" data-call="openToday" aria-label="Open Today"></button>
+        <button class="header-action icon-button" data-call="openSearch" aria-label="Search">{{template "icon-search"}}</button>
     </header>
 
     <!-- Search overlay -->
@@ -36,7 +31,7 @@
                    hx-get="/search" hx-trigger="input changed delay:200ms"
                    hx-target="#search-results" hx-swap="innerHTML"
                    name="q" autocomplete="off">
-            <button type="button" class="btn-icon search-close" onclick="closeSearch()" aria-label="Close search">
+            <button type="button" class="btn-icon search-close" data-call="closeSearch" aria-label="Close search">
                 {{template "icon-close"}}
             </button>
         </div>
@@ -103,10 +98,10 @@
             <div class="mobile-sheet-handle" aria-hidden="true"></div>
             <h2 id="mobile-workspace-title">Go to</h2>
             <div class="mobile-workspace-options">
-                <button type="button" data-mode-option="today" onclick="chooseMobileUtility('today')">{{template "icon-sun"}}<span>Today</span>{{template "icon-check"}}</button>
-                <button type="button" data-workspace-option="tasks" onclick="chooseMobileWorkspace('tasks')">{{template "icon-tasks"}}<span>Tasks</span>{{template "icon-check"}}</button>
-                <button type="button" data-workspace-option="groceries" onclick="chooseMobileWorkspace('groceries')">{{template "icon-cart"}}<span>Groceries</span>{{template "icon-check"}}</button>
-                <button type="button" data-workspace-option="shopping" onclick="chooseMobileWorkspace('shopping')">{{template "icon-bag"}}<span>Buys</span>{{template "icon-check"}}</button>
+                <button type="button" data-mode-option="today" data-call="chooseMobileUtility" data-args='["today"]'>{{template "icon-sun"}}<span>Today</span>{{template "icon-check"}}</button>
+                <button type="button" data-workspace-option="tasks" data-call="chooseMobileWorkspace" data-args='["tasks"]'>{{template "icon-tasks"}}<span>Tasks</span>{{template "icon-check"}}</button>
+                <button type="button" data-workspace-option="groceries" data-call="chooseMobileWorkspace" data-args='["groceries"]'>{{template "icon-cart"}}<span>Groceries</span>{{template "icon-check"}}</button>
+                <button type="button" data-workspace-option="shopping" data-call="chooseMobileWorkspace" data-args='["shopping"]'>{{template "icon-bag"}}<span>Buys</span>{{template "icon-check"}}</button>
             </div>
         </div>
     </div>
@@ -118,27 +113,27 @@
             </span>
             <span class="brand-name">Second Brain</span>
         </div>
-        <button class="bottom-nav-btn workspace-nav-btn active" data-mode="today" onclick="openToday()">
+        <button class="bottom-nav-btn workspace-nav-btn active" data-mode="today" data-call="openToday">
             {{template "icon-sun"}}
             <span>Today</span>
         </button>
-        <button class="bottom-nav-btn" data-mode="todos" data-workspace="tasks" onclick="switchWorkspaceSection('tasks')">
+        <button class="bottom-nav-btn" data-mode="todos" data-workspace="tasks" data-call="switchWorkspaceSection" data-args='["tasks"]'>
             {{template "icon-tasks"}}
             <span>Tasks</span>
         </button>
-        <button class="bottom-nav-btn workspace-nav-btn" data-mode="todos" data-workspace="groceries" onclick="switchWorkspaceSection('groceries')">
+        <button class="bottom-nav-btn workspace-nav-btn" data-mode="todos" data-workspace="groceries" data-call="switchWorkspaceSection" data-args='["groceries"]'>
             {{template "icon-cart"}}
             <span>Groceries</span>
         </button>
-        <button class="bottom-nav-btn workspace-nav-btn" data-mode="todos" data-workspace="shopping" onclick="switchWorkspaceSection('shopping')">
+        <button class="bottom-nav-btn workspace-nav-btn" data-mode="todos" data-workspace="shopping" data-call="switchWorkspaceSection" data-args='["shopping"]'>
             {{template "icon-bag"}}
             <span>Buys</span>
         </button>
-        <button class="bottom-nav-btn" data-mode="notes" onclick="switchMode('notes')">
+        <button class="bottom-nav-btn" data-mode="notes" data-call="switchMode" data-args='["notes"]'>
             {{template "icon-notes"}}
             <span>Notes</span>
         </button>
-        <button class="bottom-nav-btn" data-mode="habits" onclick="switchMode('habits')">
+        <button class="bottom-nav-btn" data-mode="habits" data-call="switchMode" data-args='["habits"]'>
             <span class="nav-btn-icon-wrap">
                 {{template "icon-habits"}}
                 <span class="nav-badge" id="habits-badge" hidden></span>

@@ -1,12 +1,18 @@
 package main
 
 import (
+	"bytes"
+	"compress/gzip"
 	"database/sql"
 	"encoding/json"
 	"html"
+	"io"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -107,13 +113,12 @@ func TestMigrationPreservesLegacyData(t *testing.T) {
 func TestTaskTitleRevisionConflict(t *testing.T) {
 	setupWorkspaceDB(t)
 	execSQL(t, `INSERT INTO todos(id,category,text,done,archived,due_date) VALUES(1,'todo','Original',0,0,'')`)
-	first := formRequest(t, handleEditTodo, "/todos/edit", url.Values{"id": {"1"}, "text": {"First client"}, "revision": {"1"}})
+	first := formRequest(t, handleTaskSave, "/task/save", url.Values{"id": {"1"}, "text": {"First client"}, "revision": {"1"}})
 	requireOK(t, first)
-	var saved map[string]any
-	if err := json.Unmarshal(first.Body.Bytes(), &saved); err != nil || saved["revision"] != float64(2) {
-		t.Fatalf("unexpected save response %q: %v", first.Body.String(), err)
+	if !strings.Contains(first.Body.String(), `name="revision" value="2"`) {
+		t.Fatalf("save did not render the next revision: %s", first.Body.String())
 	}
-	stale := formRequest(t, handleEditTodo, "/todos/edit", url.Values{"id": {"1"}, "text": {"Second client"}, "revision": {"1"}})
+	stale := formRequest(t, handleTaskSave, "/task/save", url.Values{"id": {"1"}, "text": {"Second client"}, "revision": {"1"}})
 	if stale.Code != http.StatusConflict {
 		t.Fatalf("stale task save = %d, want 409: %s", stale.Code, stale.Body.String())
 	}
@@ -236,7 +241,7 @@ func TestWorkspaceTemplatesAndSearch(t *testing.T) {
 	}
 	w := httptest.NewRecorder()
 	handleSearch(w, httptest.NewRequest("GET", "/search?q=Car", nil))
-	for _, expected := range []string{"openProject(1)", "openStageResult(1)", "openTodoResult('todo',1)"} {
+	for _, expected := range []string{`data-call="openProjectResult"data-args='[1]'`, `data-call="openStageResult"data-args='[1]'`, `data-call="openTodoResult"data-args='["todo",1]'`} {
 		if !strings.Contains(strings.ReplaceAll(html.UnescapeString(w.Body.String()), " ", ""), expected) {
 			t.Errorf("search missing %s", expected)
 		}
@@ -383,7 +388,7 @@ func TestTodaySeparatesAttentionUpcomingAndSuggestions(t *testing.T) {
 		t.Fatalf("stats = completed %d attention %d", view.CompletedToday, view.DueLeft)
 	}
 	w := httptest.NewRecorder()
-	renderTemplate(w, "today.html", view)
+	renderTemplate(w, nil, "today.html", view)
 	requireOK(t, w)
 	if body := w.Body.String(); !strings.Contains(body, "What next") || !strings.Contains(body, `value="2026-09-17"`) {
 		t.Fatalf("Today actions missing from rendered view: %s", body)
@@ -522,5 +527,323 @@ func TestExpiredSubscriptionCannotBeReRegistered(t *testing.T) {
 	handlePushSubscribe(w, httptest.NewRequest("POST", "/push/subscribe", strings.NewReader(string(body))))
 	if w.Code != 409 || !strings.Contains(w.Body.String(), `"renew":true`) {
 		t.Fatalf("revoked subscription was not recognized: %d %s", w.Code, w.Body.String())
+	}
+}
+
+func resetLoginStates(t *testing.T) {
+	t.Helper()
+	loginMu.Lock()
+	loginStates = map[string]*loginState{}
+	loginMu.Unlock()
+	proxies := trustedProxies
+	t.Cleanup(func() {
+		loginMu.Lock()
+		loginStates = map[string]*loginState{}
+		loginMu.Unlock()
+		trustedProxies = proxies
+	})
+}
+
+func TestConcurrentLoginAttemptsRespectLockout(t *testing.T) {
+	previous := passcode
+	passcode = "12345678"
+	resetLoginStates(t)
+	t.Cleanup(func() { passcode = previous })
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	compared := 0
+	for i := 0; i < 40; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			r := httptest.NewRequest("POST", "/login", strings.NewReader("passcode=00000000"))
+			r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			r.Header.Set("HX-Request", "true")
+			w := httptest.NewRecorder()
+			handleLogin(w, r)
+			if strings.Contains(w.Body.String(), "Wrong passcode") {
+				mu.Lock()
+				compared++
+				mu.Unlock()
+			}
+		}()
+	}
+	wg.Wait()
+	if compared > maxLoginFailures {
+		t.Fatalf("%d parallel guesses were checked; lockout allows %d", compared, maxLoginFailures)
+	}
+}
+
+func TestPermanentDeleteOnlyRemovesArchivedRows(t *testing.T) {
+	setupWorkspaceDB(t)
+	execSQL(t, `INSERT INTO todos(id,category,text) VALUES(900,'todo','Active task')`)
+	execSQL(t, `INSERT INTO habits(id,name) VALUES(900,'Active habit')`)
+	var noteID int
+	db.QueryRow(`SELECT id FROM notes WHERE archived=0`).Scan(&noteID)
+	id := url.Values{"id": {"900"}}
+	formRequest(t, handlePermanentDeleteTodo, "/todos/permanent-delete", id)
+	formRequest(t, handlePermanentDeleteHabit, "/habits/permanent-delete", id)
+	formRequest(t, handlePermanentDeleteNote, "/notes/permanent-delete", url.Values{"id": {strconv.Itoa(noteID)}})
+	for _, q := range []string{`SELECT count(*) FROM todos WHERE id=900`, `SELECT count(*) FROM habits WHERE id=900`, `SELECT count(*) FROM notes WHERE id=` + strconv.Itoa(noteID)} {
+		var n int
+		db.QueryRow(q).Scan(&n)
+		if n != 1 {
+			t.Fatalf("active row was permanently deleted: %s", q)
+		}
+	}
+	execSQL(t, `UPDATE todos SET archived=1 WHERE id=900`)
+	requireOK(t, formRequest(t, handlePermanentDeleteTodo, "/todos/permanent-delete", id))
+	var n int
+	db.QueryRow(`SELECT count(*) FROM todos WHERE id=900`).Scan(&n)
+	if n != 0 {
+		t.Fatal("archived task was not deleted")
+	}
+}
+
+func TestIncrementHabitRequiresActiveGoal(t *testing.T) {
+	setupWorkspaceDB(t)
+	execSQL(t, `INSERT INTO habits(id,name,period,target) VALUES(1,'Walk','day',1),(2,'Read','week',3),(3,'Old','week',2)`)
+	execSQL(t, `UPDATE habits SET archived=1 WHERE id=3`)
+	for id, want := range map[string]int{"1": 400, "3": 404, "99": 404} {
+		if w := formRequest(t, handleIncrementHabit, "/habits/increment", url.Values{"id": {id}}); w.Code != want {
+			t.Errorf("increment habit %s = %d, want %d", id, w.Code, want)
+		}
+	}
+	requireOK(t, formRequest(t, handleIncrementHabit, "/habits/increment", url.Values{"id": {"2"}}))
+	var logs int
+	db.QueryRow(`SELECT COALESCE(SUM(count),0) FROM habit_logs`).Scan(&logs)
+	if logs != 1 {
+		t.Fatalf("habit log count = %d, want 1", logs)
+	}
+}
+
+func TestLoginLockoutIsPerClient(t *testing.T) {
+	previous := passcode
+	passcode = "12345678"
+	t.Cleanup(func() { passcode = previous })
+	resetLoginStates(t)
+	for i := 0; i < maxLoginFailures; i++ {
+		checkPasscode("203.0.113.9", "00000000")
+	}
+	if blocked, _ := checkPasscode("203.0.113.9", "12345678"); !blocked {
+		t.Fatal("client was not locked out after repeated failures")
+	}
+	if blocked, ok := checkPasscode("198.51.100.4", "12345678"); blocked || !ok {
+		t.Fatalf("another client was affected by the lockout: blocked=%v ok=%v", blocked, ok)
+	}
+}
+
+func TestLoginClientTrustsForwardedForOnlyFromProxies(t *testing.T) {
+	resetLoginStates(t)
+	var err error
+	if trustedProxies, err = parseTrustedProxies("10.0.0.0/8, 172.18.0.2"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := parseTrustedProxies("not-an-ip"); err == nil {
+		t.Fatal("invalid TRUSTED_PROXY was accepted")
+	}
+	cases := []struct{ remote, xff, want string }{
+		{"203.0.113.9:4000", "198.51.100.4", "203.0.113.9"},                    // untrusted peer: header ignored
+		{"172.18.0.2:4000", "198.51.100.4", "198.51.100.4"},                    // trusted proxy
+		{"172.18.0.2:4000", "1.1.1.1, 198.51.100.4, 10.1.2.3", "198.51.100.4"}, // spoofed left entry, proxy chain on the right
+		{"172.18.0.2:4000", "", "172.18.0.2"},                                  // no header
+		{"172.18.0.2:4000", "garbage", "172.18.0.2"},                           // unparseable header
+	}
+	for _, c := range cases {
+		r := httptest.NewRequest("POST", "/login", nil)
+		r.RemoteAddr = c.remote
+		if c.xff != "" {
+			r.Header.Set("X-Forwarded-For", c.xff)
+		}
+		if got := loginClient(r); got != c.want {
+			t.Errorf("loginClient(%s, %q) = %s, want %s", c.remote, c.xff, got, c.want)
+		}
+	}
+}
+
+func TestPruneDeliveriesKeepsRecentAndPending(t *testing.T) {
+	setupWorkspaceDB(t)
+	now := time.Date(2026, 9, 27, 12, 0, 0, 0, time.UTC)
+	old := now.AddDate(0, 0, -40).Format(time.RFC3339)
+	recent := now.AddDate(0, 0, -2).Format(time.RFC3339)
+	execSQL(t, `INSERT INTO push_subscriptions(endpoint,p256dh,auth) VALUES('https://push.example/a','p','a')`)
+	for key, row := range map[string][2]string{"old-accepted": {old, "accepted"}, "old-pending": {old, "pending"}, "recent-failed": {recent, "failed"}} {
+		execSQL(t, `INSERT INTO push_deliveries(endpoint,event_key,payload,next_attempt,expires_at,status) VALUES('https://push.example/a',?,'{}',?,?,?)`, key, row[0], row[0], row[1])
+	}
+	if n, err := pruneDeliveries(now); err != nil || n != 1 {
+		t.Fatalf("pruned %d rows (err %v), want 1", n, err)
+	}
+	var left int
+	db.QueryRow(`SELECT count(*) FROM push_deliveries WHERE event_key IN ('old-pending','recent-failed')`).Scan(&left)
+	if left != 2 {
+		t.Fatalf("kept %d of the pending/recent rows, want 2", left)
+	}
+}
+
+func TestProjectBodyCountsArchivedCompletions(t *testing.T) {
+	setupWorkspaceDB(t)
+	execSQL(t, `INSERT INTO projects(id,name) VALUES(1,'Car')`)
+	execSQL(t, `INSERT INTO stages(id,project_id,name) VALUES(1,1,'Licence')`)
+	execSQL(t, `INSERT INTO todos(id,category,text,project_id,stage_id,done,archived) VALUES(1,'todo','Theory test',1,1,1,1),(2,'todo','Driving test',1,1,0,0)`)
+	ws, err := loadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stage := ws.Projects[0].Stages[0].Group
+	w := httptest.NewRecorder()
+	handleWorkspaceProject(w, httptest.NewRequest("GET", "/workspace/project?id=1", nil))
+	requireOK(t, w)
+	want := strconv.Itoa(stage.Completed) + "/" + strconv.Itoa(stage.Total)
+	if want != "1/2" || !strings.Contains(w.Body.String(), `<span class="section-count">`+want+`</span>`) {
+		t.Fatalf("project body stage count disagrees with the workspace (%s): %s", want, w.Body.String())
+	}
+}
+
+func TestDailyBackupWritesOncePerDayAndPrunes(t *testing.T) {
+	setupWorkspaceDB(t)
+	previousDir, previousKeep := backupDir, backupKeep
+	backupDir, backupKeep = t.TempDir(), 2
+	t.Cleanup(func() { backupDir, backupKeep = previousDir, previousKeep })
+	execSQL(t, `INSERT INTO todos(category,text) VALUES('todo','Back me up')`)
+	day := time.Date(2026, 9, 25, 3, 0, 0, 0, time.UTC)
+	for i := 0; i < 3; i++ {
+		path, err := runDailyBackup(day.AddDate(0, 0, i))
+		if err != nil || path == "" {
+			t.Fatalf("day %d: path %q err %v", i, path, err)
+		}
+	}
+	if path, err := runDailyBackup(day.AddDate(0, 0, 2)); err != nil || path != "" {
+		t.Fatalf("second run on the same day wrote %q (err %v)", path, err)
+	}
+	entries, _ := os.ReadDir(backupDir)
+	var names []string
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	if strings.Join(names, ",") != "secondbrain-2026-09-26.db,secondbrain-2026-09-27.db" {
+		t.Fatalf("backups kept: %v", names)
+	}
+	info, err := os.Stat(backupDir + "/secondbrain-2026-09-27.db")
+	if err != nil || info.Mode().Perm() != 0600 {
+		t.Fatalf("backup mode %v err %v", info, err)
+	}
+	snapshot, err := sql.Open("sqlite3", backupDir+"/secondbrain-2026-09-27.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer snapshot.Close()
+	var text string
+	if err := snapshot.QueryRow(`SELECT text FROM todos WHERE text='Back me up'`).Scan(&text); err != nil {
+		t.Fatalf("snapshot is missing data: %v", err)
+	}
+}
+
+func TestTodayMarksOnlyOverdueDates(t *testing.T) {
+	setupWorkspaceDB(t)
+	now := appNow()
+	execSQL(t, `INSERT INTO todos(category,text,due_date) VALUES('todo','Late',?),('todo','Now',?),('todo','Soon',?)`,
+		now.AddDate(0, 0, -3).Format("2006-01-02"), now.Format("2006-01-02"), now.AddDate(0, 0, 2).Format("2006-01-02"))
+	w := httptest.NewRecorder()
+	handleToday(w, httptest.NewRequest("GET", "/today", nil))
+	requireOK(t, w)
+	body := w.Body.String()
+	if n := strings.Count(body, `class="todo-date overdue"`); n != 1 {
+		t.Fatalf("overdue dates marked = %d, want 1", n)
+	}
+	late := strings.Index(body, "Late")
+	if late < 0 || !strings.Contains(body[late:late+800], "todo-date overdue") {
+		t.Fatal("the overdue task's date is not marked overdue")
+	}
+}
+
+func TestTasksSortOverdueThenDatedThenNewest(t *testing.T) {
+	setupWorkspaceDB(t)
+	execSQL(t, `INSERT INTO todos(id,category,text,due_date,created_at) VALUES
+		(1,'todo','Old undated','','2026-01-01 10:00:00'),
+		(2,'todo','Next week','2026-10-04','2026-01-02 10:00:00'),
+		(3,'todo','Overdue','2026-09-01','2026-01-03 10:00:00'),
+		(4,'todo','New undated','','2026-01-04 10:00:00')`)
+	ws, err := loadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, task := range ws.Tasks.Tasks {
+		got = append(got, task.Text)
+	}
+	if strings.Join(got, ",") != "Overdue,Next week,New undated,Old undated" {
+		t.Fatalf("task order = %v", got)
+	}
+}
+
+// The CSP forbids inline script, so templates must use data-call handlers,
+// and each named function must be in app.js's allowlist.
+func TestTemplatesHaveNoInlineScript(t *testing.T) {
+	app, err := staticFiles.ReadFile("static/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := strings.Index(string(app), "const CALLABLE = new Set([")
+	end := strings.Index(string(app)[start:], "]);")
+	allowed := string(app)[start : start+end]
+	inline := regexp.MustCompile(`(?i)\son[a-z]+\s*=|<script(?:\s[^>]*)?>\s*[^<\s]|javascript:`)
+	calls := regexp.MustCompile(`data-call="([^"]+)"`)
+	entries, _ := templateFiles.ReadDir("templates")
+	for _, entry := range entries {
+		body, _ := templateFiles.ReadFile("templates/" + entry.Name())
+		if loc := inline.FindIndex(body); loc != nil {
+			t.Errorf("%s has inline script near %q", entry.Name(), body[loc[0]:min(len(body), loc[1]+40)])
+		}
+		for _, m := range calls.FindAllSubmatch(body, -1) {
+			if !strings.Contains(allowed, "'"+string(m[1])+"'") {
+				t.Errorf("%s calls %s, which is not in CALLABLE", entry.Name(), m[1])
+			}
+		}
+	}
+}
+
+func TestStaticAndPagesAreGzipped(t *testing.T) {
+	setupWorkspaceDB(t)
+	staticFS, _ := fs.Sub(staticFiles, "static")
+	if err := compressStaticAssets(staticFS); err != nil {
+		t.Fatal(err)
+	}
+	handler := serveStatic(http.StripPrefix("/static/", http.FileServer(http.FS(staticFS))))
+	for _, gzipOK := range []bool{true, false} {
+		r := httptest.NewRequest("GET", "/static/style.css", nil)
+		if gzipOK {
+			r.Header.Set("Accept-Encoding", "gzip, deflate")
+		}
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, r)
+		requireOK(t, w)
+		body := w.Body.Bytes()
+		if gzipOK {
+			if w.Header().Get("Content-Encoding") != "gzip" || !strings.HasPrefix(w.Header().Get("Content-Type"), "text/css") {
+				t.Fatalf("compressed CSS headers: %v", w.Header())
+			}
+			zr, err := gzip.NewReader(bytes.NewReader(body))
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, _ = io.ReadAll(zr)
+		} else if w.Header().Get("Content-Encoding") != "" {
+			t.Fatal("compressed a response for a client without gzip")
+		}
+		if want, _ := staticFiles.ReadFile("static/style.css"); !bytes.Equal(body, want) {
+			t.Fatalf("static body differs (gzip=%v)", gzipOK)
+		}
+	}
+	r := httptest.NewRequest("GET", "/", nil)
+	r.Header.Set("Accept-Encoding", "gzip")
+	w := httptest.NewRecorder()
+	handleIndex(w, r)
+	requireOK(t, w)
+	zr, err := gzip.NewReader(w.Body)
+	if err != nil || w.Header().Get("Content-Encoding") != "gzip" {
+		t.Fatalf("page not gzipped: %v %v", err, w.Header())
+	}
+	if page, _ := io.ReadAll(zr); !bytes.Contains(page, []byte("<!DOCTYPE html>")) {
+		t.Fatal("gzipped page did not decode to HTML")
 	}
 }

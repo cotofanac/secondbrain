@@ -179,7 +179,7 @@ func handleToday(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Today unavailable", http.StatusInternalServerError)
 		return
 	}
-	renderTemplate(w, "today.html", view)
+	renderTemplate(w, r, "today.html", view)
 }
 func handleTodayReschedule(w http.ResponseWriter, r *http.Request) {
 	if !requirePost(w, r) {
@@ -220,7 +220,7 @@ func handleSettings(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Could not load settings", 500)
 		return
 	}
-	renderTemplate(w, "settings.html", s)
+	renderTemplate(w, r, "settings.html", s)
 }
 func handleSaveSettings(w http.ResponseWriter, r *http.Request) {
 	if !requirePost(w, r) {
@@ -336,7 +336,7 @@ func handleReview(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Could not load saved reviews", 500)
 		return
 	}
-	renderTemplate(w, "review.html", review)
+	renderTemplate(w, r, "review.html", review)
 }
 
 func queueNotification(event string, payload pushPayload, now, expires time.Time) error {
@@ -346,6 +346,20 @@ func queueNotification(event string, payload pushPayload, now, expires time.Time
 	}
 	_, err = db.Exec(`INSERT OR IGNORE INTO push_deliveries(endpoint,event_key,payload,next_attempt,expires_at) SELECT endpoint,?,?,?,? FROM push_subscriptions`, event, string(body), now.UTC().Format(time.RFC3339), expires.UTC().Format(time.RFC3339))
 	return err
+}
+
+// deliveryRetention keeps recent results for the Notifications status line
+// while stopping push_deliveries from growing without bound.
+const deliveryRetention = 30 * 24 * time.Hour
+
+// pruneDeliveries removes finished delivery rows older than deliveryRetention.
+// Pending rows are left to processDeliveries, which expires them itself.
+func pruneDeliveries(now time.Time) (int64, error) {
+	res, err := db.Exec(`DELETE FROM push_deliveries WHERE status!='pending' AND next_attempt<?`, now.Add(-deliveryRetention).UTC().Format(time.RFC3339))
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
 }
 
 // Tick receives its clock explicitly. Persistence prevents duplicates across restarts.

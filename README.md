@@ -100,5 +100,13 @@ docker compose up -d
 
 Open [http://localhost:8080](http://localhost:8080).
 
+Second Brain writes a snapshot of its database to `data/backups` once a day and
+keeps the last seven (`BACKUP_KEEP` changes the count; `0` turns it off). The
+snapshots live on the same disk, so copy that folder somewhere else too.
+
+If you run it behind a reverse proxy, set `TRUSTED_PROXY` to the proxy's
+address (an IP or CIDR range). Failed sign-ins then lock out only the device
+that made them, instead of everyone arriving through the proxy.
+
 For upgrades, backups, and deployment details, see
 [the upgrade guide](docs/UPGRADE.md).
