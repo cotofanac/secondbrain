@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -845,5 +846,22 @@ func TestStaticAndPagesAreGzipped(t *testing.T) {
 	}
 	if page, _ := io.ReadAll(zr); !bytes.Contains(page, []byte("<!DOCTYPE html>")) {
 		t.Fatal("gzipped page did not decode to HTML")
+	}
+}
+
+func TestBackupDirIsConfigurable(t *testing.T) {
+	previousDir, previousKeep := backupDir, backupKeep
+	t.Cleanup(func() { backupDir, backupKeep = previousDir, previousKeep })
+	t.Setenv("BACKUP_KEEP", "")
+	t.Setenv("BACKUP_DIR", "")
+	configureBackups("/data")
+	if backupDir != filepath.Join("/data", "backups") {
+		t.Fatalf("default backup dir = %s", backupDir)
+	}
+	custom := t.TempDir()
+	t.Setenv("BACKUP_DIR", custom)
+	configureBackups("/data")
+	if backupDir != custom {
+		t.Fatalf("BACKUP_DIR ignored: %s", backupDir)
 	}
 }

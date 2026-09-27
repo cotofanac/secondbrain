@@ -22,8 +22,10 @@ services:
       # tell clients apart via X-Forwarded-For (IPs or CIDRs, comma-separated).
       # Leave empty when the app is reached directly.
       - TRUSTED_PROXY=${TRUSTED_PROXY:-}
-      # Daily database snapshots kept in data/backups (0 turns them off).
+      # Daily database snapshots to keep (0 turns them off). They are written
+      # to /app/backups, which the volume below maps to BACKUP_PATH on the host.
       - BACKUP_KEEP=${BACKUP_KEEP:-7}
+      - BACKUP_DIR=/app/backups
     volumes:
       # Bind mount: the SQLite database is persisted on the host.
       # The container runs as appuser (UID 1000), so the host directory must be
@@ -32,6 +34,11 @@ services:
       #   mkdir -p data && sudo chown -R 1000:1000 data
       # An absolute host path works too (e.g. /srv/secondbrain/data:/app/data)
       - ./data:/app/data
+      # Backups: defaults to ./data/backups. Point BACKUP_PATH at another disk
+      # or a network share (e.g. /mnt/backup/secondbrain) so a failed data disk
+      # doesn't take the backups with it. Create it first, writable by UID 1000:
+      #   mkdir -p /mnt/backup/secondbrain && sudo chown 1000:1000 /mnt/backup/secondbrain
+      - ${BACKUP_PATH:-./data/backups}:/app/backups
     healthcheck:
       test: ["CMD", "sh", "-c", "wget -qO /dev/null http://localhost:${PORT:-8080}/health || exit 1"]
       interval: 30s

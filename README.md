@@ -101,8 +101,10 @@ docker compose up -d
 Open [http://localhost:8080](http://localhost:8080).
 
 Second Brain writes a snapshot of its database to `data/backups` once a day and
-keeps the last seven (`BACKUP_KEEP` changes the count; `0` turns it off). The
-snapshots live on the same disk, so copy that folder somewhere else too.
+keeps the last seven (`BACKUP_KEEP` changes the count; `0` turns it off). To keep
+them on another disk or a network share, set `BACKUP_PATH` in `.env` to that
+folder (with Docker Compose), or `BACKUP_DIR` when running the binary directly.
+The folder must be writable by the app (UID 1000 in the container).
 
 If you run it behind a reverse proxy, set `TRUSTED_PROXY` to the proxy's
 address (an IP or CIDR range). Failed sign-ins then lock out only the device

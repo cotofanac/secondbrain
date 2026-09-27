@@ -11,9 +11,9 @@ import (
 	"time"
 )
 
-// Daily snapshots of the database, written next to it under backups/. They
-// guard against mistakes and bad upgrades, not against losing the disk: copy
-// the backups directory somewhere else as well.
+// Daily snapshots of the database, written to BACKUP_DIR (default: backups/
+// next to the database). Pointing BACKUP_DIR at another disk or a network
+// share also guards against losing the data disk.
 var (
 	backupDir  string
 	backupKeep = 7
@@ -21,7 +21,8 @@ var (
 
 const backupPrefix, backupSuffix = "secondbrain-", ".db"
 
-// configureBackups reads BACKUP_KEEP (snapshots to retain; 0 disables).
+// configureBackups reads BACKUP_KEEP (snapshots to retain; 0 disables) and
+// BACKUP_DIR (where to write them).
 func configureBackups(dataDir string) {
 	if raw := strings.TrimSpace(os.Getenv("BACKUP_KEEP")); raw != "" {
 		n, err := strconv.Atoi(raw)
@@ -30,7 +31,10 @@ func configureBackups(dataDir string) {
 		}
 		backupKeep = n
 	}
-	backupDir = filepath.Join(dataDir, "backups")
+	backupDir = strings.TrimSpace(os.Getenv("BACKUP_DIR"))
+	if backupDir == "" {
+		backupDir = filepath.Join(dataDir, "backups")
+	}
 	if backupKeep == 0 {
 		log.Printf("Daily backups disabled")
 		return
