@@ -6,7 +6,8 @@ import (
 	"time"
 )
 
-// Migrations only add schema. Run against a backed-up database before rollout.
+// Migrations only add schema, with one deliberate exception: version 4 drops
+// the retired habit tables. Run against a backed-up database before rollout.
 func migrateWorkspace(conn *sql.DB, now time.Time) error {
 	tx, err := conn.Begin()
 	if err != nil {
@@ -89,5 +90,34 @@ func migrateWorkspace(conn *sql.DB, now time.Time) error {
 		}
 	}
 
+	if err = tx.QueryRow(`SELECT count(*) FROM schema_migrations WHERE version=4`).Scan(&count); err != nil {
+		return err
+	}
+	if count == 0 {
+		// Habits were replaced by repeating tasks and nothing reads their data
+		// any more. The only non-additive migration: an older image recreates
+		// the tables empty, so a rollback still starts but without habit history.
+		for _, statement := range []string{
+			`DROP TABLE IF EXISTS habit_logs`,
+			`DROP TABLE IF EXISTS habits`,
+			`DELETE FROM push_deliveries WHERE event_key LIKE 'habit:%'`,
+		} {
+			if _, err = tx.Exec(statement); err != nil {
+				return fmt.Errorf("habit removal migration: %w", err)
+			}
+		}
+		var settings int
+		if err = tx.QueryRow(`SELECT count(*) FROM sqlite_master WHERE type='table' AND name='settings'`).Scan(&settings); err != nil {
+			return err
+		}
+		if settings > 0 {
+			if _, err = tx.Exec(`DELETE FROM settings WHERE key IN ('habit_enabled','habit_time','queued_habit','habit_reminder_sent')`); err != nil {
+				return fmt.Errorf("habit removal migration: %w", err)
+			}
+		}
+		if _, err = tx.Exec(`INSERT INTO schema_migrations VALUES(4,?)`, now.UTC().Format(time.RFC3339)); err != nil {
+			return err
+		}
+	}
 	return tx.Commit()
 }

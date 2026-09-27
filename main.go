@@ -474,8 +474,6 @@ func initDB() {
 	db.Exec("UPDATE sessions SET last_seen = datetime('now') WHERE last_seen = ''")
 	db.Exec("DELETE FROM sessions WHERE expires_at <= datetime('now')")
 	db.Exec("ALTER TABLE todos ADD COLUMN archived_at DATETIME DEFAULT NULL")
-	// Habits were removed in favour of repeating tasks. Existing habits and
-	// habit_logs tables are left untouched so no history is lost.
 	db.Exec("CREATE INDEX IF NOT EXISTS idx_todos_category_archived ON todos(category, archived)")
 
 	// Seed a default note if none exist
