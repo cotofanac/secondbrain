@@ -252,7 +252,7 @@ func validMembership(tx *sql.Tx, projectRaw, stageRaw string) (int, int, error) 
 	return p, s, nil
 }
 func registerWorkspaceRoutes() {
-	for path, h := range map[string]http.HandlerFunc{"/workspace": handleWorkspace, "/workspace/project": handleWorkspaceProject, "/projects/action": handleProjectAction, "/stages/action": handleStageAction, "/task/detail": handleTaskDetail, "/task/save": handleTaskSave, "/projects/detail": handleProjectDetail, "/projects/notes": handleProjectNotes} {
+	for path, h := range map[string]http.HandlerFunc{"/workspace": handleWorkspace, "/workspace/project": handleWorkspaceProject, "/projects/action": handleProjectAction, "/stages/action": handleStageAction, "/task/detail": handleTaskDetail, "/task/save": handleTaskSave, "/projects/detail": handleProjectDetail, "/projects/notes": handleProjectNotes, "/sidebar": handleSidebar, "/archive": handleArchive} {
 		http.HandleFunc(path, authMiddleware(h))
 	}
 }
@@ -485,6 +485,10 @@ func handleStructureAction(w http.ResponseWriter, r *http.Request, stage bool) {
 			kind = "stage"
 		}
 		hxTrigger(w, "sbUndo", map[string]any{"kind": kind, "id": id})
+	}
+	if r.FormValue("return") == "archive" {
+		renderArchive(w, r, "projects")
+		return
 	}
 	handleWorkspace(w, r)
 }

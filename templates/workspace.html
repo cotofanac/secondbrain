@@ -22,11 +22,11 @@
 <details class="workspace-section" id="section-{{.Key}}" data-persist="{{.Key}}" {{if eq .Key "tasks"}}open{{end}}>
  <summary><span class="disclosure-icon">{{template "icon-chevron"}}</span><span class="section-kind-icon">{{if eq .Category "groceries"}}{{template "icon-cart"}}{{else if eq .Category "shopping"}}{{template "icon-bag"}}{{else}}{{template "icon-inbox"}}{{end}}</span><span class="section-title">{{.Name}}</span><span class="section-count">{{len .Tasks}}</span></summary>
  {{template "task-group" .}}
- <div class="section-footer"><button class="action-with-icon" data-call="openTaskArchive" data-args='["{{.Category}}"]'>{{template "icon-archive"}}<span>Archived</span></button>{{if ne .Category "todo"}}<button class="action-with-icon" hx-post="/todos/clear-checked" hx-target="#todo-items" hx-vals='{"category":"{{.Category}}"}'>{{template "icon-reset"}}<span>Uncheck all</span></button>{{end}}</div>
+ <div class="section-footer"><button class="action-with-icon" data-call="openArchive" data-args='["{{.Category}}"]'>{{template "icon-archive"}}<span>Archived</span></button>{{if ne .Category "todo"}}<button class="action-with-icon" hx-post="/todos/clear-checked" hx-target="#todo-items" hx-vals='{"category":"{{.Category}}"}'>{{template "icon-reset"}}<span>Uncheck all</span></button>{{end}}</div>
 </details>
 {{end}}
 {{define "project-body"}}
-<div class="section-footer"><button class="action-with-icon" data-call="openProject" data-args='[{{.ID}}]'>{{template "icon-edit"}}<span>Project details</span></button><button class="action-with-icon" data-call="structureCreate" data-args='["stage",{{.ID}}]'>{{template "icon-plus"}}<span>Stage</span></button></div>
+<div class="section-footer"><button class="action-with-icon" data-call="openProjectDetails" data-args='[{{.ID}}]'>{{template "icon-edit"}}<span>Project details</span></button><button class="action-with-icon" data-call="structureCreate" data-args='["stage",{{.ID}}]'>{{template "icon-plus"}}<span>Stage</span></button></div>
 {{template "task-group" .Group}}
 {{range .Stages}}{{if not .Archived}}
 <details class="stage-group" id="stage-{{.ID}}" data-persist="stage-{{.ID}}"><summary><span class="disclosure-icon">{{template "icon-chevron"}}</span><span>{{.Name}}</span><span class="section-count">{{.Group.Completed}}/{{.Group.Total}}</span></summary>
@@ -40,18 +40,17 @@
  <section class="inbox-group" aria-labelledby="inbox-heading">
   <div class="workspace-subheading"><span class="section-kind-icon">{{template "icon-inbox"}}</span><h2 id="inbox-heading">Inbox</h2><span class="section-count">{{len .Tasks.Tasks}}</span></div>
   {{template "task-group" .Tasks}}
-  <div class="section-footer"><button class="action-with-icon" data-call="openTaskArchive" data-args='["todo"]'>{{template "icon-archive"}}<span>Archived</span></button></div>
+  <div class="section-footer"><button class="action-with-icon" data-call="openArchive" data-args='["todo"]'>{{template "icon-archive"}}<span>Archived</span></button></div>
  </section>
  <section class="projects-group" aria-labelledby="projects-heading">
   <div class="workspace-subheading"><span class="section-kind-icon project-icon">{{template "icon-folder"}}</span><h2 id="projects-heading">Projects</h2><span class="section-count">{{len .Projects}}</span></div>
-  <div class="section-footer projects-actions"><button class="action-with-icon" data-call="structureCreate" data-args='["project",0]'>{{template "icon-plus"}}<span>New project</span></button></div>
+  <div class="section-footer projects-actions"><button class="action-with-icon" data-call="structureCreate" data-args='["project",0]'>{{template "icon-plus"}}<span>New project</span></button>{{if .ArchivedProjects}}<button class="action-with-icon" data-call="openArchive" data-args='["projects"]'>{{template "icon-archive"}}<span>Archived</span></button>{{end}}</div>
  {{range .Projects}}
  <details class="project-group" id="project-{{.ID}}" data-persist="project-{{.ID}}" data-stage-ids="{{range .Stages}} {{.ID}}{{end}}">
-  <summary><span class="disclosure-icon">{{template "icon-chevron"}}</span><span>{{.Name}}</span><span class="project-progress" style="--progress:{{if .Group.Total}}{{.Group.Completed}}{{else}}0{{end}};--total:{{if .Group.Total}}{{.Group.Total}}{{else}}1{{end}}" aria-label="{{.Group.Completed}} of {{.Group.Total}} complete"></span><span class="section-count">{{.Group.Completed}}/{{.Group.Total}}</span></summary>
+  <summary><span class="disclosure-icon">{{template "icon-chevron"}}</span><span class="project-name">{{.Name}}</span><span class="project-progress" style="--progress:{{if .Group.Total}}{{.Group.Completed}}{{else}}0{{end}};--total:{{if .Group.Total}}{{.Group.Total}}{{else}}1{{end}}" aria-label="{{.Group.Completed}} of {{.Group.Total}} complete"></span><span class="section-count">{{.Group.Completed}}/{{.Group.Total}}</span></summary>
   <div id="project-body-{{.ID}}" data-lazy-project="{{.ID}}"></div>
  </details>
  {{else}}<p class="quiet-empty">A goal can start with one small task.</p>{{end}}
- {{if .ArchivedProjects}}<details class="completed-group" data-persist="archived-projects"><summary>Completed &amp; archived projects</summary>{{range .ArchivedProjects}}<div class="archive-project"><button data-call="openProject" data-args='[{{.ID}}]'>{{.Name}}</button><button data-call="structureAction" data-args='["project",{{.ID}},"{{if .Completed}}reopen{{else}}restore{{end}}"]'>{{if .Completed}}Reopen{{else}}Restore{{end}}</button></div>{{end}}</details>{{end}}
  </section>
 </details>
 {{template "list-section" .Groceries}}

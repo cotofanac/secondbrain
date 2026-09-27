@@ -82,10 +82,14 @@
             <div class="mobile-sheet-handle" aria-hidden="true"></div>
             <h2 id="mobile-workspace-title">Go to</h2>
             <div class="mobile-workspace-options">
-                <button type="button" data-mode-option="today" data-call="chooseMobileUtility" data-args='["today"]'>{{template "icon-sun"}}<span>Today</span>{{template "icon-check"}}</button>
-                <button type="button" data-workspace-option="tasks" data-call="chooseMobileWorkspace" data-args='["tasks"]'>{{template "icon-tasks"}}<span>Tasks</span>{{template "icon-check"}}</button>
-                <button type="button" data-workspace-option="groceries" data-call="chooseMobileWorkspace" data-args='["groceries"]'>{{template "icon-cart"}}<span>Groceries</span>{{template "icon-check"}}</button>
-                <button type="button" data-workspace-option="shopping" data-call="chooseMobileWorkspace" data-args='["shopping"]'>{{template "icon-bag"}}<span>Buys</span>{{template "icon-check"}}</button>
+                <button type="button" data-mode-option="today" data-call="chooseMobileUtility" data-args='["today"]'>{{template "icon-sun"}}<span>Today</span><span class="sheet-count" aria-hidden="true" data-count-from="nav-count-today"></span>{{template "icon-check"}}</button>
+                <button type="button" data-workspace-option="tasks" data-call="chooseMobileWorkspace" data-args='["tasks"]'>{{template "icon-tasks"}}<span>Tasks</span><span class="sheet-count" aria-hidden="true" data-count-from="nav-count-tasks"></span>{{template "icon-check"}}</button>
+                <button type="button" data-workspace-option="groceries" data-call="chooseMobileWorkspace" data-args='["groceries"]'>{{template "icon-cart"}}<span>Groceries</span><span class="sheet-count" aria-hidden="true" data-count-from="nav-count-groceries"></span>{{template "icon-check"}}</button>
+                <button type="button" data-workspace-option="shopping" data-call="chooseMobileWorkspace" data-args='["shopping"]'>{{template "icon-bag"}}<span>Buys</span><span class="sheet-count" aria-hidden="true" data-count-from="nav-count-shopping"></span>{{template "icon-check"}}</button>
+            </div>
+            <div class="mobile-workspace-options mobile-sheet-secondary">
+                <button type="button" data-mode-option="archive" data-call="chooseMobileUtility" data-args='["archive"]'>{{template "icon-archive"}}<span>Archive</span><span class="sheet-count" aria-hidden="true"></span>{{template "icon-check"}}</button>
+                <button type="button" data-mode-option="settings" data-call="chooseMobileUtility" data-args='["settings"]'>{{template "icon-settings"}}<span>Reminders &amp; notifications</span><span class="sheet-count" aria-hidden="true"></span>{{template "icon-check"}}</button>
             </div>
         </div>
     </div>
@@ -99,24 +103,38 @@
         </div>
         <button class="bottom-nav-btn active" data-mode="today" data-call="openToday">
             {{template "icon-sun"}}
-            <span>Today</span>
+            <span class="nav-label">Today</span>
+            {{template "count-today" .Sidebar}}
         </button>
         <button class="bottom-nav-btn" data-mode="todos" data-workspace="tasks" data-call="switchWorkspaceSection" data-args='["tasks"]'>
             {{template "icon-tasks"}}
-            <span>Tasks</span>
+            <span class="nav-label nav-label-phone">Tasks</span><span class="nav-label nav-label-desktop">Inbox</span>
+            {{template "count-inbox" .Sidebar}}
         </button>
+        <div class="sidebar-heading sidebar-only">Projects</div>
+        {{template "sidebar-projects" .Sidebar}}
         <button class="bottom-nav-btn workspace-nav-btn" data-mode="todos" data-workspace="groceries" data-call="switchWorkspaceSection" data-args='["groceries"]'>
             {{template "icon-cart"}}
-            <span>Groceries</span>
+            <span class="nav-label">Groceries</span>
+            {{template "count-groceries" .Sidebar}}
         </button>
         <button class="bottom-nav-btn workspace-nav-btn" data-mode="todos" data-workspace="shopping" data-call="switchWorkspaceSection" data-args='["shopping"]'>
             {{template "icon-bag"}}
-            <span>Buys</span>
+            <span class="nav-label">Buys</span>
+            {{template "count-shopping" .Sidebar}}
         </button>
         <button class="bottom-nav-btn" data-mode="notes" data-call="switchMode" data-args='["notes"]'>
             {{template "icon-notes"}}
-            <span>Notes</span>
+            <span class="nav-label">Notes</span>
         </button>
+        <button class="bottom-nav-btn workspace-nav-btn" data-mode="todos" data-workspace="archive" data-call="openArchive" data-args='["todo"]'>
+            {{template "icon-archive"}}
+            <span class="nav-label">Archive</span>
+        </button>
+        <div class="sidebar-footer sidebar-only">
+            <button type="button" class="sidebar-link" data-call="structureCreate" data-args='["project",0]'>{{template "icon-plus"}}<span>New project</span></button>
+            <button type="button" class="icon-button sidebar-settings" data-mode="settings" data-call="openSettings" aria-label="Reminders &amp; notifications" title="Reminders &amp; notifications">{{template "icon-settings"}}</button>
+        </div>
     </nav>
 
     <script src="/static/htmx.min.js?v={{assetVersion}}"></script>

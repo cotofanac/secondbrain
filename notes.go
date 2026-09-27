@@ -274,24 +274,6 @@ func handleRenameNote(w http.ResponseWriter, r *http.Request) {
 	handleNotes(w, r)
 }
 
-func handleArchiveNotes(w http.ResponseWriter, r *http.Request) {
-	rows, err := db.Query("SELECT id, title FROM notes WHERE archived = 1 ORDER BY title ASC LIMIT 200")
-	if err != nil {
-		http.Error(w, "DB error", http.StatusInternalServerError)
-		return
-	}
-	defer rows.Close()
-
-	var notes []Note
-	for rows.Next() {
-		var n Note
-		rows.Scan(&n.ID, &n.Title)
-		notes = append(notes, n)
-	}
-
-	renderTemplate(w, r, "notes-archive.html", notes)
-}
-
 func handleRestoreNote(w http.ResponseWriter, r *http.Request) {
 	if !requirePost(w, r) {
 		return
@@ -306,7 +288,9 @@ func handleRestoreNote(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "DB error", http.StatusInternalServerError)
 		return
 	}
-	handleArchiveNotes(w, r)
+	// The restored note belongs in the note list again.
+	hxTrigger(w, "sbNotesChanged", map[string]any{})
+	renderArchive(w, r, "notes")
 }
 
 func handlePermanentDeleteNote(w http.ResponseWriter, r *http.Request) {
@@ -324,5 +308,5 @@ func handlePermanentDeleteNote(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "DB error", http.StatusInternalServerError)
 		return
 	}
-	handleArchiveNotes(w, r)
+	renderArchive(w, r, "notes")
 }

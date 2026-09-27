@@ -29,10 +29,14 @@ const shot = name => require('node:path').join(process.env.SCREENSHOT_DIR || req
  await page.locator('#capture-tasks button[type=submit], #capture-tasks button.add-circle').click();
  await page.getByRole('button',{name:'Call the driving school',exact:true}).waitFor();
  assert.equal(await page.locator('#capture-tasks [name=text]').inputValue(),'');
- await page.locator('#projects-heading').waitFor();
+ // The sidebar counts open inbox tasks and lists projects, which open as pages.
+ await page.waitForFunction(()=>document.getElementById('nav-count-tasks')?.textContent.trim()==='1');
  await page.getByRole('button',{name:'New project',exact:true}).click();
  await page.locator('#custom-dialog-input').fill('Car');await page.locator('#custom-dialog-confirm').click();
- await page.locator('.project-group > summary').filter({hasText:'Car'}).click();
+ await page.locator('.sidebar-project').filter({hasText:'Car'}).click();
+ await page.locator('[data-project-page] > summary').filter({hasText:'Car'}).waitFor();
+ assert.equal(await page.locator('#capture-tasks').isVisible(),false,'inbox shown on a project page');
+ assert.equal(await page.locator('.sidebar-project.active').textContent(),'Car','sidebar does not mark the open project');
  await page.getByRole('button',{name:'Stage',exact:true}).click();
  await page.locator('#custom-dialog-input').fill('Driving licence');await page.locator('#custom-dialog-confirm').click();
  await page.locator('.stage-group > summary').filter({hasText:'Driving licence'}).click();
@@ -72,6 +76,13 @@ const shot = name => require('node:path').join(process.env.SCREENSHOT_DIR || req
  await page.getByRole('button',{name:'Quick Notes',exact:true}).waitFor();
  await page.screenshot({path:shot('secondbrain-desktop.png'),fullPage:true});
  await page.getByRole('button',{name:'Close details',exact:true}).click();
+ // One archive for everything, opened from the sidebar; Back returns to the project.
+ await page.locator('.bottom-nav-btn[data-workspace="archive"]').click();
+ await page.locator('.archive-kinds button.active').filter({hasText:'Tasks'}).waitFor();
+ await page.locator('.archive-kinds button').filter({hasText:'Projects'}).click();
+ await page.locator('.archive-kinds button.active').filter({hasText:'Projects'}).waitFor();
+ await page.getByRole('button',{name:'Back',exact:true}).click();
+ await page.locator('[data-project-page] > summary').filter({hasText:'Car'}).waitFor();
  for (const width of [320,375,390,430,1024,1440]) {
   await page.setViewportSize({width,height:900});
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth && document.getElementById('app').getBoundingClientRect().right<=innerWidth),true,'horizontal overflow '+width);

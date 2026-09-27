@@ -38,8 +38,9 @@ stay simple enough that writing remains the point.
 ## Designed to Get Out of the Way
 
 Second Brain feels at home on both a desktop and a phone. The desktop gives
-your work room to breathe, with focused collections and details alongside the
-list. Mobile keeps the same structure close at hand with fast entry,
+your work room to breathe: a sidebar with counts for Today, the Inbox and each
+list, every project with its progress, and one Archive for everything put away.
+Each project opens as its own page, with details alongside. Mobile keeps the same structure close at hand with fast entry,
 touch-friendly controls, and compact navigation.
 
 Every interaction is intentionally small. Press Return to capture. Select to

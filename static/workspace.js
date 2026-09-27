@@ -3,7 +3,6 @@ let detailSelection = null;
 let pendingFocus = null;
 let workspaceState = null;
 let noteViewState = null;
-let archiveCategory = 'todo';
 let detailReturnFocus = null;
 let detailReturnMode = null;
 let captureRequestID = 0;
@@ -129,6 +128,7 @@ function rememberWorkspace() {
 }
 function restoreWorkspace() {
     restoreSections();
+    applyProjectPage();
     loadOpenProjects();
     restoreCaptureDrafts();
     if (workspaceState) {
@@ -176,6 +176,11 @@ function expandAncestors(el) {
     }
 }
 function showWorkspaceContaining(el) {
+    const project = el?.closest('.project-group');
+    if (project && isDesktop()) {
+        showProjectPage(Number(project.id.replace('project-', '')));
+        return;
+    }
     const section = el?.closest('.workspace-section');
     if (!section) return;
     const key = section.id.replace('section-', '');
@@ -239,6 +244,7 @@ async function openTask(id, options = {}) {
     detailReturnMode = options.returnMode || null;
     detailReturnFocus = document.querySelector('#task-' + id + ' .task-label');
     closePopupMenus();
+    if (currentWorkspaceSection() === 'archive') document.body.dataset.workspaceSection = readLocal('desktop-workspace') || 'tasks';
     switchMode('todos');
     detailSelection = { kind: 'task', id };
     if (document.querySelector('#todo-items .archive-header')) {
@@ -249,13 +255,43 @@ async function openTask(id, options = {}) {
     setDestination({ view: 'todos', task: id });
     showDetail('/task/detail?id=' + id);
 }
+// --- Project pages ---
+// On desktop a project opens as its own page, reached from the sidebar. It is
+// the project's section of the task workspace with everything else hidden, so
+// completing, capturing and refreshing work exactly as in the full list. On
+// phones projects stay inline in the one continuous Tasks page.
+function applyProjectPage() {
+    const id = document.body.dataset.workspaceSection === 'project' ? document.body.dataset.projectId : '';
+    // An attribute, not a class: htmx resets classes when it settles a swap.
+    document.querySelectorAll('.project-group').forEach(project => {
+        const page = project.id === 'project-' + id;
+        project.toggleAttribute('data-project-page', page);
+        if (page && !project.open) project.open = true;
+    });
+}
+function showProjectPage(id) {
+    document.body.dataset.workspaceSection = 'project';
+    document.body.dataset.projectId = String(id);
+    applyProjectPage();
+    switchMode('todos');
+    const page = document.querySelector('[data-project-page]');
+    if (page) loadProjectBody(page).then(updateTopbarStat);
+}
 async function openProject(id) {
-    if (!canLeaveDetail()) return;
+    if (!id || !canLeaveDetail()) return;
+    const pane = document.getElementById('detail-pane');
+    if (isDesktop()) {
+        if (!pane.hidden) closeDetail();
+        if (document.querySelector('#todo-items .archive-header')) await refreshWorkspace();
+        showProjectPage(id);
+        window.scrollTo({ top: 0, behavior: 'auto' });
+        setDestination({ view: 'todos', project: id });
+        return;
+    }
     document.body.dataset.workspaceSection = 'tasks';
     writeLocal('desktop-workspace', 'tasks');
     switchMode('todos');
     if (document.querySelector('#todo-items .archive-header')) await refreshWorkspace();
-    detailSelection = { kind: 'project', id };
     const el = document.getElementById('project-' + id);
     if (el) {
         showWorkspaceContaining(el);
@@ -263,8 +299,18 @@ async function openProject(id) {
         el.open = true;
     }
     setDestination({ view: 'todos', project: id });
+    openProjectDetails(id);
+}
+function openProjectDetails(id) {
+    if (!canLeaveDetail()) return;
+    detailSelection = { kind: 'project', id };
     showDetail('/projects/detail?id=' + id);
 }
+// A project page's title is not a disclosure: keep it open.
+document.addEventListener('click', e => {
+    const summary = e.target.closest?.('[data-project-page] > summary');
+    if (summary && isDesktop()) e.preventDefault();
+});
 function openTodayTask(id) {
     return openTask(id, { returnMode: 'today' });
 }
@@ -318,14 +364,33 @@ async function structureAction(kind, id, action, extra = {}) {
         values: { id, action, ...extra }
     });
 }
-function openTaskArchive(category) {
+// --- Archive ---
+// One view for everything archived, shown in the task area. Back returns to
+// wherever it was opened from.
+let archiveReturn = null;
+function openArchive(kind = 'todo') {
     if (!canLeaveDetail()) return;
-    closeDetail();
-    archiveCategory = category;
-    htmx.ajax('GET', '/todos/archive?category=' + category, '#todo-items');
+    if (!document.getElementById('detail-pane').hidden) closeDetail();
+    const mode = document.body.dataset.mode || 'todos';
+    if (currentWorkspaceSection() !== 'archive' || mode !== 'todos')
+        archiveReturn = { mode, workspace: currentWorkspaceSection(), project: document.body.dataset.projectId };
+    document.body.dataset.workspaceSection = 'archive';
+    switchMode('todos');
+    setDestination({ view: 'archive', kind });
+    htmx.ajax('GET', '/archive?kind=' + encodeURIComponent(kind), '#todo-items');
 }
 function hideArchive() {
-    refreshWorkspace();
+    const back = archiveReturn || { mode: 'todos', workspace: 'tasks' };
+    archiveReturn = null;
+    refreshWorkspace().then(() => {
+        if (back.mode !== 'todos') {
+            document.body.dataset.workspaceSection = readLocal('desktop-workspace') || 'tasks';
+            if (back.mode === 'today') openToday();
+            else if (back.mode === 'settings') openSettings();
+            else switchMode(back.mode);
+        } else if (back.workspace === 'project' && back.project) showProjectPage(Number(back.project));
+        else switchWorkspaceSection(back.workspace === 'archive' ? 'tasks' : back.workspace, { preserveScroll: true });
+    });
 }
 function openSettings() {
     switchMode('settings');
@@ -344,6 +409,7 @@ function routeLocation() {
     // Habits and weekly reviews were retired; keep old links working.
     else if (['today', 'habits', 'review'].includes(q.get('view'))) openToday();
     else if (q.get('view') === 'settings') openSettings();
+    else if (q.get('view') === 'archive') openArchive(q.get('kind') || 'todo');
     else if (q.get('note')) openNoteResult(Number(q.get('note')));
     else if (q.get('stage')) openStageResult(Number(q.get('stage')));
     else if (q.get('view')) switchMode(q.get('view'));
@@ -351,6 +417,8 @@ function routeLocation() {
 }
 async function openStageResult(id, projectID = 0) {
     closeSearch();
+    if (!canLeaveDetail()) return;
+    if (!document.getElementById('detail-pane').hidden) closeDetail();
     document.body.dataset.workspaceSection = 'tasks';
     writeLocal('desktop-workspace', 'tasks');
     switchMode('todos');
@@ -361,6 +429,7 @@ async function openStageResult(id, projectID = 0) {
         : [...document.querySelectorAll('.project-group')].find(el =>
               el.dataset.stageIds?.trim().split(/\s+/).includes(String(id))
           );
+    if (project && isDesktop()) showProjectPage(Number(project.id.replace('project-', '')));
     if (project) {
         project.open = true;
         await loadProjectBody(project);

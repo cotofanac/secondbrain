@@ -7,9 +7,9 @@
 const CALLABLE = new Set([
     'chooseMobileUtility', 'chooseMobileWorkspace', 'closeDetail', 'closeSearch', 'createNote',
     'archiveNote', 'disablePush', 'enablePush', 'filterNotes', 'filterStageOptions', 'hideArchive',
-    'hideNotesArchive', 'leaveSecondaryView', 'openMobileWorkspaceSwitcher',
-    'openNoteResult', 'openProject', 'openProjectResult', 'openSearch', 'openSettings',
-    'openStageResult', 'openTask', 'openTaskArchive', 'openToday', 'openTodayTask', 'openTodoResult', 'renameNote',
+    'leaveSecondaryView', 'openArchive', 'openMobileWorkspaceSwitcher',
+    'openNoteResult', 'openProject', 'openProjectDetails', 'openProjectResult', 'openSearch', 'openSettings',
+    'openStageResult', 'openTask', 'openToday', 'openTodayTask', 'openTodoResult', 'renameNote',
     'selectNote', 'showNotesArchive', 'structureAction', 'structureCreate', 'structureRename',
     'switchMode', 'switchWorkspaceSection', 'testPush', 'toggleNotePicker'
 ]);
@@ -26,21 +26,33 @@ function dispatchCall(e) {
 
 // --- Mode switching (Today / Tasks / Notes) ---
 const MODE_TITLES = { todos: 'Tasks', today: 'Today', notes: 'Notes', settings: 'Reminders & notifications' };
-const WORKSPACE_TITLES = { tasks: 'Tasks', groceries: 'Groceries', shopping: 'Buys' };
+const WORKSPACE_TITLES = { tasks: 'Tasks', groceries: 'Groceries', shopping: 'Buys', project: 'Project', archive: 'Archive' };
+// The sidebar, project pages and counts beside each list appear from this width.
+const isDesktop = () => matchMedia('(min-width: 1024px)').matches;
+function currentProjectName() {
+    const id = document.body.dataset.projectId;
+    return document.querySelector('#project-' + id + ' > summary .project-name')?.textContent || 'Project';
+}
+function workspaceTitle(section = currentWorkspaceSection()) {
+    return section === 'project' ? currentProjectName() : WORKSPACE_TITLES[section];
+}
 let secondaryReturnDestination = { mode: 'todos', workspace: 'tasks' };
 function currentWorkspaceSection() {
     return WORKSPACE_TITLES[document.body.dataset.workspaceSection] ? document.body.dataset.workspaceSection : 'tasks';
 }
 function updateNavigation(mode) {
     const workspace = currentWorkspaceSection();
-    document.querySelectorAll('.bottom-nav-btn').forEach(button => {
-        const active = mode === 'todos'
-            ? button.dataset.mode === 'todos' && button.dataset.workspace === workspace
-            : button.dataset.mode === mode;
+    const mark = (button, active) => {
         button.classList.toggle('active', active);
         if (active) button.setAttribute('aria-current', 'page');
         else button.removeAttribute('aria-current');
-    });
+    };
+    document.querySelectorAll('.bottom-nav-btn').forEach(button => mark(button, mode === 'todos'
+        ? button.dataset.mode === 'todos' && button.dataset.workspace === workspace
+        : button.dataset.mode === mode));
+    document.querySelectorAll('.sidebar-settings').forEach(button => mark(button, mode === 'settings'));
+    document.querySelectorAll('.sidebar-project').forEach(button => mark(button, mode === 'todos' && workspace === 'project'
+        && button.dataset.projectId === document.body.dataset.projectId));
 }
 function switchMode(mode) {
     if (!MODE_TITLES[mode]) mode='todos';
@@ -67,9 +79,9 @@ function switchMode(mode) {
         activeView.classList.add('view-entering');
     }
     const title = document.getElementById('topbar-title');
-    title.textContent=mode === 'todos' ? WORKSPACE_TITLES[currentWorkspaceSection()] : MODE_TITLES[mode];
+    title.textContent=mode === 'todos' ? workspaceTitle() : MODE_TITLES[mode];
     title.classList.toggle('can-switch-workspace', mode === 'todos' || mode === 'today');
-    title.setAttribute('aria-label', mode === 'todos' ? 'Choose task list, current list '+WORKSPACE_TITLES[currentWorkspaceSection()] : mode === 'today' ? 'Choose destination, current view Today' : MODE_TITLES[mode]);
+    title.setAttribute('aria-label', mode === 'todos' ? 'Choose task list, current list '+workspaceTitle() : mode === 'today' ? 'Choose destination, current view Today' : MODE_TITLES[mode]);
     const back = document.getElementById('topbar-back');
     if (back) {
         const secondary = mode === 'settings';
@@ -100,11 +112,20 @@ function openMobileWorkspaceSwitcher() {
         button.classList.toggle('selected', selected);
         button.setAttribute('aria-current', selected ? 'page' : 'false');
     });
-    const today = menu.querySelector('[data-mode-option="today"]');
-    const todaySelected = document.body.dataset.mode === 'today';
-    today?.classList.toggle('selected', todaySelected);
-    today?.setAttribute('aria-current', todaySelected ? 'page' : 'false');
-    openModal(menu, todaySelected ? today : menu.querySelector('[data-workspace-option="'+current+'"]'));
+    const mode = document.body.dataset.mode;
+    menu.querySelectorAll('[data-mode-option]').forEach(button => {
+        const option = button.dataset.modeOption;
+        const selected = option === 'archive' ? mode === 'todos' && current === 'archive' : mode === option;
+        button.classList.toggle('selected', selected);
+        button.setAttribute('aria-current', selected ? 'page' : 'false');
+    });
+    // The sheet repeats the counts shown beside each list in the sidebar.
+    menu.querySelectorAll('[data-count-from]').forEach(count => {
+        const source = document.getElementById(count.dataset.countFrom);
+        count.textContent = (source?.querySelector('.nav-total') || source)?.textContent.trim() || '';
+        count.classList.toggle('has-overdue', !!source?.classList.contains('has-overdue'));
+    });
+    openModal(menu, menu.querySelector('.selected') || menu.querySelector('button'));
 }
 function closeMobileWorkspaceSwitcher() {
     closeModal(document.getElementById('mobile-workspace-menu'));
@@ -117,6 +138,7 @@ function chooseMobileUtility(mode) {
     closeMobileWorkspaceSwitcher();
     if (mode === 'today') openToday();
     if (mode === 'settings') openSettings();
+    if (mode === 'archive') openArchive('todo');
 }
 document.addEventListener('click', function(e) {
     if (e.target?.id === 'mobile-workspace-menu') closeMobileWorkspaceSwitcher();
@@ -126,12 +148,14 @@ document.addEventListener('keydown', function(e) {
 });
 
 function switchWorkspaceSection(section, options = {}) {
-    if (!WORKSPACE_TITLES[section]) section = 'tasks';
+    if (!['tasks', 'groceries', 'shopping'].includes(section)) section = 'tasks';
     if (typeof canLeaveDetail === 'function' && !canLeaveDetail()) return false;
     const pane = document.getElementById('detail-pane');
     if (pane && !pane.hidden && typeof closeDetail === 'function') closeDetail();
     document.body.dataset.workspaceSection = section;
     try { localStorage.setItem('desktop-workspace', section); } catch (_) {}
+    if (document.querySelector('#todo-items .archive-header')) refreshWorkspace();
+    if (typeof applyProjectPage === 'function') applyProjectPage();
     const target = document.getElementById('section-' + section);
     if (target) target.open = true;
     switchMode('todos');
@@ -162,7 +186,8 @@ function updateTopbarStat() {
     let count = '';
 
     if (activeMode === 'todos') {
-        const section = document.getElementById('section-' + currentWorkspaceSection());
+        const workspace = currentWorkspaceSection();
+        const section = workspace === 'project' ? document.querySelector('[data-project-page]') : document.getElementById('section-' + workspace);
         const pending = section?.querySelectorAll('.todo-item:not(.done):not(.archived-item)').length || 0;
         if (pending > 0) count = pending + ' left';
     }
@@ -356,12 +381,31 @@ function doLogout() {
 // --- Archive ---
 async function showNotesArchive() {
     if (!await saveBeforeNoteAction()) return;
-    htmx.ajax('GET', '/notes/archive', '#notes-content');
+    openArchive('notes');
 }
+// Restoring a note from the archive puts it back in the note list.
+document.body.addEventListener('sbNotesChanged', function() {
+    htmx.ajax('GET', '/notes', { target: '#notes-content', source: document.getElementById('notes-content') });
+});
 
-function hideNotesArchive() {
-    htmx.ajax('GET', '/notes', '#notes-content');
+// --- Sidebar counts and projects ---
+// Any change to tasks, lists or projects can move a count, so the server
+// re-renders them after each one (out-of-band, into their places in the nav).
+let sidebarTimer = null;
+function refreshSidebar() {
+    clearTimeout(sidebarTimer);
+    sidebarTimer = setTimeout(() => {
+        const nav = document.getElementById('bottom-nav');
+        if (!nav || document.body.dataset.offlineCopy) return;
+        htmx.ajax('GET', '/sidebar', { source: nav, target: nav, swap: 'none' })
+            .then(() => updateNavigation(document.body.dataset.mode || 'todos'));
+    }, 150);
 }
+document.body.addEventListener('htmx:afterRequest', function(e) {
+    const path = e.detail.requestConfig?.path || '';
+    if (!e.detail.successful || e.detail.requestConfig?.verb === 'get') return;
+    if (/^\/(todos|projects|stages|today|task)\//.test(path)) refreshSidebar();
+});
 
 // --- Inactivity auto-logout ---
 const INACTIVITY_WARNING_MS = 60 * 1000;
@@ -447,6 +491,7 @@ function refreshCurrentView() {
         if(editor && !editor.dataset.dirty && !noteSavePending) { preserveScroll(); loadNote(editor.dataset.noteId); }
     }
     if(mode==='today') { preserveScroll(); htmx.ajax('GET','/today','#today-content'); }
+    refreshSidebar(); // counts move with the date too
     if(typeof preparePush==='function') preparePush();
 }
 
@@ -590,7 +635,7 @@ document.addEventListener('keydown', function(e) {
 document.addEventListener('DOMContentLoaded', function() {
     let savedWorkspace = 'tasks';
     try { savedWorkspace = localStorage.getItem('desktop-workspace') || 'tasks'; } catch (_) {}
-    document.body.dataset.workspaceSection = WORKSPACE_TITLES[savedWorkspace] ? savedWorkspace : 'tasks';
+    document.body.dataset.workspaceSection = ['tasks', 'groceries', 'shopping'].includes(savedWorkspace) ? savedWorkspace : 'tasks';
     initNoteEditor();
     if (document.body.dataset.offlineCopy) {
         // Served by the service worker from the last page loaded online.

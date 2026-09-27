@@ -756,3 +756,44 @@ func TestBackupDirIsConfigurable(t *testing.T) {
 		t.Fatalf("BACKUP_DIR ignored: %s", backupDir)
 	}
 }
+
+func TestSidebarCountsAndArchive(t *testing.T) {
+	setupWorkspaceDB(t)
+	today := appNow().Format("2006-01-02")
+	yesterday := appNow().AddDate(0, 0, -1).Format("2006-01-02")
+	execSQL(t, `INSERT INTO projects(id,name) VALUES(1,'Car'),(2,'Old trip')`)
+	execSQL(t, `UPDATE projects SET completed=1 WHERE id=2`)
+	execSQL(t, `INSERT INTO todos(category,text,due_date,project_id) VALUES('todo','Late','`+yesterday+`',1),('todo','Due','`+today+`',NULL),('todo','Someday','',NULL),('groceries','Milk','',NULL)`)
+	execSQL(t, `INSERT INTO todos(category,text,archived,archived_at) VALUES('shopping','Lamp',1,'2026-09-20T10:00:00Z')`)
+	w := httptest.NewRecorder()
+	handleSidebar(w, httptest.NewRequest("GET", "/sidebar", nil))
+	requireOK(t, w)
+	body := w.Body.String()
+	for _, want := range []string{
+		`id="nav-count-today" aria-hidden="true" hx-swap-oob="true"><span class="nav-overdue">1</span><span class="nav-total">2</span>`,
+		`id="nav-count-tasks" aria-hidden="true" hx-swap-oob="true">2<`,
+		`id="nav-count-groceries" aria-hidden="true" hx-swap-oob="true">1<`,
+		`data-project-id="1"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("sidebar missing %s in %s", want, body)
+		}
+	}
+	if strings.Contains(body, `data-project-id="2"`) {
+		t.Error("completed project listed in the sidebar")
+	}
+	for kind, want := range map[string]string{"shopping": "Lamp", "projects": "Old trip", "bogus": "Nothing archived"} {
+		w = httptest.NewRecorder()
+		handleArchive(w, httptest.NewRequest("GET", "/archive?kind="+kind, nil))
+		requireOK(t, w)
+		if !strings.Contains(w.Body.String(), want) {
+			t.Errorf("archive %s missing %q", kind, want)
+		}
+	}
+	requireOK(t, formRequest(t, handleProjectAction, "/projects/action", url.Values{"id": {"2"}, "action": {"reopen"}, "return": {"archive"}}))
+	var completed int
+	db.QueryRow(`SELECT completed FROM projects WHERE id=2`).Scan(&completed)
+	if completed != 0 {
+		t.Fatal("project not reopened from the archive")
+	}
+}

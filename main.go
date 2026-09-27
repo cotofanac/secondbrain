@@ -335,7 +335,6 @@ func main() {
 	http.HandleFunc("/todos/toggle", authMiddleware(handleToggleTodo))
 	http.HandleFunc("/todos/delete", authMiddleware(handleDeleteTodo))
 	http.HandleFunc("/todos/clear-checked", authMiddleware(handleClearChecked))
-	http.HandleFunc("/todos/archive", authMiddleware(handleArchiveTodos))
 	http.HandleFunc("/todos/restore", authMiddleware(handleRestoreTodo))
 	http.HandleFunc("/todos/permanent-delete", authMiddleware(handlePermanentDeleteTodo))
 
@@ -345,7 +344,6 @@ func main() {
 	http.HandleFunc("/notes/create", authMiddleware(handleCreateNote))
 	http.HandleFunc("/notes/delete", authMiddleware(handleDeleteNote))
 	http.HandleFunc("/notes/rename", authMiddleware(handleRenameNote))
-	http.HandleFunc("/notes/archive", authMiddleware(handleArchiveNotes))
 	http.HandleFunc("/notes/restore", authMiddleware(handleRestoreNote))
 	http.HandleFunc("/notes/permanent-delete", authMiddleware(handlePermanentDeleteNote))
 
@@ -503,12 +501,14 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 		Timezone                 string
 		Workspace                Workspace
 		Today                    TodayView
+		Sidebar                  SidebarView
 		GrocerySuggestions       []string
 		ShoppingSuggestions      []string
 	}{
 		Timezone:                 appLocation().String(),
 		Workspace:                workspace,
 		Today:                    today,
+		Sidebar:                  sidebarFrom(workspace, today),
 		Notes:                    notesList,
 		CurrentNote:              currentNote,
 		InactivityTimeoutSeconds: inactivityTimeoutMinutes * 60,

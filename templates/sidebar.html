@@ -1,0 +1,8 @@
+{{define "count-today"}}<span class="nav-count{{if .Overdue}} has-overdue{{end}}" id="nav-count-today" aria-hidden="true"{{if .OOB}} hx-swap-oob="true"{{end}}>{{if .Overdue}}<span class="nav-overdue">{{.Overdue}}</span>{{end}}{{if .Today}}<span class="nav-total">{{.Today}}</span>{{end}}</span>{{end}}
+{{define "count-inbox"}}<span class="nav-count" id="nav-count-tasks" aria-hidden="true"{{if .OOB}} hx-swap-oob="true"{{end}}>{{if .Inbox}}{{.Inbox}}{{end}}</span>{{end}}
+{{define "count-groceries"}}<span class="nav-count" id="nav-count-groceries" aria-hidden="true"{{if .OOB}} hx-swap-oob="true"{{end}}>{{if .Groceries}}{{.Groceries}}{{end}}</span>{{end}}
+{{define "count-shopping"}}<span class="nav-count" id="nav-count-shopping" aria-hidden="true"{{if .OOB}} hx-swap-oob="true"{{end}}>{{if .Buys}}{{.Buys}}{{end}}</span>{{end}}
+{{define "sidebar-projects"}}<div class="sidebar-projects sidebar-only" id="sidebar-projects"{{if .OOB}} hx-swap-oob="true"{{end}}>
+{{range .Projects}}<button type="button" class="sidebar-project" data-project-id="{{.ID}}" data-call="openProject" data-args='[{{.ID}}]'><span class="project-progress" style="--progress:{{if .Group.Total}}{{.Group.Completed}}{{else}}0{{end}};--total:{{if .Group.Total}}{{.Group.Total}}{{else}}1{{end}}" aria-label="{{.Group.Completed}} of {{.Group.Total}} complete"></span><span class="sidebar-project-name">{{.Name}}</span></button>
+{{else}}<p class="sidebar-empty">No projects yet</p>{{end}}</div>{{end}}
+{{define "sidebar-live"}}{{template "count-today" .}}{{template "count-inbox" .}}{{template "count-groceries" .}}{{template "count-shopping" .}}{{template "sidebar-projects" .}}{{end}}

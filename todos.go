@@ -257,37 +257,6 @@ func handleClearChecked(w http.ResponseWriter, r *http.Request) {
 	handleTodos(w, r)
 }
 
-func handleArchiveTodos(w http.ResponseWriter, r *http.Request) {
-	category := r.URL.Query().Get("category")
-	if category != "groceries" && category != "todo" && category != "shopping" {
-		category = "groceries"
-	}
-
-	rows, err := db.Query(
-		"SELECT id, category, text, due_date, done, COALESCE(archived_at, '') FROM todos WHERE category = ? AND archived = 1 ORDER BY COALESCE(archived_at, created_at) DESC LIMIT 200",
-		category,
-	)
-	if err != nil {
-		http.Error(w, "DB error", http.StatusInternalServerError)
-		return
-	}
-	defer rows.Close()
-
-	var todos []Todo
-	for rows.Next() {
-		var t Todo
-		rows.Scan(&t.ID, &t.Category, &t.Text, &t.DueDate, &t.Done, &t.ArchivedAt)
-		todos = append(todos, t)
-	}
-
-	data := struct {
-		Category string
-		Todos    []Todo
-	}{category, todos}
-
-	renderTemplate(w, r, "todo-archive.html", data)
-}
-
 func handleRestoreTodo(w http.ResponseWriter, r *http.Request) {
 	if !requirePost(w, r) {
 		return
@@ -319,7 +288,7 @@ func handleRestoreTodo(w http.ResponseWriter, r *http.Request) {
 		handleTodos(w, r)
 		return
 	}
-	handleArchiveTodos(w, r)
+	renderArchive(w, r, category)
 }
 
 func handlePermanentDeleteTodo(w http.ResponseWriter, r *http.Request) {
@@ -346,8 +315,7 @@ func handlePermanentDeleteTodo(w http.ResponseWriter, r *http.Request) {
 	}
 	log.Printf("Todo permanently deleted: id=%d [%s]", id, category)
 
-	r.URL.RawQuery = "category=" + category
-	handleArchiveTodos(w, r)
+	renderArchive(w, r, category)
 }
 
 // Completed tasks tidy away seven days after completion; unfinished work stays.
