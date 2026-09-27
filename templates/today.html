@@ -26,8 +26,8 @@
  {{if .Suggestions}}<section class="today-section today-suggestions">
   <h2>What next <span>unscheduled ideas</span></h2>
   {{range .Suggestions}}
-  <article class="today-suggestion">
-   <div><strong>{{.Text}}</strong><small>{{if .Stage}}{{.Project}} · {{.Stage}}{{else if .Project}}Next in {{.Project}}{{else}}Unscheduled task{{end}}</small></div>
+  <article class="today-suggestion" data-task-id="{{.ID}}">
+   <div data-edit-label><strong>{{.Text}}</strong><small>{{if .Project}}Next in {{.Project}}{{else}}Unscheduled task{{end}}</small></div>
    <div class="today-actions">
     <form hx-post="/today/reschedule" hx-target="#today-content"><input type="hidden" name="id" value="{{.ID}}"><input type="hidden" name="revision" value="{{.Revision}}"><input type="hidden" name="due_date" value="{{$.ISODate}}"><button class="btn btn-primary">Do today</button></form>
     <form hx-post="/todos/toggle" hx-target="#today-content"><input type="hidden" name="id" value="{{.ID}}"><button class="btn">Complete</button></form>
@@ -43,13 +43,13 @@
 </div>
 
 {{define "today-task"}}
-<div class="today-row">
+<div class="today-row" data-task-id="{{.ID}}">
  <form hx-post="/todos/toggle" hx-target="#today-content"><input type="hidden" name="id" value="{{.ID}}"><button type="submit" class="check-btn" aria-label="Complete {{.Text}}"><span class="task-checkmark" aria-hidden="true"></span></button></form>
- <button type="button" class="today-row-label" data-call="openTodayTask" data-args='[{{.ID}}]'>{{.Text}}{{if .Project}}<small>{{.Project}}{{if .Stage}} · {{.Stage}}{{end}}</small>{{end}}</button>
+ <button type="button" class="today-row-label" data-edit-label data-call="openTodayTask" data-args='[{{.ID}}]'>{{.Text}}{{if .Project}}<small>{{.Project}}</small>{{end}}</button>
  <div class="today-row-end">{{if or .Date .Repeat}}<span class="todo-date {{if and .Date (lt .Date .Today)}}overdue{{end}}">{{if .Repeat}}{{template "repeat-badge" .Repeat}}{{end}}{{formatDate .Date}}</span>{{end}}
   <details class="row-menu today-row-menu"><summary class="icon-button" aria-label="Task actions">{{template "icon-more"}}</summary><div class="menu-panel">
    <form hx-post="/today/reschedule" hx-target="#today-content"><input type="hidden" name="id" value="{{.ID}}"><input type="hidden" name="revision" value="{{.Revision}}"><button name="due_date" value="{{.Today}}">Do today</button><button name="due_date" value="{{.Tomorrow}}">Do tomorrow</button></form>
-   <button type="button" data-call="openTodayTask" data-args='[{{.ID}}]'>Edit details</button>
+   <button type="button" data-call="openTodayTask" data-args='[{{.ID}}]'>Edit</button>
   </div></details>
  </div>
 </div>

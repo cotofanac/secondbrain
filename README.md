@@ -26,7 +26,7 @@ needs one, and let completed work move quietly out of the way. A task can
 repeat daily, weekly, monthly, or yearly: check it off and the next one is
 waiting on its date, which makes routines simply part of your day.
 
-**Projects** for the things that take more than one step. Add stages, see real
+**Projects** for the things that take more than one step. Split them under headings, see real
 progress, and keep the notes behind a project close to the work itself.
 
 **Groceries** and **Buys** for the lists you come back to. Familiar items are
@@ -43,8 +43,8 @@ list, every project with its progress, and one Archive for everything put away.
 Each project opens as its own page, with details alongside. Mobile keeps the same structure close at hand with fast entry,
 touch-friendly controls, and compact navigation.
 
-Every interaction is intentionally small. Press Return to capture. Select to
-edit. Check something off and keep moving.
+Every interaction is intentionally small. Press Return to capture. Tap a task to
+edit in place. Check something off and keep moving.
 
 Light and dark appearances follow your device. Install it to your Home Screen
 and it opens like an app, without giving up ownership of your data.
@@ -60,7 +60,7 @@ An optional daily reminder brings back tasks due today.
 
 The “What next” section offers a few unscheduled tasks with a plain explanation
 of where each came from. One tap can bring a suggestion into Today, complete it,
-or open its details.
+or open it for editing.
 
 ## Yours, Properly
 

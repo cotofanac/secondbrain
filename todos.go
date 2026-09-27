@@ -18,7 +18,7 @@ type Todo struct {
 	CreatedAt  string
 	ArchivedAt string
 	ProjectID  int    `json:"project_id"`
-	StageID    int    `json:"stage_id"`
+	HeadingID  int    `json:"heading_id"`
 	Revision   int    `json:"revision"`
 	Repeat     string `json:"repeat"`
 }
@@ -115,12 +115,12 @@ func handleAddTodo(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		defer tx.Rollback()
-		project, stage, err := validMembership(tx, r.FormValue("project_id"), r.FormValue("stage_id"))
+		project, heading, err := parseList(tx, r.FormValue("list"))
 		if err != nil {
 			http.Error(w, err.Error(), 400)
 			return
 		}
-		_, err = tx.Exec("INSERT INTO todos (category,text,due_date,project_id,stage_id) VALUES(?,?,?,NULLIF(?,0),NULLIF(?,0))", category, text, dueDate, project, stage)
+		_, err = tx.Exec("INSERT INTO todos (category,text,due_date,project_id,heading_id) VALUES(?,?,?,NULLIF(?,0),NULLIF(?,0))", category, text, dueDate, project, heading)
 		if err == nil {
 			err = tx.Commit()
 		}
@@ -158,9 +158,9 @@ func handleToggleTodo(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback()
 	var category string
-	var projectID, stageID int
+	var projectID, headingID int
 	var done bool
-	err = tx.QueryRow(`SELECT t.category,COALESCE(t.project_id,0),COALESCE(t.stage_id,0),t.done FROM todos t WHERE t.id=? AND `+activeTaskSQL, id).Scan(&category, &projectID, &stageID, &done)
+	err = tx.QueryRow(`SELECT t.category,COALESCE(t.project_id,0),COALESCE(t.heading_id,0),t.done FROM todos t WHERE t.id=? AND `+activeTaskSQL, id).Scan(&category, &projectID, &headingID, &done)
 	if err != nil {
 		http.Error(w, "Not found", http.StatusNotFound)
 		return
@@ -198,7 +198,7 @@ func handleToggleTodo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.FormValue("response") == "task-group" {
-		handleTaskGroup(w, r, category, projectID, stageID)
+		handleTaskGroup(w, r, category, projectID, headingID)
 		return
 	}
 	r.URL.RawQuery = "category=" + category

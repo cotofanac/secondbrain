@@ -10,7 +10,6 @@ type SearchResultData struct {
 	Notes    []Note
 	Todos    []Todo
 	Projects []Project
-	Stages   []Stage
 }
 
 func handleSearch(w http.ResponseWriter, r *http.Request) {
@@ -48,16 +47,6 @@ func handleSearch(w http.ResponseWriter, r *http.Request) {
 			var p Project
 			if rows.Scan(&p.ID, &p.Name) == nil {
 				data.Projects = append(data.Projects, p)
-			}
-		}
-		rows.Close()
-	}
-	rows, err = db.Query(`SELECT s.id,s.project_id,s.name,p.name FROM stages s JOIN projects p ON p.id=s.project_id WHERE s.archived=0 AND p.archived=0 AND p.completed=0 AND s.name LIKE ? ORDER BY p.position,s.position,s.id LIMIT 10`, pattern)
-	if err == nil {
-		for rows.Next() {
-			var s Stage
-			if rows.Scan(&s.ID, &s.ProjectID, &s.Name, &s.ProjectName) == nil {
-				data.Stages = append(data.Stages, s)
 			}
 		}
 		rows.Close()

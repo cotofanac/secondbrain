@@ -1,7 +1,7 @@
 {{define "task-row"}}
 <div class="todo-item {{if .Done}}done{{end}}" id="task-{{.ID}}" data-task-id="{{.ID}}" data-revision="{{.Revision}}">
  <form hx-post="/todos/toggle" hx-target="closest .task-group" hx-swap="outerHTML swap:140ms"><input type="hidden" name="id" value="{{.ID}}"><input type="hidden" name="response" value="task-group"><button class="check-btn {{if .Done}}checked{{end}}" aria-label="{{if .Done}}Reopen{{else}}Complete{{end}} {{.Text}}"><span class="task-checkmark" aria-hidden="true"></span></button></form>
- <button type="button" class="task-label" data-call="openTask" data-args='[{{.ID}}]'>{{.Text}}</button>
+ <button type="button" class="task-label" data-edit-label data-call="openTask" data-args='[{{.ID}}]'>{{.Text}}</button>
  {{if or .DueDate .Repeat}}<span class="todo-date {{if and (not .Done) (isOverdue .DueDate)}}overdue{{end}}">{{if .Repeat}}{{template "repeat-badge" .Repeat}}{{end}}{{formatDate .DueDate}}</span>{{end}}
  <details class="row-menu"><summary class="icon-button" aria-label="Task actions">{{template "icon-more"}}</summary><div class="menu-panel"><form hx-post="/todos/delete" hx-target="#todo-items"><input type="hidden" name="id" value="{{.ID}}"><button class="action-with-icon">{{template "icon-archive"}}<span>Archive</span></button></form></div></details>
 </div>
@@ -9,7 +9,7 @@
 {{define "task-group"}}
 <div class="task-group" data-group="{{.Key}}" data-category="{{.Category}}">
  <form class="capture-form" id="capture-{{.Key}}" hx-post="/todos/add" hx-target="#todo-items">
-  <input type="hidden" name="category" value="{{.Category}}"><input type="hidden" name="project_id" value="{{.ProjectID}}"><input type="hidden" name="stage_id" value="{{.StageID}}">
+  <input type="hidden" name="category" value="{{.Category}}"><input type="hidden" name="list" value="{{.List}}">
   <input type="text" name="text" aria-label="{{if eq .Category "todo"}}Add task{{else}}Add item{{end}}" placeholder="{{if eq .Category "todo"}}Add a task…{{else}}Add an item…{{end}}" maxlength="500" autocomplete="off" enterkeyhint="done" {{if eq .Category "groceries"}}list="grocery-suggestions"{{else if eq .Category "shopping"}}list="shopping-suggestions"{{end}} required>
   {{if eq .Category "todo"}}<details class="capture-options"><summary class="icon-button" title="Due date" aria-label="Choose an optional due date">{{template "icon-calendar"}}</summary><label>Due date<input type="date" name="due_date"></label></details>{{end}}
   <button type="submit" class="add-circle" aria-label="Add">{{template "icon-plus"}}</button>
@@ -26,14 +26,19 @@
 </details>
 {{end}}
 {{define "project-body"}}
-<div class="section-footer"><button class="action-with-icon" data-call="openProjectDetails" data-args='[{{.ID}}]'>{{template "icon-edit"}}<span>Project details</span></button><button class="action-with-icon" data-call="structureCreate" data-args='["stage",{{.ID}}]'>{{template "icon-plus"}}<span>Stage</span></button></div>
+<div class="section-footer"><button class="action-with-icon" data-call="openProjectDetails" data-args='[{{.ID}}]'>{{template "icon-edit"}}<span>Project details</span></button><button class="action-with-icon" data-call="structureCreate" data-args='["heading",{{.ID}}]'>{{template "icon-plus"}}<span>Heading</span></button></div>
 {{template "task-group" .Group}}
-{{range .Stages}}{{if not .Archived}}
-<details class="stage-group" id="stage-{{.ID}}" data-persist="stage-{{.ID}}"><summary><span class="disclosure-icon">{{template "icon-chevron"}}</span><span>{{.Name}}</span><span class="section-count">{{.Group.Completed}}/{{.Group.Total}}</span></summary>
+{{range .Headings}}
+<section class="heading-group" id="heading-{{.ID}}" aria-labelledby="heading-title-{{.ID}}">
+ <div class="heading-row"><h3 id="heading-title-{{.ID}}">{{.Name}}</h3><details class="row-menu"><summary class="icon-button" aria-label="Actions for heading {{.Name}}">{{template "icon-more"}}</summary><div class="menu-panel">
+  <button type="button" data-call="structureRename" data-args='["heading",{{.ID}},"$el"]' data-name="{{.Name}}">Rename</button>
+  <button type="button" data-call="structureAction" data-args='["heading",{{.ID}},"up"]'>Move up</button>
+  <button type="button" data-call="structureAction" data-args='["heading",{{.ID}},"down"]'>Move down</button>
+  <button type="button" class="danger-action" data-call="deleteHeading" data-args='[{{.ID}},"$el"]' data-name="{{.Name}}">Delete heading</button>
+ </div></details></div>
  {{template "task-group" .Group}}
- <div class="section-footer"><button class="action-with-icon" data-call="structureRename" data-args='["stage",{{.ID}},"$el"]' data-name="{{.Name}}">{{template "icon-edit"}}<span>Rename</span></button><button class="icon-button" data-call="structureAction" data-args='["stage",{{.ID}},"up"]' aria-label="Move {{.Name}} up">{{template "icon-up"}}</button><button class="icon-button" data-call="structureAction" data-args='["stage",{{.ID}},"down"]' aria-label="Move {{.Name}} down">{{template "icon-down"}}</button><button class="action-with-icon" data-call="structureAction" data-args='["stage",{{.ID}},"archive"]'>{{template "icon-archive"}}<span>Archive stage</span></button></div>
-</details>
-{{end}}{{end}}
+</section>
+{{end}}
 {{end}}
 <details class="workspace-section unified-tasks" id="section-tasks" data-persist="tasks" open>
  <summary><span class="disclosure-icon">{{template "icon-chevron"}}</span><span class="section-kind-icon">{{template "icon-tasks"}}</span><span class="section-title">Tasks</span></summary>
@@ -46,7 +51,7 @@
   <div class="workspace-subheading"><span class="section-kind-icon project-icon">{{template "icon-folder"}}</span><h2 id="projects-heading">Projects</h2><span class="section-count">{{len .Projects}}</span></div>
   <div class="section-footer projects-actions"><button class="action-with-icon" data-call="structureCreate" data-args='["project",0]'>{{template "icon-plus"}}<span>New project</span></button>{{if .ArchivedProjects}}<button class="action-with-icon" data-call="openArchive" data-args='["projects"]'>{{template "icon-archive"}}<span>Archived</span></button>{{end}}</div>
  {{range .Projects}}
- <details class="project-group" id="project-{{.ID}}" data-persist="project-{{.ID}}" data-stage-ids="{{range .Stages}} {{.ID}}{{end}}">
+ <details class="project-group" id="project-{{.ID}}" data-persist="project-{{.ID}}">
   <summary><span class="disclosure-icon">{{template "icon-chevron"}}</span><span class="project-name">{{.Name}}</span><span class="project-progress" style="--progress:{{if .Group.Total}}{{.Group.Completed}}{{else}}0{{end}};--total:{{if .Group.Total}}{{.Group.Total}}{{else}}1{{end}}" aria-label="{{.Group.Completed}} of {{.Group.Total}} complete"></span><span class="section-count">{{.Group.Completed}}/{{.Group.Total}}</span></summary>
   <div id="project-body-{{.ID}}" data-lazy-project="{{.ID}}"></div>
  </details>

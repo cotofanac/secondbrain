@@ -79,7 +79,7 @@ func registerScheduleRoutes() {
 type TodayItem struct {
 	ID, Revision                int
 	Text, Date, Today, Tomorrow string
-	Project, Stage, Repeat      string
+	Project, Repeat             string
 }
 
 type TodayView struct {
@@ -98,7 +98,7 @@ func scanTodayItems(query string, args ...any) ([]TodayItem, error) {
 	var items []TodayItem
 	for rows.Next() {
 		var item TodayItem
-		if err = rows.Scan(&item.ID, &item.Text, &item.Date, &item.Revision, &item.Project, &item.Stage, &item.Repeat); err != nil {
+		if err = rows.Scan(&item.ID, &item.Text, &item.Date, &item.Revision, &item.Project, &item.Repeat); err != nil {
 			return nil, err
 		}
 		items = append(items, item)
@@ -111,8 +111,8 @@ func loadToday(now time.Time) (TodayView, error) {
 	tomorrow := now.AddDate(0, 0, 1).Format("2006-01-02")
 	limit := now.AddDate(0, 0, 8).Format("2006-01-02")
 	view := TodayView{Date: now.Format("Monday, 2 January"), ISODate: today}
-	base := `SELECT t.id,t.text,t.due_date,t.revision,COALESCE(p.name,''),COALESCE(s.name,''),t.repeat
-		FROM todos t LEFT JOIN projects p ON p.id=t.project_id LEFT JOIN stages s ON s.id=t.stage_id
+	base := `SELECT t.id,t.text,t.due_date,t.revision,COALESCE(p.name,''),t.repeat
+		FROM todos t LEFT JOIN projects p ON p.id=t.project_id
 		WHERE t.category='todo' AND t.done=0 AND ` + activeTaskSQL
 	var err error
 	view.Overdue, err = scanTodayItems(base+` AND t.due_date!='' AND t.due_date<? ORDER BY t.due_date,t.id`, today)
@@ -131,8 +131,7 @@ func loadToday(now time.Time) (TodayView, error) {
 	// each project first, followed by standalone tasks, in the user's list order.
 	view.Suggestions, err = scanTodayItems(base + ` AND t.due_date='' AND (t.project_id IS NULL OR t.id=(
 		SELECT t2.id FROM todos t2 WHERE t2.project_id=t.project_id AND t2.category='todo' AND t2.done=0
-		AND t2.archived=0 AND t2.due_date='' AND (t2.stage_id IS NULL OR EXISTS(
-			SELECT 1 FROM stages s2 WHERE s2.id=t2.stage_id AND s2.archived=0))
+		AND t2.archived=0 AND t2.due_date=''
 		ORDER BY t2.id LIMIT 1))
 		ORDER BY CASE WHEN t.project_id IS NULL THEN 1 ELSE 0 END,COALESCE(p.position,0),t.id LIMIT 3`)
 	if err != nil {

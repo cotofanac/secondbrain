@@ -8,14 +8,12 @@ const shot = name => require('node:path').join(process.env.SCREENSHOT_DIR || req
  const browser = await chromium.launch({headless:true,executablePath:process.env.TEST_BROWSER});
  const context = await browser.newContext({viewport:{width:1280,height:900}});
  const page = await context.newPage(); const errors=[];
- async function openTaskDetails(name) {
+ async function openTaskEditor(name) {
   await page.getByRole('button',{name,exact:true}).click();
-  await page.locator('#task-detail-form').waitFor();
-  // htmx attaches the autosave trigger when the swap settles (~20ms), which
-  // is faster than a person but slower than Playwright's fill().
-  await page.waitForFunction(()=>document.getElementById('task-detail-form')?.['htmx-internal-data']?.listenerInfos);
+  await page.locator('#task-editor').waitFor();
  }
- const saved=()=>page.locator('.detail-save-status').filter({hasText:/^Saved$/}).waitFor();
+ const saved=()=>page.locator('.task-save-status').filter({hasText:/^Saved$/}).waitFor();
+ const closeEditor=async()=>{await page.locator('#task-editor').getByRole('button',{name:'Done',exact:true}).click();await page.locator('#task-editor').waitFor({state:'detached'});};
  page.on('pageerror',e=>errors.push(e.message));
  page.on('console',m=>{if(/Content Security Policy/i.test(m.text()))errors.push(m.text());});
  await page.goto(base);
@@ -37,16 +35,16 @@ const shot = name => require('node:path').join(process.env.SCREENSHOT_DIR || req
  await page.locator('[data-project-page] > summary').filter({hasText:'Car'}).waitFor();
  assert.equal(await page.locator('#capture-tasks').isVisible(),false,'inbox shown on a project page');
  assert.equal(await page.locator('.sidebar-project.active').textContent(),'Car','sidebar does not mark the open project');
- await page.getByRole('button',{name:'Stage',exact:true}).click();
+ await page.getByRole('button',{name:'Heading',exact:true}).click();
  await page.locator('#custom-dialog-input').fill('Driving licence');await page.locator('#custom-dialog-confirm').click();
- await page.locator('.stage-group > summary').filter({hasText:'Driving licence'}).click();
- const capture=page.locator('.stage-group .capture-form');await capture.locator('[name=text]').fill('Book lessons');await capture.locator('button.add-circle').click();
- // Tapping a task opens its details, which save as you type.
- await openTaskDetails('Book lessons');
- const detailTitle=page.locator('#task-detail-form [name=text]');
+ await page.locator('.heading-row h3').filter({hasText:'Driving licence'}).waitFor();
+ const capture=page.locator('.heading-group .capture-form');await capture.locator('[name=text]').fill('Book lessons');await capture.locator('button.add-circle').click();
+ // Tapping a task opens it in place; edits save as you type.
+ await openTaskEditor('Book lessons');
+ const detailTitle=page.locator('#task-editor [name=text]');
  await detailTitle.fill('Book practical lessons');await saved();
- await page.getByRole('button',{name:'Book practical lessons',exact:true}).waitFor();
- await page.locator('#task-detail-form [name=due_date]').fill('2026-10-01');await saved();
+ await page.locator('#task-editor [name=due_date]').fill('2026-10-01');await saved();
+ assert.equal(await page.locator('#task-editor .chip.is-set').count(),1,'set date chip not marked');
  // A reply must not overwrite text typed after the request was sent, and
  // focus stays in the field being edited.
  let releaseTask;const heldTask=new Promise(resolve=>releaseTask=resolve);
@@ -57,20 +55,35 @@ const shot = name => require('node:path').join(process.env.SCREENSHOT_DIR || req
  await saved();
  assert.equal(await detailTitle.inputValue(),'Book lessons soon please');
  assert.equal(await detailTitle.evaluate(el=>el===document.activeElement),true,'autosave moved focus');
- await detailTitle.fill('Book practical lessons');await saved();
- await page.getByRole('button',{name:'Close details',exact:true}).click();
+ // A refresh while editing keeps the editor, its text and its focus.
+ await detailTitle.fill('Book practical lessons');
+ await page.evaluate(()=>refreshWorkspace());
+ assert.equal(await detailTitle.inputValue(),'Book practical lessons');
+ assert.equal(await detailTitle.evaluate(el=>el===document.activeElement),true,'refresh moved focus out of the editor');
+ await saved();
+ await closeEditor();
+ await page.getByRole('button',{name:'Book practical lessons',exact:true}).waitFor();
+ // Escape and tapping elsewhere close the editor too.
+ await openTaskEditor('Book practical lessons');await page.keyboard.press('Escape');await page.locator('#task-editor').waitFor({state:'detached'});
+ await openTaskEditor('Book practical lessons');await page.locator('[data-project-page] > summary').click();await page.locator('#task-editor').waitFor({state:'detached'});
  // Completion and reopening preserve the task and collapsed state.
  await page.locator('#section-tasks').evaluate(el=>el.dataset.testStable='true');
  await page.getByRole('button',{name:'Complete Book practical lessons',exact:true}).click();
  assert.equal(await page.locator('#section-tasks').getAttribute('data-test-stable'),'true','task completion replaced the entire workspace section');
- const completed=page.locator('.stage-group .completed-group');if(!await completed.evaluate(el=>el.open))await completed.locator(':scope > summary').click();
+ const completed=page.locator('.heading-group .completed-group');if(!await completed.evaluate(el=>el.open))await completed.locator(':scope > summary').click();
  await page.getByRole('button',{name:'Reopen Book practical lessons',exact:true}).click();
  await page.getByRole('button',{name:'Book practical lessons',exact:true}).waitFor();
  // Draft survives another task's mutation and a refresh.
  await capture.locator('[name=text]').fill('Keep this draft');
  await page.evaluate(()=>refreshWorkspace());
- assert.equal(await page.locator('.stage-group .capture-form [name=text]').inputValue(),'Keep this draft');
- await page.locator('.stage-group .capture-form [name=text]').fill('');
+ assert.equal(await page.locator('.heading-group .capture-form [name=text]').inputValue(),'Keep this draft');
+ await page.locator('.heading-group .capture-form [name=text]').fill('');
+ // Deleting a heading keeps its tasks in the project.
+ await page.locator('.heading-row .row-menu > summary').click();
+ await page.getByRole('button',{name:'Delete heading',exact:true}).click();
+ await page.locator('#custom-dialog-confirm').click();
+ await page.locator('.heading-group').waitFor({state:'detached'});
+ await page.locator('[data-project-page]').getByRole('button',{name:'Book practical lessons',exact:true}).waitFor();
  await page.getByRole('button',{name:'Project details',exact:true}).click();
  await page.getByRole('button',{name:'Link note',exact:true}).click();
  await page.getByRole('button',{name:'Quick Notes',exact:true}).waitFor();
@@ -126,10 +139,23 @@ const shot = name => require('node:path').join(process.env.SCREENSHOT_DIR || req
  await page.locator('#topbar-title').click();await page.locator('[data-workspace-option="groceries"]').click();
  assert.equal(await page.locator('#section-groceries').isVisible(),true,'Today did not preserve the last task list');
  await page.locator('#topbar-title').click();await page.locator('[data-workspace-option="tasks"]').click();
- await openTaskDetails('Book practical lessons');
- assert.equal(await page.locator('#detail-pane').evaluate(el=>{const b=el.getBoundingClientRect();return b.left>=0&&b.right<=innerWidth&&b.top>=0&&b.bottom<=innerHeight}),true,'mobile details overflow');
- assert.equal(await page.locator('#detail-pane').evaluate(el=>el.getBoundingClientRect().height < innerHeight*.75),true,'mobile task details should be a compact sheet');
- await page.getByRole('button',{name:'Close details',exact:true}).click();
+ await openTaskEditor('Book practical lessons');
+ assert.equal(await page.locator('#task-editor').evaluate(el=>{const b=el.getBoundingClientRect();return b.left>=0&&b.right<=innerWidth}),true,'mobile task editor overflow');
+ // The list control moves a task; it changes place once the editor closes.
+ const todayISO=await page.evaluate(()=>new Date().toLocaleDateString('en-CA',{timeZone:document.body.dataset.timezone}));
+ await page.locator('#task-editor [name=due_date]').fill(todayISO);
+ await page.locator('#task-editor [name=list]').selectOption({label:'Inbox'});await saved();
+ await closeEditor();
+ await page.locator('.inbox-group').getByRole('button',{name:'Book practical lessons',exact:true}).waitFor();
+ // Today opens tasks in place as well.
+ await page.locator('.bottom-nav-btn[data-mode="today"]').click();
+ await page.locator('#today-content').getByRole('button',{name:'Book practical lessons',exact:true}).click();
+ await page.locator('#today-content #task-editor').waitFor();
+ await page.locator('#task-editor [name=text]').fill('Book the practical lessons');await saved();
+ await closeEditor();
+ await page.locator('#today-content').getByRole('button',{name:'Book the practical lessons',exact:true}).waitFor();
+ await page.getByRole('button',{name:'Tasks',exact:true}).click();
+ await page.locator('.inbox-group').getByRole('button',{name:'Book the practical lessons',exact:true}).waitFor();
  await page.evaluate(()=>document.documentElement.style.fontSize='24px');
  assert.equal(await page.evaluate(()=>document.getElementById('app').getBoundingClientRect().right<=innerWidth),true,'large-text overflow');
  await page.evaluate(()=>document.documentElement.style.fontSize='');
@@ -162,7 +188,7 @@ const shot = name => require('node:path').join(process.env.SCREENSHOT_DIR || req
  await page.locator('#schedule-form').waitFor();
  await page.locator('[name=task_enabled]').check();await page.getByRole('button',{name:'Save reminders',exact:true}).click();
  await page.waitForTimeout(200);assert.equal(await page.locator('[name=task_enabled]').isChecked(),true);
- await page.evaluate(()=>openToday());await page.getByRole('heading',{name:'Today'}).waitFor();
+ await page.evaluate(()=>openToday());await page.getByRole('heading',{name:'Today',exact:true}).waitFor();
  // Root service worker must become ready, unlike the old /static/ scope.
  const scope=await page.evaluate(async()=> (await navigator.serviceWorker.ready).scope);assert.equal(scope,base+'/');
  const manifest=await page.evaluate(()=>fetch('/static/manifest.json').then(response=>response.json()));
@@ -181,5 +207,5 @@ const shot = name => require('node:path').join(process.env.SCREENSHOT_DIR || req
  await page.evaluate(()=>doLogout());await page.waitForURL(url=>url.pathname==='/login');
  assert.equal(await page.evaluate(()=>caches.has('secondbrain-page')),false,'offline copy survived logout');
  assert.deepEqual(errors,[],'browser errors');
- await browser.close();console.log('UI smoke passed: Today, projects, stages, task editing, completion, drafts, notes, notifications, root worker, offline copy, six viewport widths.');
+ await browser.close();console.log('UI smoke passed: Today, projects, headings, in-place task editing, completion, drafts, notes, notifications, root worker, offline copy, six viewport widths.');
 })().catch(error=>{console.error(error);process.exit(1)});

@@ -1,4 +1,4 @@
-{{if and (not .Notes) (not .Todos) (not .Projects) (not .Stages)}}
+{{if and (not .Notes) (not .Todos) (not .Projects)}}
 <div class="search-empty">No results for "{{.Query}}"</div>
 {{else}}
 {{if .Notes}}
@@ -19,5 +19,4 @@
 {{end}}
 {{end}}
 {{if .Projects}}<div class="search-section-label">Projects</div>{{range .Projects}}<button class="search-result-item" data-call="openProjectResult" data-args='[{{.ID}}]'>{{.Name}}</button>{{end}}{{end}}
-{{if .Stages}}<div class="search-section-label">Stages</div>{{range .Stages}}<button class="search-result-item" data-call="openStageResult" data-args='[{{.ID}}]'><span class="search-result-text">{{.Name}}</span><span class="search-result-cat">{{.ProjectName}}</span></button>{{end}}{{end}}
 {{end}}

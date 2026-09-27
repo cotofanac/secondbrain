@@ -6,10 +6,10 @@
 // listed here can be called.
 const CALLABLE = new Set([
     'chooseMobileUtility', 'chooseMobileWorkspace', 'closeDetail', 'closeSearch', 'createNote',
-    'archiveNote', 'disablePush', 'enablePush', 'filterNotes', 'filterStageOptions', 'hideArchive',
+    'archiveNote', 'closeTaskEditor', 'deleteHeading', 'disablePush', 'enablePush', 'filterNotes', 'hideArchive',
     'leaveSecondaryView', 'openArchive', 'openMobileWorkspaceSwitcher',
     'openNoteResult', 'openProject', 'openProjectDetails', 'openProjectResult', 'openSearch', 'openSettings',
-    'openStageResult', 'openTask', 'openToday', 'openTodayTask', 'openTodoResult', 'renameNote',
+    'openTask', 'openToday', 'openTodayTask', 'openTodoResult', 'renameNote',
     'selectNote', 'showNotesArchive', 'structureAction', 'structureCreate', 'structureRename',
     'switchMode', 'switchWorkspaceSection', 'testPush', 'toggleNotePicker'
 ]);
@@ -149,7 +149,6 @@ document.addEventListener('keydown', function(e) {
 
 function switchWorkspaceSection(section, options = {}) {
     if (!['tasks', 'groceries', 'shopping'].includes(section)) section = 'tasks';
-    if (typeof canLeaveDetail === 'function' && !canLeaveDetail()) return false;
     const pane = document.getElementById('detail-pane');
     if (pane && !pane.hidden && typeof closeDetail === 'function') closeDetail();
     document.body.dataset.workspaceSection = section;
@@ -276,7 +275,6 @@ document.body.addEventListener('htmx:confirm', function(e) {
 // the user; 5xx bodies are not, so those keep the generic message.
 document.body.addEventListener('htmx:responseError', function(e) {
     const xhr = e.detail.xhr;
-    if (xhr?.status === 409 && e.detail.target?.id === 'detail-pane') return;
     // An expired session responds 401 + HX-Redirect; we're already navigating
     // to /login, so a toast would just be noise.
     if (xhr && xhr.getResponseHeader('HX-Redirect')) return;
@@ -346,7 +344,7 @@ function hideToast() {
 document.body.addEventListener('sbUndo', function(e) {
     const d = e.detail || {};
     if (!d.id) return;
-    showToast(d.kind === 'project' ? 'Project archived' : d.kind === 'stage' ? 'Stage archived' : 'Task archived', {
+    showToast(d.kind === 'project' ? 'Project archived' : 'Task archived', {
         label: 'Undo',
         onClick: function() { undoArchive(d.kind, d.id); }
     });
@@ -361,7 +359,7 @@ document.body.addEventListener('sbNotice', function(e) {
 function undoArchive(kind, id) {
     // return=list asks the restore handler for the live list rather than the
     // archive view it would normally re-render.
-    if (kind === 'project' || kind === 'stage') { structureAction(kind,id,'restore'); return; }
+    if (kind === 'project') { structureAction(kind,id,'restore'); return; }
     htmx.ajax('POST', '/todos/restore', {
         target: '#todo-items',
         swap: 'innerHTML',
@@ -404,7 +402,7 @@ function refreshSidebar() {
 document.body.addEventListener('htmx:afterRequest', function(e) {
     const path = e.detail.requestConfig?.path || '';
     if (!e.detail.successful || e.detail.requestConfig?.verb === 'get') return;
-    if (/^\/(todos|projects|stages|today|task)\//.test(path)) refreshSidebar();
+    if (/^\/(todos|projects|headings|today)\//.test(path)) refreshSidebar();
 });
 
 // --- Inactivity auto-logout ---

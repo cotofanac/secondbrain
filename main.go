@@ -38,7 +38,7 @@ var (
 	templates                *template.Template
 	passcode                 string
 	inactivityTimeoutMinutes = 45
-	// validNameRe guards note titles and project and stage names. It is deliberately
+	// validNameRe guards note titles and project and heading names. It is deliberately
 	// permissive: anything except C0/C7F control characters is allowed, so
 	// punctuation, accents and emoji all pass. It is not an XSS defence —
 	// html/template escapes every value by context at render time — it only

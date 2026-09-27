@@ -2,6 +2,7 @@ package main
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -9,33 +10,75 @@ import (
 	"time"
 )
 
-// activeTaskSQL also excludes children of archived stages and projects.
-const activeTaskSQL = `t.archived=0 AND (t.project_id IS NULL OR EXISTS(SELECT 1 FROM projects p WHERE p.id=t.project_id AND p.archived=0 AND p.completed=0)) AND (t.stage_id IS NULL OR EXISTS(SELECT 1 FROM stages s WHERE s.id=t.stage_id AND s.archived=0))`
+// activeTaskSQL also excludes tasks under archived or completed projects.
+const activeTaskSQL = `t.archived=0 AND (t.project_id IS NULL OR EXISTS(SELECT 1 FROM projects p WHERE p.id=t.project_id AND p.archived=0 AND p.completed=0))`
 
 type TaskGroup struct {
-	Key, Name, Category                  string
-	ProjectID, StageID, Total, Completed int
-	Tasks, Done                          []Todo
+	Key, Name, Category                    string
+	ProjectID, HeadingID, Total, Completed int
+	Tasks, Done                            []Todo
 }
-type Stage struct {
+
+// List names the list a task captured into this group joins (see parseList).
+func (g TaskGroup) List() string {
+	if g.HeadingID != 0 {
+		return fmt.Sprint("heading:", g.HeadingID)
+	}
+	if g.ProjectID != 0 {
+		return fmt.Sprint("project:", g.ProjectID)
+	}
+	return ""
+}
+
+type Heading struct {
 	ID, ProjectID int
 	Name          string
-	ProjectName   string
-	Archived      bool
 	Group         TaskGroup
 }
 type Project struct {
 	ID                  int
 	Name                string
 	Archived, Completed bool
-	Group               TaskGroup
-	Stages              []Stage
-	Notes               []Note
+	// Group holds the tasks directly in the project; its counts cover the
+	// whole project, headings included.
+	Group    TaskGroup
+	Headings []Heading
+	Notes    []Note
 }
 type Workspace struct {
 	Tasks, Groceries, Buys     TaskGroup
 	Projects, ArchivedProjects []Project
 }
+
+// placeTask files a task (or n archived completions, with no row) into its
+// project, adding it to the project's progress, and returns the group it is
+// listed in: the heading's, or the project's own.
+func (p *Project) placeTask(headingID, n int, done bool) *TaskGroup {
+	p.Group.Total += n
+	if done {
+		p.Group.Completed += n
+	}
+	for i := range p.Headings {
+		if p.Headings[i].ID == headingID {
+			return &p.Headings[i].Group
+		}
+	}
+	return &p.Group
+}
+func (g *TaskGroup) add(t Todo) {
+	if t.Done {
+		g.Done = append(g.Done, t)
+	} else {
+		g.Tasks = append(g.Tasks, t)
+	}
+}
+
+func newHeading(id, projectID int, name string) Heading {
+	return Heading{ID: id, ProjectID: projectID, Name: name, Group: TaskGroup{Key: fmt.Sprint("heading-", id), Name: name, Category: "todo", ProjectID: projectID, HeadingID: id}}
+}
+
+// Dated tasks first, soonest (so overdue) on top; undated tasks newest first.
+const taskOrderSQL = `ORDER BY done,due_date='',due_date,created_at DESC,id DESC`
 
 func loadWorkspace() (Workspace, error) {
 	w := Workspace{Tasks: TaskGroup{Key: "tasks", Name: "Tasks", Category: "todo"}, Groceries: TaskGroup{Key: "groceries", Name: "Groceries", Category: "groceries"}, Buys: TaskGroup{Key: "shopping", Name: "Buys", Category: "shopping"}}
@@ -62,19 +105,19 @@ func loadWorkspace() (Workspace, error) {
 	for i := range projects {
 		pm[projects[i].ID] = &projects[i]
 	}
-	rows, err = db.Query(`SELECT id,project_id,name,archived FROM stages ORDER BY position,id`)
+	rows, err = db.Query(`SELECT id,project_id,name FROM headings ORDER BY position,id`)
 	if err != nil {
 		return w, err
 	}
 	for rows.Next() {
-		var s Stage
-		if err = rows.Scan(&s.ID, &s.ProjectID, &s.Name, &s.Archived); err != nil {
+		var id, projectID int
+		var name string
+		if err = rows.Scan(&id, &projectID, &name); err != nil {
 			rows.Close()
 			return w, err
 		}
-		s.Group = TaskGroup{Key: fmt.Sprint("stage-", s.ID), Name: s.Name, Category: "todo", ProjectID: s.ProjectID, StageID: s.ID}
-		if p := pm[s.ProjectID]; p != nil {
-			p.Stages = append(p.Stages, s)
+		if p := pm[projectID]; p != nil {
+			p.Headings = append(p.Headings, newHeading(id, projectID, name))
 		}
 	}
 	err = rows.Err()
@@ -82,56 +125,27 @@ func loadWorkspace() (Workspace, error) {
 	if err != nil {
 		return w, err
 	}
-	sm := map[int]*Stage{}
-	for i := range projects {
-		for j := range projects[i].Stages {
-			s := &projects[i].Stages[j]
-			sm[s.ID] = s
-		}
-	}
-	// count adds n tasks to the group a task belongs to and, for tasks in an
-	// active stage, to the project's overall progress as well.
-	count := func(category string, projectID, stageID, n int, done bool) *TaskGroup {
-		group := &w.Tasks
+	groupFor := func(category string, projectID, headingID, n int, done bool) *TaskGroup {
 		if category == "groceries" {
-			group = &w.Groceries
+			return &w.Groceries
 		} else if category == "shopping" {
-			group = &w.Buys
+			return &w.Buys
 		} else if p := pm[projectID]; p != nil {
-			group = &p.Group
-			if s := sm[stageID]; s != nil {
-				group = &s.Group
-				if !s.Archived {
-					p.Group.Total += n
-					if done {
-						p.Group.Completed += n
-					}
-				}
-			}
+			return p.placeTask(headingID, n, done)
 		}
-		group.Total += n
-		if done {
-			group.Completed += n
-		}
-		return group
+		return &w.Tasks
 	}
-	// Dated tasks first, soonest (so overdue) on top; undated tasks newest first.
-	rows, err = db.Query(`SELECT id,category,text,due_date,done,COALESCE(project_id,0),COALESCE(stage_id,0),revision,repeat FROM todos WHERE archived=0 ORDER BY done,due_date='',due_date,created_at DESC,id DESC`)
+	rows, err = db.Query(`SELECT id,category,text,due_date,done,COALESCE(project_id,0),COALESCE(heading_id,0),revision,repeat FROM todos WHERE archived=0 ` + taskOrderSQL)
 	if err != nil {
 		return w, err
 	}
 	for rows.Next() {
 		var t Todo
-		if err = rows.Scan(&t.ID, &t.Category, &t.Text, &t.DueDate, &t.Done, &t.ProjectID, &t.StageID, &t.Revision, &t.Repeat); err != nil {
+		if err = rows.Scan(&t.ID, &t.Category, &t.Text, &t.DueDate, &t.Done, &t.ProjectID, &t.HeadingID, &t.Revision, &t.Repeat); err != nil {
 			rows.Close()
 			return w, err
 		}
-		group := count(t.Category, t.ProjectID, t.StageID, 1, t.Done)
-		if t.Done {
-			group.Done = append(group.Done, t)
-		} else {
-			group.Tasks = append(group.Tasks, t)
-		}
+		groupFor(t.Category, t.ProjectID, t.HeadingID, 1, t.Done).add(t)
 	}
 	err = rows.Err()
 	rows.Close()
@@ -140,18 +154,19 @@ func loadWorkspace() (Workspace, error) {
 	}
 	// Completed project work that has since been tidied into the archive still
 	// counts toward progress. Only the totals are needed, not the rows.
-	rows, err = db.Query(`SELECT category,project_id,COALESCE(stage_id,0),count(*) FROM todos WHERE archived=1 AND done=1 AND project_id IS NOT NULL GROUP BY category,project_id,stage_id`)
+	rows, err = db.Query(`SELECT project_id,count(*) FROM todos WHERE archived=1 AND done=1 AND category='todo' AND project_id IS NOT NULL GROUP BY project_id`)
 	if err != nil {
 		return w, err
 	}
 	for rows.Next() {
-		var category string
-		var projectID, stageID, n int
-		if err = rows.Scan(&category, &projectID, &stageID, &n); err != nil {
+		var projectID, n int
+		if err = rows.Scan(&projectID, &n); err != nil {
 			rows.Close()
 			return w, err
 		}
-		count(category, projectID, stageID, n, true)
+		if p := pm[projectID]; p != nil {
+			p.placeTask(0, n, true)
+		}
 	}
 	err = rows.Err()
 	rows.Close()
@@ -176,7 +191,7 @@ func handleWorkspace(w http.ResponseWriter, r *http.Request) {
 	renderTemplate(w, r, "workspace.html", data)
 }
 
-func handleTaskGroup(w http.ResponseWriter, r *http.Request, category string, projectID, stageID int) {
+func handleTaskGroup(w http.ResponseWriter, r *http.Request, category string, projectID, headingID int) {
 	data, err := loadWorkspace()
 	if err != nil {
 		http.Error(w, "Could not load tasks", http.StatusInternalServerError)
@@ -190,16 +205,14 @@ func handleTaskGroup(w http.ResponseWriter, r *http.Request, category string, pr
 	} else if projectID != 0 {
 		group = nil
 		for i := range data.Projects {
-			if data.Projects[i].ID != projectID {
+			p := &data.Projects[i]
+			if p.ID != projectID {
 				continue
 			}
-			group = &data.Projects[i].Group
-			if stageID != 0 {
-				for j := range data.Projects[i].Stages {
-					if data.Projects[i].Stages[j].ID == stageID {
-						group = &data.Projects[i].Stages[j].Group
-						break
-					}
+			group = &p.Group
+			for j := range p.Headings {
+				if p.Headings[j].ID == headingID {
+					group = &p.Headings[j].Group
 				}
 			}
 			break
@@ -212,47 +225,38 @@ func handleTaskGroup(w http.ResponseWriter, r *http.Request, category string, pr
 	renderTemplate(w, r, "task-group", *group)
 }
 
-// A stage can only belong to its selected active project. Zero means standalone.
-func validMembership(tx *sql.Tx, projectRaw, stageRaw string) (int, int, error) {
-	parse := func(s string) (int, error) {
-		if s == "" {
-			return 0, nil
-		}
-		n, e := strconv.Atoi(s)
-		if e != nil || n < 0 {
-			return 0, fmt.Errorf("Invalid project or stage")
-		}
-		return n, nil
+var errBadList = errors.New("Choose an active project")
+
+// parseList reads the list a task belongs to: "" (the inbox), "project:N" or
+// "heading:N", and returns the project and heading ids for an active project.
+func parseList(tx *sql.Tx, raw string) (projectID, headingID int, err error) {
+	if raw == "" {
+		return 0, 0, nil
 	}
-	p, err := parse(projectRaw)
+	kind, rawID, _ := strings.Cut(raw, ":")
+	id, err := strconv.Atoi(rawID)
+	if err != nil || id <= 0 {
+		return 0, 0, errBadList
+	}
+	switch kind {
+	case "project":
+		err = tx.QueryRow(`SELECT id FROM projects WHERE id=? AND archived=0 AND completed=0`, id).Scan(&projectID)
+	case "heading":
+		headingID = id
+		err = tx.QueryRow(`SELECT p.id FROM headings h JOIN projects p ON p.id=h.project_id WHERE h.id=? AND p.archived=0 AND p.completed=0`, id).Scan(&projectID)
+	default:
+		return 0, 0, errBadList
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, 0, errBadList
+	}
 	if err != nil {
 		return 0, 0, err
 	}
-	s, err := parse(stageRaw)
-	if err != nil {
-		return 0, 0, err
-	}
-	var n int
-	if p != 0 {
-		if err = tx.QueryRow(`SELECT count(*) FROM projects WHERE id=? AND archived=0 AND completed=0`, p).Scan(&n); err != nil {
-			return 0, 0, err
-		}
-		if n != 1 {
-			return 0, 0, fmt.Errorf("Choose an active project")
-		}
-	}
-	if s != 0 {
-		if err = tx.QueryRow(`SELECT count(*) FROM stages WHERE id=? AND project_id=? AND archived=0`, s, p).Scan(&n); err != nil {
-			return 0, 0, err
-		}
-		if n != 1 {
-			return 0, 0, fmt.Errorf("Stage does not belong to this project")
-		}
-	}
-	return p, s, nil
+	return projectID, headingID, nil
 }
 func registerWorkspaceRoutes() {
-	for path, h := range map[string]http.HandlerFunc{"/workspace": handleWorkspace, "/workspace/project": handleWorkspaceProject, "/projects/action": handleProjectAction, "/stages/action": handleStageAction, "/task/detail": handleTaskDetail, "/task/save": handleTaskSave, "/projects/detail": handleProjectDetail, "/projects/notes": handleProjectNotes, "/sidebar": handleSidebar, "/archive": handleArchive} {
+	for path, h := range map[string]http.HandlerFunc{"/workspace": handleWorkspace, "/workspace/project": handleWorkspaceProject, "/projects/action": handleProjectAction, "/headings/action": handleHeadingAction, "/task/edit": handleTaskEdit, "/task/save": handleTaskSave, "/projects/detail": handleProjectDetail, "/projects/notes": handleProjectNotes, "/sidebar": handleSidebar, "/archive": handleArchive} {
 		http.HandleFunc(path, authMiddleware(h))
 	}
 }
@@ -264,100 +268,77 @@ func handleWorkspaceProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p.Group = TaskGroup{Key: fmt.Sprint("project-", id), Category: "todo", ProjectID: id}
-	rows, err := db.Query(`SELECT id,name,archived FROM stages WHERE project_id=? ORDER BY position,id`, id)
-	if err != nil {
-		http.Error(w, "Could not load project", 500)
-		return
-	}
-	stageIndex := map[int]int{}
-	for rows.Next() {
-		var s Stage
-		if err = rows.Scan(&s.ID, &s.Name, &s.Archived); err != nil {
-			rows.Close()
-			http.Error(w, "Could not load project", 500)
-			return
-		}
-		s.ProjectID = id
-		s.Group = TaskGroup{Key: fmt.Sprint("stage-", s.ID), Name: s.Name, Category: "todo", ProjectID: id, StageID: s.ID}
-		stageIndex[s.ID] = len(p.Stages)
-		p.Stages = append(p.Stages, s)
-	}
-	if err = rows.Err(); err != nil {
-		rows.Close()
-		http.Error(w, "Could not load project", 500)
-		return
-	}
-	rows.Close()
-	rows, err = db.Query(`SELECT id,category,text,due_date,done,COALESCE(stage_id,0),revision,repeat FROM todos WHERE project_id=? AND archived=0 ORDER BY done,due_date='',due_date,created_at DESC,id DESC`, id)
-	if err != nil {
-		http.Error(w, "Could not load project", 500)
-		return
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var t Todo
-		if err = rows.Scan(&t.ID, &t.Category, &t.Text, &t.DueDate, &t.Done, &t.StageID, &t.Revision, &t.Repeat); err != nil {
-			http.Error(w, "Could not load project", 500)
-			return
-		}
-		t.ProjectID = id
-		g := &p.Group
-		if i, ok := stageIndex[t.StageID]; ok {
-			g = &p.Stages[i].Group
-			p.Group.Total++
-			if t.Done {
-				p.Group.Completed++
-			}
-		}
-		g.Total++
-		if t.Done {
-			g.Completed++
-			g.Done = append(g.Done, t)
-		} else {
-			g.Tasks = append(g.Tasks, t)
-		}
-	}
-	if err = rows.Err(); err != nil {
-		http.Error(w, "Could not load project", 500)
-		return
-	}
-	// Match loadWorkspace: archived completions still count toward progress.
-	rows, err = db.Query(`SELECT COALESCE(stage_id,0),count(*) FROM todos WHERE project_id=? AND archived=1 AND done=1 GROUP BY stage_id`, id)
-	if err != nil {
-		http.Error(w, "Could not load project", 500)
-		return
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var stageID, n int
-		if err = rows.Scan(&stageID, &n); err != nil {
-			http.Error(w, "Could not load project", 500)
-			return
-		}
-		g := &p.Group
-		if i, ok := stageIndex[stageID]; ok {
-			g = &p.Stages[i].Group
-			if !p.Stages[i].Archived {
-				p.Group.Total += n
-				p.Group.Completed += n
-			}
-		}
-		g.Total += n
-		g.Completed += n
-	}
-	if err = rows.Err(); err != nil {
+	if err := loadProjectTasks(&p); err != nil {
 		http.Error(w, "Could not load project", 500)
 		return
 	}
 	renderTemplate(w, r, "project-body", p)
 }
+
+// loadProjectTasks fills one project's headings, tasks and progress, the same
+// way loadWorkspace does for all of them.
+func loadProjectTasks(p *Project) error {
+	rows, err := db.Query(`SELECT id,name FROM headings WHERE project_id=? ORDER BY position,id`, p.ID)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var id int
+		var name string
+		if err = rows.Scan(&id, &name); err != nil {
+			rows.Close()
+			return err
+		}
+		p.Headings = append(p.Headings, newHeading(id, p.ID, name))
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	rows, err = db.Query(`SELECT id,category,text,due_date,done,COALESCE(heading_id,0),revision,repeat FROM todos WHERE project_id=? AND archived=0 `+taskOrderSQL, p.ID)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var t Todo
+		if err = rows.Scan(&t.ID, &t.Category, &t.Text, &t.DueDate, &t.Done, &t.HeadingID, &t.Revision, &t.Repeat); err != nil {
+			rows.Close()
+			return err
+		}
+		t.ProjectID = p.ID
+		p.placeTask(t.HeadingID, 1, t.Done).add(t)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	// Match loadWorkspace: archived completions still count toward progress.
+	var n int
+	if err = db.QueryRow(`SELECT count(*) FROM todos WHERE project_id=? AND archived=1 AND done=1 AND category='todo'`, p.ID).Scan(&n); err != nil {
+		return err
+	}
+	p.placeTask(0, n, true)
+	return nil
+}
 func handleProjectAction(w http.ResponseWriter, r *http.Request) { handleStructureAction(w, r, false) }
-func handleStageAction(w http.ResponseWriter, r *http.Request)   { handleStructureAction(w, r, true) }
-func handleStructureAction(w http.ResponseWriter, r *http.Request, stage bool) {
+func handleHeadingAction(w http.ResponseWriter, r *http.Request) { handleStructureAction(w, r, true) }
+
+var structureActions = map[bool]map[string]bool{
+	false: {"create": true, "rename": true, "up": true, "down": true, "archive": true, "restore": true, "complete": true, "reopen": true},
+	true:  {"create": true, "rename": true, "up": true, "down": true, "delete": true},
+}
+
+func handleStructureAction(w http.ResponseWriter, r *http.Request, heading bool) {
 	if !requirePost(w, r) {
 		return
 	}
 	action := r.FormValue("action")
+	if !structureActions[heading][action] {
+		http.Error(w, "Invalid action", 400)
+		return
+	}
 	name := strings.TrimSpace(r.FormValue("name"))
 	id, _ := strconv.Atoi(r.FormValue("id"))
 	parent, _ := strconv.Atoi(r.FormValue("project_id"))
@@ -368,8 +349,8 @@ func handleStructureAction(w http.ResponseWriter, r *http.Request, stage bool) {
 	}
 	defer tx.Rollback()
 	table := "projects"
-	if stage {
-		table = "stages"
+	if heading {
+		table = "headings"
 	}
 	if action == "create" || action == "rename" {
 		if name == "" || len(name) > 200 || !validNameRe.MatchString(name) {
@@ -386,24 +367,27 @@ func handleStructureAction(w http.ResponseWriter, r *http.Request, stage bool) {
 	}
 	switch action {
 	case "create":
-		if stage {
-			if _, _, err = validMembership(tx, strconv.Itoa(parent), ""); err == nil {
-				_, err = tx.Exec(`INSERT INTO stages(name,project_id,position) SELECT ?,?,COALESCE(MAX(position),0)+1 FROM stages WHERE project_id=?`, name, parent, parent)
+		if heading {
+			if _, _, err = parseList(tx, fmt.Sprint("project:", parent)); err != nil {
+				http.Error(w, err.Error(), 400)
+				return
 			}
+			_, err = tx.Exec(`INSERT INTO headings(name,project_id,position) SELECT ?,?,COALESCE(MAX(position),0)+1 FROM headings WHERE project_id=?`, name, parent, parent)
 		} else {
 			_, err = tx.Exec(`INSERT INTO projects(name,position) SELECT ?,COALESCE(MAX(position),0)+1 FROM projects`, name)
 		}
 	case "rename":
 		_, err = tx.Exec("UPDATE "+table+" SET name=? WHERE id=?", name, id)
-	case "archive":
-		_, err = tx.Exec("UPDATE "+table+" SET archived=1 WHERE id=?", id)
-	case "restore":
-		_, err = tx.Exec("UPDATE "+table+" SET archived=0 WHERE id=?", id)
-	case "complete":
-		if stage {
-			http.Error(w, "Invalid action", 400)
-			return
+	case "delete":
+		// A heading only groups tasks: they move up to the project itself.
+		if _, err = tx.Exec(`UPDATE todos SET heading_id=NULL WHERE heading_id=?`, id); err == nil {
+			_, err = tx.Exec(`DELETE FROM headings WHERE id=?`, id)
 		}
+	case "archive":
+		_, err = tx.Exec(`UPDATE projects SET archived=1 WHERE id=?`, id)
+	case "restore":
+		_, err = tx.Exec(`UPDATE projects SET archived=0 WHERE id=?`, id)
+	case "complete":
 		var remaining int
 		err = tx.QueryRow(`SELECT count(*) FROM todos t WHERE project_id=? AND done=0 AND `+activeTaskSQL, id).Scan(&remaining)
 		if err == nil && remaining > 0 {
@@ -414,62 +398,9 @@ func handleStructureAction(w http.ResponseWriter, r *http.Request, stage bool) {
 			_, err = tx.Exec(`UPDATE projects SET completed=1 WHERE id=? AND archived=0`, id)
 		}
 	case "reopen":
-		if stage {
-			http.Error(w, "Invalid action", 400)
-			return
-		}
 		_, err = tx.Exec(`UPDATE projects SET completed=0,archived=0 WHERE id=?`, id)
 	case "up", "down":
-		// Normalize sibling positions before exchanging adjacent entries.
-		condition := "archived=0"
-		args := []any{}
-		if stage {
-			condition += " AND project_id=(SELECT project_id FROM stages WHERE id=?)"
-			args = append(args, id)
-		} else {
-			condition += " AND completed=0"
-		}
-		rows, e := tx.Query("SELECT id FROM "+table+" WHERE "+condition+" ORDER BY position,id", args...)
-		if e != nil {
-			err = e
-			break
-		}
-		var ids []int
-		for rows.Next() {
-			var n int
-			if e = rows.Scan(&n); e != nil {
-				break
-			}
-			ids = append(ids, n)
-		}
-		if e == nil {
-			e = rows.Err()
-		}
-		rows.Close()
-		if e != nil {
-			err = e
-			break
-		}
-		for i, n := range ids {
-			if n == id {
-				j := i - 1
-				if action == "down" {
-					j = i + 1
-				}
-				if j >= 0 && j < len(ids) {
-					ids[i], ids[j] = ids[j], ids[i]
-				}
-				break
-			}
-		}
-		for i, n := range ids {
-			if _, err = tx.Exec("UPDATE "+table+" SET position=? WHERE id=?", i, n); err != nil {
-				break
-			}
-		}
-	default:
-		http.Error(w, "Invalid action", 400)
-		return
+		err = moveSibling(tx, heading, id, action == "up")
 	}
 	if err != nil {
 		http.Error(w, "Could not update: "+err.Error(), 400)
@@ -480,11 +411,7 @@ func handleStructureAction(w http.ResponseWriter, r *http.Request, stage bool) {
 		return
 	}
 	if action == "archive" {
-		kind := "project"
-		if stage {
-			kind = "stage"
-		}
-		hxTrigger(w, "sbUndo", map[string]any{"kind": kind, "id": id})
+		hxTrigger(w, "sbUndo", map[string]any{"kind": "project", "id": id})
 	}
 	if r.FormValue("return") == "archive" {
 		renderArchive(w, r, "projects")
@@ -493,68 +420,120 @@ func handleStructureAction(w http.ResponseWriter, r *http.Request, stage bool) {
 	handleWorkspace(w, r)
 }
 
-type TaskDetail struct {
-	Task     Todo
-	Projects []Project
+// moveSibling swaps a project or heading with its neighbour, normalizing the
+// positions of its siblings first.
+func moveSibling(tx *sql.Tx, heading bool, id int, up bool) error {
+	query := `SELECT id FROM projects WHERE archived=0 AND completed=0 ORDER BY position,id`
+	var args []any
+	if heading {
+		query = `SELECT id FROM headings WHERE project_id=(SELECT project_id FROM headings WHERE id=?) ORDER BY position,id`
+		args = append(args, id)
+	}
+	rows, err := tx.Query(query, args...)
+	if err != nil {
+		return err
+	}
+	var ids []int
+	for rows.Next() {
+		var n int
+		if err = rows.Scan(&n); err != nil {
+			rows.Close()
+			return err
+		}
+		ids = append(ids, n)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	for i, n := range ids {
+		if n == id {
+			j := i + 1
+			if up {
+				j = i - 1
+			}
+			if j >= 0 && j < len(ids) {
+				ids[i], ids[j] = ids[j], ids[i]
+			}
+			break
+		}
+	}
+	table := "projects"
+	if heading {
+		table = "headings"
+	}
+	for i, n := range ids {
+		if _, err = tx.Exec("UPDATE "+table+" SET position=? WHERE id=?", i, n); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
-func loadTaskChoices() ([]Project, error) {
-	rows, err := db.Query(`SELECT id,name FROM projects WHERE archived=0 AND completed=0 ORDER BY position,id`)
-	if err != nil {
-		return nil, err
-	}
-	var projects []Project
-	index := map[int]int{}
-	for rows.Next() {
-		var p Project
-		if err = rows.Scan(&p.ID, &p.Name); err != nil {
-			rows.Close()
-			return nil, err
-		}
-		index[p.ID] = len(projects)
-		projects = append(projects, p)
-	}
-	if err = rows.Err(); err != nil {
-		rows.Close()
-		return nil, err
-	}
-	rows.Close()
-	rows, err = db.Query(`SELECT id,project_id,name FROM stages WHERE archived=0 ORDER BY position,id`)
+// ListChoice is one entry of the task editor's list picker.
+type ListChoice struct{ Value, Label string }
+
+type TaskEditor struct {
+	Task  Todo
+	List  string
+	Lists []ListChoice
+}
+
+// loadListChoices lists where a task can go: the inbox, then each active
+// project followed by its headings.
+func loadListChoices() ([]ListChoice, error) {
+	rows, err := db.Query(`SELECT p.id,p.name,COALESCE(h.id,0),COALESCE(h.name,'') FROM projects p LEFT JOIN headings h ON h.project_id=p.id
+		WHERE p.archived=0 AND p.completed=0 ORDER BY p.position,p.id,h.position,h.id`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
+	choices := []ListChoice{{"", "Inbox"}}
+	last := 0
 	for rows.Next() {
-		var s Stage
-		if err = rows.Scan(&s.ID, &s.ProjectID, &s.Name); err != nil {
+		var projectID, headingID int
+		var project, heading string
+		if err = rows.Scan(&projectID, &project, &headingID, &heading); err != nil {
 			return nil, err
 		}
-		if i, ok := index[s.ProjectID]; ok {
-			projects[i].Stages = append(projects[i].Stages, s)
+		if projectID != last {
+			choices = append(choices, ListChoice{fmt.Sprint("project:", projectID), project})
+			last = projectID
+		}
+		if headingID != 0 {
+			choices = append(choices, ListChoice{fmt.Sprint("heading:", headingID), project + " › " + heading})
 		}
 	}
-	return projects, rows.Err()
+	return choices, rows.Err()
 }
 
 func getTask(id int) (Todo, error) {
 	var t Todo
-	err := db.QueryRow(`SELECT id,category,text,due_date,done,COALESCE(project_id,0),COALESCE(stage_id,0),revision,repeat FROM todos t WHERE t.id=? AND `+activeTaskSQL, id).Scan(&t.ID, &t.Category, &t.Text, &t.DueDate, &t.Done, &t.ProjectID, &t.StageID, &t.Revision, &t.Repeat)
+	err := db.QueryRow(`SELECT id,category,text,due_date,done,COALESCE(project_id,0),COALESCE(heading_id,0),revision,repeat FROM todos t WHERE t.id=? AND `+activeTaskSQL, id).Scan(&t.ID, &t.Category, &t.Text, &t.DueDate, &t.Done, &t.ProjectID, &t.HeadingID, &t.Revision, &t.Repeat)
 	return t, err
 }
-func handleTaskDetail(w http.ResponseWriter, r *http.Request) {
+
+// handleTaskEdit returns the editor that opens inside a task's row.
+func handleTaskEdit(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.Atoi(r.URL.Query().Get("id"))
 	t, err := getTask(id)
 	if err != nil {
 		http.Error(w, "Task unavailable. It may have been archived.", 404)
 		return
 	}
-	projects, err := loadTaskChoices()
-	if err != nil {
-		http.Error(w, "DB error", 500)
-		return
+	view := TaskEditor{Task: t, List: TaskGroup{ProjectID: t.ProjectID, HeadingID: t.HeadingID}.List()}
+	if t.Category == "todo" {
+		if view.Lists, err = loadListChoices(); err != nil {
+			http.Error(w, "DB error", 500)
+			return
+		}
 	}
-	renderTemplate(w, r, "task-detail.html", TaskDetail{t, projects})
+	renderTemplate(w, r, "task-editor.html", view)
 }
+
+// handleTaskSave stores the editor's fields. It answers with JSON only: the
+// editor is never re-rendered under the cursor, it just takes the new revision.
 func handleTaskSave(w http.ResponseWriter, r *http.Request) {
 	if !requirePost(w, r) {
 		return
@@ -596,9 +575,9 @@ func handleTaskSave(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Not found", 404)
 		return
 	}
-	p, s := 0, 0
+	p, h := 0, 0
 	if category == "todo" {
-		p, s, err = validMembership(tx, r.FormValue("project_id"), r.FormValue("stage_id"))
+		p, h, err = parseList(tx, r.FormValue("list"))
 	} else {
 		due, repeat = "", ""
 	}
@@ -606,7 +585,7 @@ func handleTaskSave(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), 400)
 		return
 	}
-	res, err := tx.Exec(`UPDATE todos SET text=?,due_date=?,repeat=?,project_id=NULLIF(?,0),stage_id=NULLIF(?,0),revision=revision+1 WHERE id=? AND revision=?`, name, due, repeat, p, s, id, revision)
+	res, err := tx.Exec(`UPDATE todos SET text=?,due_date=?,repeat=?,project_id=NULLIF(?,0),heading_id=NULLIF(?,0),revision=revision+1 WHERE id=? AND revision=?`, name, due, repeat, p, h, id, revision)
 	if err == nil {
 		if n, countErr := res.RowsAffected(); countErr != nil {
 			err = countErr
@@ -628,10 +607,7 @@ func handleTaskSave(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Could not save task", 500)
 		return
 	}
-	// Details save as you type; the pane shows the status, so no toast.
-	hxTrigger(w, "sbWorkspaceChanged", map[string]any{})
-	r.URL.RawQuery = "id=" + strconv.Itoa(id)
-	handleTaskDetail(w, r)
+	writeJSON(w, http.StatusOK, map[string]any{"status": "saved", "revision": revision + 1})
 }
 func handleProjectDetail(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.Atoi(r.URL.Query().Get("id"))

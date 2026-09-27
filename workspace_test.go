@@ -60,8 +60,12 @@ func TestTaskTitleRevisionConflict(t *testing.T) {
 	execSQL(t, `INSERT INTO todos(id,category,text,done,archived,due_date) VALUES(1,'todo','Original',0,0,'')`)
 	first := formRequest(t, handleTaskSave, "/task/save", url.Values{"id": {"1"}, "text": {"First client"}, "revision": {"1"}})
 	requireOK(t, first)
-	if !strings.Contains(first.Body.String(), `name="revision" value="2"`) {
-		t.Fatalf("save did not render the next revision: %s", first.Body.String())
+	var saved struct {
+		Status   string `json:"status"`
+		Revision int    `json:"revision"`
+	}
+	if err := json.Unmarshal(first.Body.Bytes(), &saved); err != nil || saved.Status != "saved" || saved.Revision != 2 {
+		t.Fatalf("save did not return the next revision: %s", first.Body.String())
 	}
 	stale := formRequest(t, handleTaskSave, "/task/save", url.Values{"id": {"1"}, "text": {"Second client"}, "revision": {"1"}})
 	if stale.Code != http.StatusConflict {
@@ -80,26 +84,37 @@ func TestTaskTitleRevisionConflict(t *testing.T) {
 
 func TestProjectTasksMembershipAndLifecycle(t *testing.T) {
 	setupWorkspaceDB(t)
-	execSQL(t, `INSERT INTO projects(id,name) VALUES(1,'Car'),(2,'Home')`)
-	execSQL(t, `INSERT INTO stages(id,project_id,name) VALUES(1,1,'Licence'),(2,2,'Kitchen')`)
-	bad := formRequest(t, handleAddTodo, "/todos/add", url.Values{"category": {"todo"}, "text": {"Bad membership"}, "project_id": {"1"}, "stage_id": {"2"}})
-	if bad.Code != 400 {
-		t.Fatalf("accepted foreign stage: %d", bad.Code)
+	execSQL(t, `INSERT INTO projects(id,name) VALUES(1,'Car'),(2,'Home'),(3,'Done')`)
+	execSQL(t, `UPDATE projects SET completed=1 WHERE id=3`)
+	execSQL(t, `INSERT INTO headings(id,project_id,name) VALUES(1,1,'Licence'),(2,2,'Kitchen'),(3,3,'Old')`)
+	for _, list := range []string{"heading:9", "heading:3", "project:3", "stage:1", "heading:x"} {
+		bad := formRequest(t, handleAddTodo, "/todos/add", url.Values{"category": {"todo"}, "text": {"Bad membership"}, "list": {list}})
+		if bad.Code != 400 {
+			t.Fatalf("accepted list %q: %d", list, bad.Code)
+		}
 	}
-	requireOK(t, formRequest(t, handleAddTodo, "/todos/add", url.Values{"category": {"todo"}, "text": {"Book lessons"}, "project_id": {"1"}, "stage_id": {"1"}}))
-	var id int
-	db.QueryRow(`SELECT id FROM todos WHERE text='Book lessons'`).Scan(&id)
+	requireOK(t, formRequest(t, handleAddTodo, "/todos/add", url.Values{"category": {"todo"}, "text": {"Book lessons"}, "list": {"heading:1"}}))
+	var id, project, heading int
+	db.QueryRow(`SELECT id,project_id,heading_id FROM todos WHERE text='Book lessons'`).Scan(&id, &project, &heading)
+	if project != 1 || heading != 1 {
+		t.Fatalf("heading capture filed the task under %d/%d", project, heading)
+	}
 	requireOK(t, formRequest(t, handleToggleTodo, "/todos/toggle", url.Values{"id": {"1"}}))
-	requireOK(t, formRequest(t, handleTaskSave, "/task/save", url.Values{"id": {"1"}, "revision": {"1"}, "text": {"Book lessons"}, "due_date": {"2026-10-01"}, "project_id": {"2"}, "stage_id": {"2"}}))
-	var done, project, stage int
+	requireOK(t, formRequest(t, handleTaskSave, "/task/save", url.Values{"id": {"1"}, "revision": {"1"}, "text": {"Book lessons"}, "due_date": {"2026-10-01"}, "list": {"heading:2"}}))
+	var done int
 	var completed string
-	db.QueryRow(`SELECT done,project_id,stage_id,completed_at FROM todos WHERE id=?`, id).Scan(&done, &project, &stage, &completed)
-	if done != 1 || project != 2 || stage != 2 || completed == "" {
-		t.Fatalf("move lost task state %d %d %d %q", done, project, stage, completed)
+	db.QueryRow(`SELECT done,project_id,heading_id,completed_at FROM todos WHERE id=?`, id).Scan(&done, &project, &heading, &completed)
+	if done != 1 || project != 2 || heading != 2 || completed == "" {
+		t.Fatalf("move lost task state %d %d %d %q", done, project, heading, completed)
 	}
-	requireOK(t, formRequest(t, handleTaskSave, "/task/save", url.Values{"id": {"1"}, "revision": {"2"}, "text": {"Standalone again"}, "due_date": {""}, "project_id": {"0"}, "stage_id": {"0"}}))
+	requireOK(t, formRequest(t, handleTaskSave, "/task/save", url.Values{"id": {"1"}, "revision": {"2"}, "text": {"Just the project"}, "list": {"project:1"}}))
+	db.QueryRow(`SELECT project_id,COALESCE(heading_id,0) FROM todos WHERE id=1`).Scan(&project, &heading)
+	if project != 1 || heading != 0 {
+		t.Fatalf("project move left %d/%d", project, heading)
+	}
+	requireOK(t, formRequest(t, handleTaskSave, "/task/save", url.Values{"id": {"1"}, "revision": {"3"}, "text": {"Standalone again"}, "due_date": {""}, "list": {""}}))
 	var standalone bool
-	db.QueryRow(`SELECT project_id IS NULL AND stage_id IS NULL FROM todos WHERE id=1`).Scan(&standalone)
+	db.QueryRow(`SELECT project_id IS NULL AND heading_id IS NULL FROM todos WHERE id=1`).Scan(&standalone)
 	if !standalone {
 		t.Fatal("cannot unassign task")
 	}
@@ -108,8 +123,8 @@ func TestProjectTasksMembershipAndLifecycle(t *testing.T) {
 func TestProjectArchiveCompletionAndCounts(t *testing.T) {
 	setupWorkspaceDB(t)
 	execSQL(t, `INSERT INTO projects(id,name) VALUES(1,'Car')`)
-	execSQL(t, `INSERT INTO stages(id,project_id,name) VALUES(1,1,'Licence')`)
-	execSQL(t, `INSERT INTO todos(id,category,text,project_id,stage_id,done,archived,due_date) VALUES(1,'todo','Complete',1,1,1,1,''),(2,'todo','Pending',1,1,0,0,'2020-01-01')`)
+	execSQL(t, `INSERT INTO headings(id,project_id,name) VALUES(1,1,'Licence')`)
+	execSQL(t, `INSERT INTO todos(id,category,text,project_id,heading_id,done,archived,due_date) VALUES(1,'todo','Complete',1,1,1,1,''),(2,'todo','Pending',1,1,0,0,'2020-01-01')`)
 	ws, err := loadWorkspace()
 	if err != nil {
 		t.Fatal(err)
@@ -135,12 +150,21 @@ func TestProjectArchiveCompletionAndCounts(t *testing.T) {
 	if err != nil || len(tasks) != 1 {
 		t.Fatal("restoring project lost pending task")
 	}
-	requireOK(t, formRequest(t, handleStageAction, "/stages/action", url.Values{"id": {"1"}, "action": {"archive"}}))
-	tasks, _ = dueTodayTasks(date("2026-09-13"))
-	if len(tasks) != 0 {
-		t.Fatal("archived stage leaked into reminders")
+	bad := formRequest(t, handleHeadingAction, "/headings/action", url.Values{"id": {"1"}, "action": {"archive"}})
+	if bad.Code != 400 {
+		t.Fatalf("headings have no archive, got %d", bad.Code)
 	}
-	requireOK(t, formRequest(t, handleStageAction, "/stages/action", url.Values{"id": {"1"}, "action": {"restore"}}))
+	requireOK(t, formRequest(t, handleHeadingAction, "/headings/action", url.Values{"id": {"1"}, "action": {"delete"}}))
+	var headings, orphaned int
+	db.QueryRow(`SELECT count(*) FROM headings`).Scan(&headings)
+	db.QueryRow(`SELECT count(*) FROM todos WHERE project_id=1 AND heading_id IS NULL`).Scan(&orphaned)
+	if headings != 0 || orphaned != 2 {
+		t.Fatalf("deleting a heading left %d headings and moved %d of 2 tasks to the project", headings, orphaned)
+	}
+	tasks, _ = dueTodayTasks(date("2026-09-13"))
+	if len(tasks) != 1 {
+		t.Fatal("deleting a heading hid its task")
+	}
 	requireOK(t, formRequest(t, handleToggleTodo, "/todos/toggle", url.Values{"id": {"2"}}))
 	requireOK(t, formRequest(t, handleProjectAction, "/projects/action", url.Values{"id": {"1"}, "action": {"complete"}}))
 	requireOK(t, formRequest(t, handleProjectAction, "/projects/action", url.Values{"id": {"1"}, "action": {"reopen"}}))
@@ -171,12 +195,12 @@ func TestProjectNoteLinksAndOrdering(t *testing.T) {
 func TestWorkspaceTemplatesAndSearch(t *testing.T) {
 	setupWorkspaceDB(t)
 	execSQL(t, `INSERT INTO projects(id,name) VALUES(1,'Car')`)
-	execSQL(t, `INSERT INTO stages(id,project_id,name) VALUES(1,1,'Car research')`)
-	execSQL(t, `INSERT INTO todos(id,category,text,project_id,stage_id) VALUES(1,'todo','Car shortlist',1,1)`)
+	execSQL(t, `INSERT INTO headings(id,project_id,name) VALUES(1,1,'Car research')`)
+	execSQL(t, `INSERT INTO todos(id,category,text,project_id,heading_id) VALUES(1,'todo','Car shortlist',1,1)`)
 	for _, c := range []struct {
 		path string
 		h    http.HandlerFunc
-	}{{"/", handleIndex}, {"/workspace", handleWorkspace}, {"/task/detail?id=1", handleTaskDetail}, {"/projects/detail?id=1", handleProjectDetail}, {"/settings", handleSettings}, {"/search?q=Car", handleSearch}} {
+	}{{"/", handleIndex}, {"/workspace", handleWorkspace}, {"/task/edit?id=1", handleTaskEdit}, {"/workspace/project?id=1", handleWorkspaceProject}, {"/projects/detail?id=1", handleProjectDetail}, {"/settings", handleSettings}, {"/search?q=Car", handleSearch}} {
 		w := httptest.NewRecorder()
 		c.h(w, httptest.NewRequest("GET", c.path, nil))
 		requireOK(t, w)
@@ -186,7 +210,7 @@ func TestWorkspaceTemplatesAndSearch(t *testing.T) {
 	}
 	w := httptest.NewRecorder()
 	handleSearch(w, httptest.NewRequest("GET", "/search?q=Car", nil))
-	for _, expected := range []string{`data-call="openProjectResult"data-args='[1]'`, `data-call="openStageResult"data-args='[1]'`, `data-call="openTodoResult"data-args='["todo",1]'`} {
+	for _, expected := range []string{`data-call="openProjectResult"data-args='[1]'`, `data-call="openTodoResult"data-args='["todo",1]'`} {
 		if !strings.Contains(strings.ReplaceAll(html.UnescapeString(w.Body.String()), " ", ""), expected) {
 			t.Errorf("search missing %s", expected)
 		}
@@ -572,22 +596,36 @@ func TestPruneDeliveriesKeepsRecentAndPending(t *testing.T) {
 	}
 }
 
-func TestProjectBodyCountsArchivedCompletions(t *testing.T) {
+func TestProjectBodyMatchesWorkspace(t *testing.T) {
 	setupWorkspaceDB(t)
 	execSQL(t, `INSERT INTO projects(id,name) VALUES(1,'Car')`)
-	execSQL(t, `INSERT INTO stages(id,project_id,name) VALUES(1,1,'Licence')`)
-	execSQL(t, `INSERT INTO todos(id,category,text,project_id,stage_id,done,archived) VALUES(1,'todo','Theory test',1,1,1,1),(2,'todo','Driving test',1,1,0,0)`)
+	execSQL(t, `INSERT INTO headings(id,project_id,name) VALUES(1,1,'Licence')`)
+	execSQL(t, `INSERT INTO todos(id,category,text,project_id,heading_id,done,archived) VALUES(1,'todo','Theory test',1,1,1,1),(2,'todo','Driving test',1,1,0,0),(3,'todo','Insurance',1,NULL,0,0)`)
 	ws, err := loadWorkspace()
 	if err != nil {
 		t.Fatal(err)
 	}
-	stage := ws.Projects[0].Stages[0].Group
+	body := Project{ID: 1}
+	if err = loadProjectTasks(&body); err != nil {
+		t.Fatal(err)
+	}
+	all := ws.Projects[0]
+	if all.Group.Completed != 1 || all.Group.Total != 3 || body.Group.Completed != 1 || body.Group.Total != 3 {
+		t.Fatalf("progress %d/%d (workspace) and %d/%d (project body), want 1/3", all.Group.Completed, all.Group.Total, body.Group.Completed, body.Group.Total)
+	}
+	if len(body.Headings) != 1 || len(body.Headings[0].Group.Tasks) != 1 || len(body.Group.Tasks) != 1 {
+		t.Fatal("tasks not filed under their heading")
+	}
 	w := httptest.NewRecorder()
 	handleWorkspaceProject(w, httptest.NewRequest("GET", "/workspace/project?id=1", nil))
 	requireOK(t, w)
-	want := strconv.Itoa(stage.Completed) + "/" + strconv.Itoa(stage.Total)
-	if want != "1/2" || !strings.Contains(w.Body.String(), `<span class="section-count">`+want+`</span>`) {
-		t.Fatalf("project body stage count disagrees with the workspace (%s): %s", want, w.Body.String())
+	page := w.Body.String()
+	heading := strings.Index(page, `id="heading-1"`)
+	if heading < 0 || strings.Index(page, "Driving test") < heading || strings.Index(page, "Insurance") > heading {
+		t.Fatalf("project body does not place tasks under their heading: %s", page)
+	}
+	if !strings.Contains(page, `name="list" value="heading:1"`) {
+		t.Fatal("heading capture does not add to the heading")
 	}
 }
 
