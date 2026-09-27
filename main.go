@@ -237,7 +237,6 @@ func main() {
 	configurePushReminders()
 	configureTrustedProxies()
 
-	// Backups are configured first: migrating an old database saves a copy.
 	configureBackups(dataDirectory())
 	initDB()
 	defer db.Close()

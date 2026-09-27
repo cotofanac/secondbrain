@@ -9,7 +9,9 @@ On first startup this version rebuilds every table in its final shape and copies
 - Weekly reviews (`weekly_reviews`, `/review`) and `todos.position` are removed, with the retired review and reminder settings.
 - Grocery and Buys items no longer carry task completion or cleanup stamps.
 
-Older images cannot run on the rebuilt database. To roll back, restore `secondbrain-before-v5.db` along with the older image. A database older than migration 4 is upgraded through migrations 1-4 first, in the same startup.
+Older images cannot run on the rebuilt database. To roll back, restore `secondbrain-before-v5.db` along with the older image.
+
+Later releases no longer contain the upgrade code. A database older than version 5 is refused at startup: run the 2026-09-27 release (commit `02c622b`) on it once, then upgrade.
 
 # Workspace update: database and rollout notes
 

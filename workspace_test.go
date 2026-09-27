@@ -55,62 +55,6 @@ func requireOK(t *testing.T, w *httptest.ResponseRecorder) {
 	}
 }
 
-func TestMigrationPreservesLegacyData(t *testing.T) {
-	conn, err := sql.Open("sqlite3", ":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer conn.Close()
-	conn.SetMaxOpenConns(1)
-	// A database from before the numbered migrations.
-	upgradeLegacyTables(conn)
-	if _, err = conn.Exec(`INSERT INTO todos(id,category,text,done,archived,due_date) VALUES(1,'todo','old open',0,0,'2020-01-01'),(2,'todo','old complete',1,0,''),(3,'todo','archived',0,1,'')`); err != nil {
-		t.Fatal(err)
-	}
-	now := date("2026-09-13")
-	if err = migrate(conn, now); err != nil {
-		t.Fatal(err)
-	}
-	if err = migrate(conn, now.AddDate(0, 0, 1)); err != nil {
-		t.Fatal(err)
-	}
-	var count int
-	conn.QueryRow(`SELECT count(*) FROM todos`).Scan(&count)
-	if count != 3 {
-		t.Fatalf("lost rows: %d", count)
-	}
-	var project, stage sql.NullInt64
-	var completed sql.NullString
-	var after string
-	if err = conn.QueryRow(`SELECT project_id,stage_id,completed_at,archive_after FROM todos WHERE id=2`).Scan(&project, &stage, &completed, &after); err != nil {
-		t.Fatal(err)
-	}
-	if project.Valid || stage.Valid || completed.Valid || after != "2026-09-20T00:00:00Z" {
-		t.Fatalf("migration fabricated history or altered baseline: %v %v %v %s", project, stage, completed, after)
-	}
-	var archived int
-	conn.QueryRow(`SELECT archived FROM todos WHERE id=3`).Scan(&archived)
-	if archived != 1 {
-		t.Fatal("archived task restored")
-	}
-	var todoRevision, noteRevision, migrationCount int
-	if err = conn.QueryRow(`SELECT revision FROM todos WHERE id=1`).Scan(&todoRevision); err != nil {
-		t.Fatal(err)
-	}
-	if _, err = conn.Exec(`INSERT INTO notes(id,title) VALUES(1,'n')`); err != nil {
-		t.Fatal(err)
-	}
-	if err = conn.QueryRow(`SELECT revision FROM notes WHERE id=1`).Scan(&noteRevision); err != nil {
-		t.Fatal(err)
-	}
-	if err = conn.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&migrationCount); err != nil {
-		t.Fatal(err)
-	}
-	if todoRevision != 1 || noteRevision != 1 || migrationCount != schemaVersion {
-		t.Fatalf("revision migration not repeatable: todo=%d note=%d migrations=%d", todoRevision, noteRevision, migrationCount)
-	}
-}
-
 func TestTaskTitleRevisionConflict(t *testing.T) {
 	setupWorkspaceDB(t)
 	execSQL(t, `INSERT INTO todos(id,category,text,done,archived,due_date) VALUES(1,'todo','Original',0,0,'')`)
