@@ -35,6 +35,13 @@ const shot = name => require('node:path').join(process.env.SCREENSHOT_DIR || req
  assert.equal(await captureDate.locator('input').inputValue(),'');assert.equal(await captureDate.locator('.chip-clear').isHidden(),true);
  // The sidebar counts open inbox tasks and lists projects, which open as pages.
  await page.waitForFunction(()=>document.getElementById('nav-count-tasks')?.textContent.trim()==='1');
+ // A date typed at the end of a new task becomes its due date and leaves the title.
+ await page.locator('#capture-tasks [name=text]').fill('Pay rent tomorrow');
+ assert.notEqual(await page.locator('#capture-tasks .chip-text').textContent(),'Date','typed date not previewed');
+ await page.locator('#capture-tasks button.add-circle').click();
+ await page.locator('#section-tasks .todo-item').filter({hasText:'Pay rent'}).locator('.todo-date').waitFor();
+ assert.equal(await page.getByRole('button',{name:'Pay rent',exact:true}).count(),1,'typed date left in the title');
+ assert.equal(await page.locator('#capture-tasks .chip-date input').inputValue(),'','capture kept the typed date');
  await page.getByRole('button',{name:'New project',exact:true}).click();
  await page.locator('#custom-dialog-input').fill('Car');await page.locator('#custom-dialog-confirm').click();
  await page.locator('.sidebar-project').filter({hasText:'Car'}).click();

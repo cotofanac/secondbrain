@@ -43,8 +43,8 @@ list, every project with its progress, and one Archive for everything put away.
 Each project opens as its own page. Mobile keeps the same structure close at hand with fast entry,
 touch-friendly controls, and compact navigation.
 
-Every interaction is intentionally small. Press Return to capture. Tap a task to
-edit in place. Check something off and keep moving.
+Every interaction is intentionally small. Press Return to capture, and end a task
+with a date ("tomorrow", "fri", "30 sep") to set it. Tap a task to edit in place. Check something off and keep moving.
 
 Light and dark appearances follow your device. Install it to your Home Screen
 and it opens like an app, without giving up ownership of your data.

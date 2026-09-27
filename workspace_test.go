@@ -150,9 +150,9 @@ func TestProjectArchiveCompletionAndCounts(t *testing.T) {
 	if err != nil || len(tasks) != 1 {
 		t.Fatal("restoring project lost pending task")
 	}
-	bad := formRequest(t, handleHeadingAction, "/headings/action", url.Values{"id": {"1"}, "action": {"archive"}})
+	bad := formRequest(t, handleHeadingAction, "/headings/action", url.Values{"id": {"1"}, "action": {"complete"}})
 	if bad.Code != 400 {
-		t.Fatalf("headings have no archive, got %d", bad.Code)
+		t.Fatalf("headings cannot be completed, got %d", bad.Code)
 	}
 	requireOK(t, formRequest(t, handleHeadingAction, "/headings/action", url.Values{"id": {"1"}, "action": {"delete"}}))
 	var headings, orphaned int
@@ -878,5 +878,33 @@ func TestDailyReminderIsQueuedOnceAtItsTime(t *testing.T) {
 	tick(at("2026-09-15", "10:00"))
 	if sent != 1 {
 		t.Fatal("reminder sent while turned off")
+	}
+}
+
+func TestArchivingAHeadingArchivesItsTasks(t *testing.T) {
+	setupWorkspaceDB(t)
+	execSQL(t, `INSERT INTO projects(id,name) VALUES(1,'Move flat')`)
+	execSQL(t, `INSERT INTO headings(id,project_id,name) VALUES(1,1,'Packing'),(2,1,'Paperwork')`)
+	execSQL(t, `INSERT INTO todos(id,category,text,project_id,heading_id,done,archived) VALUES
+		(1,'todo','Buy boxes',1,1,1,0),(2,'todo','Pack kitchen',1,1,0,0),(3,'todo','Old',1,1,1,1),(4,'todo','Change address',1,2,0,0)`)
+	w := formRequest(t, handleHeadingAction, "/headings/action", url.Values{"id": {"1"}, "action": {"archive"}})
+	requireOK(t, w)
+	if !strings.Contains(w.Header().Get("HX-Trigger"), "Heading archived with 2 task(s)") {
+		t.Fatalf("missing notice: %s", w.Header().Get("HX-Trigger"))
+	}
+	var headings, active, underHeading int
+	db.QueryRow(`SELECT count(*) FROM headings`).Scan(&headings)
+	db.QueryRow(`SELECT count(*) FROM todos WHERE archived=0`).Scan(&active)
+	db.QueryRow(`SELECT count(*) FROM todos WHERE heading_id=1`).Scan(&underHeading)
+	if headings != 1 || active != 1 || underHeading != 0 {
+		t.Fatalf("after archiving: %d headings, %d active tasks, %d still under it", headings, active, underHeading)
+	}
+	// A restored task comes back at the top of its project.
+	requireOK(t, formRequest(t, handleRestoreTodo, "/todos/restore", url.Values{"id": {"2"}}))
+	var project int
+	var heading sql.NullInt64
+	db.QueryRow(`SELECT project_id,heading_id FROM todos WHERE id=2 AND archived=0`).Scan(&project, &heading)
+	if project != 1 || heading.Valid {
+		t.Fatalf("restored task in project %d under heading %v", project, heading)
 	}
 }

@@ -6,7 +6,7 @@
 // listed here can be called.
 const CALLABLE = new Set([
     'chooseMobileUtility', 'chooseMobileWorkspace', 'closeNotePicker', 'closeSearch', 'createNote',
-    'archiveNote', 'closeTaskEditor', 'deleteHeading', 'disablePush', 'enablePush', 'filterNotes', 'hideArchive',
+    'archiveHeading', 'archiveNote', 'closeTaskEditor', 'deleteHeading', 'disablePush', 'enablePush', 'filterNotes', 'hideArchive',
     'doLogout', 'openArchive', 'openMobileWorkspaceSwitcher',
     'openNoteResult', 'openProject', 'openProjectResult', 'openSearch',
     'openTask', 'openToday', 'openTodayTask', 'openTodoResult', 'renameNote',

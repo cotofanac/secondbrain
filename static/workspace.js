@@ -472,6 +472,10 @@ document.addEventListener('click', e => {
     const clear = e.target.closest?.('.chip-clear');
     if (clear) {
         const input = clear.closest('.chip-date').querySelector('input');
+        // Clearing a typed date keeps the words in the title from now on.
+        const form = clear.closest('.capture-form');
+        if (form?.dataset.dateSource === 'typed') form.dataset.typedOff = '1';
+        if (form) delete form.dataset.dateSource;
         input.value = '';
         input.dispatchEvent(new Event('input', { bubbles: true }));
         syncDateChips(clear.closest('.chip-date').parentElement);
@@ -483,6 +487,103 @@ document.addEventListener('click', e => {
     try {
         input?.showPicker?.();
     } catch (_) {}
+});
+// --- Typed dates ---
+// A date typed at the end of a new task ("Call the bank tomorrow", "Pay rent
+// on fri", "Renew passport 30 sep") becomes its due date and leaves the title.
+// The date chip previews it while typing; × or picking another date keeps the
+// words as typed.
+const WEEKDAY_NAMES = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+const MONTH_NAMES = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'];
+const NUMBER_WORDS = { a: 1, an: 1, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6 };
+function todayISO() {
+    return new Date().toLocaleDateString('en-CA', { timeZone: document.body.dataset.timezone || undefined });
+}
+function addDaysISO(iso, n) {
+    const d = new Date(iso + 'T00:00:00Z');
+    d.setUTCDate(d.getUTCDate() + n);
+    return d.toISOString().slice(0, 10);
+}
+// A name matches when it is at least three letters of the full word ("fri", "sept").
+function matchName(word, names) {
+    return word.length >= 3 ? names.findIndex(name => name.startsWith(word)) : -1;
+}
+function parseDatePhrase(phrase, today) {
+    const dow = new Date(today + 'T00:00:00Z').getUTCDay();
+    if (phrase === 'today') return today;
+    if (['tomorrow', 'tmr', 'tmrw'].includes(phrase)) return addDaysISO(today, 1);
+    if (phrase === 'next week') return addDaysISO(today, (8 - dow) % 7 || 7);
+    let m = phrase.match(/^in (\d{1,3}|a|an|one|two|three|four|five|six) (day|days|week|weeks)$/);
+    if (m) {
+        const n = NUMBER_WORDS[m[1]] || Number(m[1]);
+        return addDaysISO(today, m[2].startsWith('week') ? n * 7 : n);
+    }
+    // A weekday means its next one, never today: "fri" on a Friday is a week out.
+    const weekday = matchName(phrase.replace(/^next /, ''), WEEKDAY_NAMES);
+    if (weekday >= 0) return addDaysISO(today, (weekday - dow + 7) % 7 || 7);
+    m = phrase.match(/^(\d{1,2}) ([a-z]+)$/) || phrase.match(/^([a-z]+) (\d{1,2})$/);
+    if (m) {
+        const [day, month] = /^\d/.test(m[1]) ? [Number(m[1]), m[2]] : [Number(m[2]), m[1]];
+        const index = matchName(month, MONTH_NAMES);
+        if (index < 0) return null;
+        let year = Number(today.slice(0, 4));
+        const date = y => new Date(Date.UTC(y, index, day)).toISOString().slice(0, 10);
+        if (new Date(Date.UTC(year, index, day)).getUTCDate() !== day) return null;
+        if (date(year) < today) year++;
+        return date(year);
+    }
+    if (/^\d{4}-\d{2}-\d{2}$/.test(phrase) && !Number.isNaN(Date.parse(phrase))) return phrase;
+    return null;
+}
+// typedDate returns { title, due } for a title ending in a date, else null.
+function typedDate(text, today = todayISO()) {
+    const words = text.trim().split(/\s+/);
+    for (let n = Math.min(3, words.length - 1); n >= 1; n--) {
+        const due = parseDatePhrase(words.slice(-n).join(' ').toLowerCase(), today);
+        if (!due) continue;
+        let rest = words.slice(0, -n);
+        if (rest.length > 1 && ['on', 'by', 'due'].includes(rest[rest.length - 1].toLowerCase())) rest = rest.slice(0, -1);
+        return { title: rest.join(' '), due };
+    }
+    return null;
+}
+// Preview a typed date in the capture row's chip, unless a date was picked by
+// hand or the typed one was cleared.
+function previewTypedDate(form) {
+    const due = form.querySelector('.chip-date input');
+    if (!due || form.dataset.dateSource === 'picked' || form.dataset.typedOff) return;
+    const typed = typedDate(form.elements.text.value);
+    if (typed) {
+        due.value = typed.due;
+        form.dataset.dateSource = 'typed';
+    } else if (form.dataset.dateSource === 'typed') {
+        due.value = '';
+        delete form.dataset.dateSource;
+    }
+    syncDateChips(form);
+    saveCaptureDraft(form);
+}
+document.addEventListener('input', e => {
+    const form = e.target.closest?.('.capture-form');
+    if (!form || e.target.name !== 'text' || form.querySelector('[name=category]')?.value !== 'todo') return;
+    if (!e.target.value) delete form.dataset.typedOff;
+    previewTypedDate(form);
+});
+document.addEventListener('change', e => {
+    const form = e.target.closest?.('.capture-form');
+    if (form && e.target.matches('.chip-date input') && e.target.value) form.dataset.dateSource = 'picked';
+});
+// Send the title without its date words. Today's own capture row has no chip,
+// so a typed date there simply replaces "today".
+document.body.addEventListener('htmx:configRequest', e => {
+    const form = e.detail.elt;
+    if (!form?.classList.contains('capture-form') || e.detail.parameters.category !== 'todo') return;
+    const chip = form.querySelector('.chip-date');
+    if (chip && form.dataset.dateSource !== 'typed') return;
+    const typed = typedDate(String(e.detail.parameters.text || ''));
+    if (!typed) return;
+    e.detail.parameters.text = typed.title;
+    e.detail.parameters.due_date = typed.due;
 });
 // A swap that replaces the editor's row (a completion, a refresh) detaches
 // the editor with its unsaved text; put it back into the new row.
@@ -605,6 +706,12 @@ async function structureRename(kind, id, el) {
     const name = await showPrompt('Rename ' + kind, el.dataset.name);
     if (name) structureAction(kind, id, 'rename', { name });
 }
+// Archiving a heading puts it away with its tasks, for a finished section.
+async function archiveHeading(id, el) {
+    closePopupMenus();
+    if (await showConfirm('Archive the heading “' + el.dataset.name + '” and its tasks? You can restore the tasks from the Archive.'))
+        structureAction('heading', id, 'archive');
+}
 async function deleteHeading(id, el) {
     closePopupMenus();
     if (await showConfirm('Delete the heading “' + el.dataset.name + '”? Its tasks stay in the project.'))
@@ -700,7 +807,8 @@ document.body.addEventListener('htmx:beforeRequest', e => {
     }
     if (!form?.classList.contains('capture-form')) return;
     const input = form.elements.text;
-    const text = input?.value.trim();
+    // The title as sent, without any typed date.
+    const text = String(e.detail.requestConfig?.parameters?.text ?? input?.value ?? '').trim();
     if (!text) return;
     const pending = document.createElement('div');
     pending.className = 'todo-item capture-pending';
@@ -717,6 +825,8 @@ document.body.addEventListener('htmx:beforeRequest', e => {
     form.dataset.pendingRow = pending.dataset.captureRequest;
     input.value = '';
     // The next task starts without a date; a failed add gets this one back.
+    delete form.dataset.dateSource;
+    delete form.dataset.typedOff;
     const due = form.querySelector('.chip-date input');
     if (due?.value) {
         pending.dataset.due = due.value;
@@ -734,6 +844,7 @@ function restoreFailedCapture(e) {
     const due = form.querySelector('.chip-date input');
     if (pending?.dataset.due && due && !due.value) {
         due.value = pending.dataset.due;
+        form.dataset.dateSource = 'picked';
         syncDateChips(form);
     }
     pending?.remove();

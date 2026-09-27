@@ -44,6 +44,7 @@
   <button type="button" data-call="structureRename" data-args='["heading",{{.ID}},"$el"]' data-name="{{.Name}}">Rename</button>
   <button type="button" data-call="structureAction" data-args='["heading",{{.ID}},"up"]'>Move up</button>
   <button type="button" data-call="structureAction" data-args='["heading",{{.ID}},"down"]'>Move down</button>
+  <button type="button" data-call="archiveHeading" data-args='[{{.ID}},"$el"]' data-name="{{.Name}}">Archive heading</button>
   <button type="button" class="danger-action" data-call="deleteHeading" data-args='[{{.ID}},"$el"]' data-name="{{.Name}}">Delete heading</button>
  </div></details></div>
  {{template "task-group" .Group}}

@@ -326,7 +326,7 @@ func handleHeadingAction(w http.ResponseWriter, r *http.Request) { handleStructu
 
 var structureActions = map[bool]map[string]bool{
 	false: {"create": true, "rename": true, "up": true, "down": true, "archive": true, "restore": true, "complete": true, "reopen": true},
-	true:  {"create": true, "rename": true, "up": true, "down": true, "delete": true},
+	true:  {"create": true, "rename": true, "up": true, "down": true, "delete": true, "archive": true},
 }
 
 func handleStructureAction(w http.ResponseWriter, r *http.Request, heading bool) {
@@ -341,6 +341,7 @@ func handleStructureAction(w http.ResponseWriter, r *http.Request, heading bool)
 	name := strings.TrimSpace(r.FormValue("name"))
 	id, _ := strconv.Atoi(r.FormValue("id"))
 	parent, _ := strconv.Atoi(r.FormValue("project_id"))
+	var archivedTasks int64
 	tx, err := db.Begin()
 	if err != nil {
 		http.Error(w, "DB error", 500)
@@ -383,7 +384,19 @@ func handleStructureAction(w http.ResponseWriter, r *http.Request, heading bool)
 			_, err = tx.Exec(`DELETE FROM headings WHERE id=?`, id)
 		}
 	case "archive":
-		_, err = tx.Exec(`UPDATE projects SET archived=1 WHERE id=?`, id)
+		if !heading {
+			_, err = tx.Exec(`UPDATE projects SET archived=1 WHERE id=?`, id)
+			break
+		}
+		// A finished section: its open tasks go to the archive with it (each
+		// restorable there, at the top of the project) and the heading goes.
+		var res sql.Result
+		if res, err = tx.Exec(`UPDATE todos SET archived=1,archived_at=? WHERE heading_id=? AND archived=0`, dbTime(time.Now()), id); err == nil {
+			archivedTasks, _ = res.RowsAffected()
+			if _, err = tx.Exec(`UPDATE todos SET heading_id=NULL WHERE heading_id=?`, id); err == nil {
+				_, err = tx.Exec(`DELETE FROM headings WHERE id=?`, id)
+			}
+		}
 	case "restore":
 		_, err = tx.Exec(`UPDATE projects SET archived=0 WHERE id=?`, id)
 	case "complete":
@@ -409,7 +422,9 @@ func handleStructureAction(w http.ResponseWriter, r *http.Request, heading bool)
 		http.Error(w, "DB error", 500)
 		return
 	}
-	if action == "archive" {
+	if action == "archive" && heading {
+		hxTrigger(w, "sbNotice", map[string]any{"message": fmt.Sprintf("Heading archived with %d task(s)", archivedTasks)})
+	} else if action == "archive" {
 		hxTrigger(w, "sbUndo", map[string]any{"kind": "project", "id": id})
 	}
 	if r.FormValue("return") == "archive" {
