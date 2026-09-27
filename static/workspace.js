@@ -101,6 +101,7 @@ function restoreCaptureDrafts(root = document) {
         if (form.elements.due_date && !form.elements.due_date.value)
             form.elements.due_date.value = draft.due || '';
     });
+    syncDateChips(root);
 }
 function rememberWorkspace() {
     const forms = {};
@@ -139,6 +140,7 @@ function restoreWorkspace() {
                     const el = form.elements.namedItem(key);
                     if (el) el.value = value;
                 }
+                syncDateChips(form);
             }
         }
         const form = document.getElementById(s.focus);
@@ -211,7 +213,7 @@ function setDestination(values) {
     else history.pushState(state, '', url);
 }
 function closePopupMenus() {
-    document.querySelectorAll('.row-menu,.app-menu,.capture-options').forEach(d => (d.open = false));
+    document.querySelectorAll('.row-menu,.app-menu').forEach(d => (d.open = false));
 }
 
 // --- Task editor ---
@@ -443,23 +445,40 @@ function showTaskConflict(editor, latest) {
     keep.focus();
 }
 function markSetChips(form) {
-    form.querySelectorAll('.chip').forEach(chip => {
+    form.querySelectorAll('.chip:not(.chip-date)').forEach(chip => {
         const field = chip.querySelector('input,select');
         if (field?.name !== 'list') chip.classList.toggle('is-set', !!field?.value);
     });
-    const due = form.elements.due_date;
-    const text = form.querySelector('.chip-date .chip-text');
-    if (due && text) {
-        // Same wording as the list rows ("Sep 30").
-        const [y, m, d] = due.value.split('-').map(Number);
-        text.textContent = due.value
+    syncDateChips(form);
+}
+// A date chip shows its date in the list rows' wording ("Sep 30"), or "Date".
+function syncDateChips(root = document) {
+    root.querySelectorAll?.('.chip-date').forEach(chip => {
+        const value = chip.querySelector('input').value;
+        const [y, m, d] = value.split('-').map(Number);
+        chip.classList.toggle('is-set', !!value);
+        chip.querySelector('.chip-text').textContent = value
             ? new Date(y, m - 1, d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
             : 'Date';
-    }
+        chip.querySelector('.chip-clear').hidden = !value;
+    });
 }
-// The date field is invisible over its chip; open the picker on a click,
-// which desktop browsers otherwise only do from their own calendar icon.
+document.addEventListener('change', e => {
+    if (e.target.matches?.('.chip-date input')) syncDateChips(e.target.closest('.chip-date').parentElement);
+});
 document.addEventListener('click', e => {
+    // × clears the date as if it had been picked away, so drafts and the
+    // task editor's autosave see an ordinary input.
+    const clear = e.target.closest?.('.chip-clear');
+    if (clear) {
+        const input = clear.closest('.chip-date').querySelector('input');
+        input.value = '';
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        syncDateChips(clear.closest('.chip-date').parentElement);
+        return;
+    }
+    // The date field is invisible over its chip; open the picker on a click,
+    // which desktop browsers otherwise only do from their own calendar icon.
     const input = e.target.closest?.('.chip-date input');
     try {
         input?.showPicker?.();
@@ -697,6 +716,13 @@ document.body.addEventListener('htmx:beforeRequest', e => {
     form.closest('.task-group')?.querySelector('.quiet-empty')?.setAttribute('hidden', '');
     form.dataset.pendingRow = pending.dataset.captureRequest;
     input.value = '';
+    // The next task starts without a date; a failed add gets this one back.
+    const due = form.querySelector('.chip-date input');
+    if (due?.value) {
+        pending.dataset.due = due.value;
+        due.value = '';
+        syncDateChips(form);
+    }
     input.focus({ preventScroll: true });
 });
 function restoreFailedCapture(e) {
@@ -705,6 +731,11 @@ function restoreFailedCapture(e) {
     const pending = document.querySelector('[data-capture-request="' + form.dataset.pendingRow + '"]');
     if (pending && !form.elements.text.value)
         form.elements.text.value = pending.querySelector('.task-label')?.textContent || '';
+    const due = form.querySelector('.chip-date input');
+    if (pending?.dataset.due && due && !due.value) {
+        due.value = pending.dataset.due;
+        syncDateChips(form);
+    }
     pending?.remove();
     form.closest('.task-group')?.querySelector('.quiet-empty')?.removeAttribute('hidden');
     saveCaptureDraft(form);
@@ -791,7 +822,10 @@ document.body.addEventListener('sbWorkspaceChanged', e => {
 });
 document.addEventListener('input', e => {
     const capture = e.target.closest('.capture-form');
-    if (capture) saveCaptureDraft(capture);
+    if (capture) {
+        saveCaptureDraft(capture);
+        syncDateChips(capture);
+    }
 });
 document.addEventListener('keydown', e => {
     if (e.metaKey && e.key.toLowerCase() === 'k') {

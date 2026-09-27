@@ -27,6 +27,12 @@ const shot = name => require('node:path').join(process.env.SCREENSHOT_DIR || req
  await page.locator('#capture-tasks button[type=submit], #capture-tasks button.add-circle').click();
  await page.getByRole('button',{name:'Call the driving school',exact:true}).waitFor();
  assert.equal(await page.locator('#capture-tasks [name=text]').inputValue(),'');
+ // The capture date is one chip: picking shows the date, × clears it.
+ const captureDate=page.locator('#capture-tasks .chip-date');
+ await captureDate.locator('input').fill('2026-10-02');await captureDate.locator('input').dispatchEvent('change');
+ assert.equal(await captureDate.locator('.chip-text').textContent(),'Oct 2');
+ await captureDate.locator('.chip-clear').click();
+ assert.equal(await captureDate.locator('input').inputValue(),'');assert.equal(await captureDate.locator('.chip-clear').isHidden(),true);
  // The sidebar counts open inbox tasks and lists projects, which open as pages.
  await page.waitForFunction(()=>document.getElementById('nav-count-tasks')?.textContent.trim()==='1');
  await page.getByRole('button',{name:'New project',exact:true}).click();

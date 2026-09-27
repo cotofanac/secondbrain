@@ -1,3 +1,6 @@
+{{/* The due date as a chip. The native date field lies invisibly over it, so
+     one tap opens the system picker; × clears a date that is set. */}}
+{{define "date-chip"}}<span class="chip chip-date{{if .}} is-set{{end}}" title="Due date">{{template "icon-calendar"}}<span class="chip-text">{{if .}}{{formatDate .}}{{else}}Date{{end}}</span><input type="date" name="due_date" value="{{.}}" aria-label="Due date"><button type="button" class="chip-clear" aria-label="Clear due date"{{if not .}} hidden{{end}}>{{template "icon-close"}}</button></span>{{end}}
 {{define "task-row"}}
 <div class="todo-item {{if .Done}}done{{end}}" id="task-{{.ID}}" data-task-id="{{.ID}}" data-revision="{{.Revision}}">
  <form hx-post="/todos/toggle" hx-target="closest .task-group" hx-swap="outerHTML swap:140ms"><input type="hidden" name="id" value="{{.ID}}"><input type="hidden" name="response" value="task-group"><button class="check-btn {{if .Done}}checked{{end}}" aria-label="{{if .Done}}Reopen{{else}}Complete{{end}} {{.Text}}"><span class="task-checkmark" aria-hidden="true"></span></button></form>
@@ -11,7 +14,7 @@
  <form class="capture-form" id="capture-{{.Key}}" hx-post="/todos/add" hx-target="#todo-items">
   <input type="hidden" name="category" value="{{.Category}}"><input type="hidden" name="list" value="{{.List}}">
   <input type="text" name="text" aria-label="{{if eq .Category "todo"}}Add task{{else}}Add item{{end}}" placeholder="{{if eq .Category "todo"}}Add a task…{{else}}Add an item…{{end}}" maxlength="500" autocomplete="off" enterkeyhint="done" {{if eq .Category "groceries"}}list="grocery-suggestions"{{else if eq .Category "shopping"}}list="shopping-suggestions"{{end}} required>
-  {{if eq .Category "todo"}}<details class="capture-options"><summary class="icon-button" title="Due date" aria-label="Choose an optional due date">{{template "icon-calendar"}}</summary><label>Due date<input type="date" name="due_date"></label></details>{{end}}
+  {{if eq .Category "todo"}}{{template "date-chip" ""}}{{end}}
   <button type="submit" class="add-circle" aria-label="Add">{{template "icon-plus"}}</button>
  </form>
  {{range .Tasks}}{{template "task-row" .}}{{else}}<p class="quiet-empty">{{if .Done}}All done.{{else}}No items{{end}}</p>{{end}}

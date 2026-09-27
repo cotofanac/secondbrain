@@ -4,7 +4,7 @@
  <input class="task-editor-title" name="text" value="{{.Task.Text}}" maxlength="500" required aria-label="Task" autocomplete="off" enterkeyhint="done">
  <div class="task-editor-bar">
   {{if eq .Task.Category "todo"}}
-  <label class="chip chip-date{{if .Task.DueDate}} is-set{{end}}" title="Due date">{{template "icon-calendar"}}<span class="chip-text">{{if .Task.DueDate}}{{formatDate .Task.DueDate}}{{else}}Date{{end}}</span><input type="date" name="due_date" value="{{.Task.DueDate}}" aria-label="Due date"></label>
+  {{template "date-chip" .Task.DueDate}}
   <label class="chip{{if .Task.Repeat}} is-set{{end}}" title="Repeat">{{template "icon-repeat"}}<select name="repeat" aria-label="Repeat">{{$r := .Task.Repeat}}<option value="" {{if eq $r ""}}selected{{end}}>No repeat</option><option value="daily" {{if eq $r "daily"}}selected{{end}}>Daily</option><option value="weekly" {{if eq $r "weekly"}}selected{{end}}>Weekly</option><option value="monthly" {{if eq $r "monthly"}}selected{{end}}>Monthly</option><option value="yearly" {{if eq $r "yearly"}}selected{{end}}>Yearly</option></select></label>
   <label class="chip" title="List">{{template "icon-folder"}}<select name="list" aria-label="List">{{range .Lists}}<option value="{{.Value}}" {{if eq .Value $.List}}selected{{end}}>{{.Label}}</option>{{end}}</select></label>
   {{end}}
