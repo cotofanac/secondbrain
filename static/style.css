@@ -1334,7 +1334,7 @@ details[open] > summary > .disclosure-icon .icon { transform: rotate(90deg); }
 .todo-item.is-completing .task-checkmark { background:var(--accent); transform:scale(1.06); }
 .todo-item.is-completing { opacity:.72; }
 .todo-item.is-completing .task-label { opacity:.55; transform:translateX(3px); text-decoration:line-through; }
-.todo-item { transition:opacity 160ms ease; }
+.todo-item, .today-row { transition:opacity 160ms ease, background-color 160ms ease; }
 .todo-item .task-label { transition:opacity 140ms ease,transform 140ms ease,color 140ms ease; }
 .view.view-entering { animation:view-enter 160ms cubic-bezier(.2,.75,.25,1); }
 @keyframes view-enter { from { opacity:.72; transform:translateY(4px); } to { opacity:1; transform:translateY(0); } }
@@ -1643,3 +1643,29 @@ details[open] > summary > .disclosure-icon .icon { transform: rotate(90deg); }
 .today-reminder-actions { display: flex; flex-wrap: wrap; gap: 0 1rem; padding-left: calc(17px + .45rem); }
 .today-reminder-actions .text-action { min-height: 40px; font-size: .85rem; }
 .today-reminder-actions .text-action:disabled { color: var(--text-dim); }
+
+/* Motion. Short and eased like the view and item entrances above, only for
+   changes the user starts (never for background refreshes), and switched off
+   entirely under prefers-reduced-motion. */
+@keyframes pop-in { from { opacity:0; transform:translateY(-4px) scale(.96); } to { opacity:1; transform:none; } }
+@keyframes fade-in { from { opacity:0; } }
+@keyframes rise-in { from { opacity:0; transform:translateY(-3px); } to { opacity:1; transform:none; } }
+@keyframes tick-in { from { opacity:0; transform:rotate(45deg) scale(.4); } to { opacity:1; transform:rotate(45deg) scale(1); } }
+/* Menus grow out of their … button. */
+.menu-panel { transform-origin:top right; }
+details[open] > .menu-panel { animation:pop-in 140ms cubic-bezier(.2,.75,.25,1); }
+/* Sheets: the backdrop fades while the sheet itself slides up. */
+.mobile-workspace-menu:not([hidden]), .note-sheet-backdrop:not([hidden]) { animation:fade-in 170ms ease-out; }
+/* A task opening in place: the row eases into its editing colour, the title
+   field fades up, and the date/repeat/list row settles just after. */
+.task-editor.is-opening { animation:fade-in 160ms ease-out; }
+.task-editor.is-opening .task-editor-bar { animation:rise-in 220ms cubic-bezier(.2,.75,.25,1) 40ms both; }
+/* Checking a task draws its tick in, in Tasks and in Today alike. */
+.todo-item.is-completing .task-checkmark::after,
+.today-row.is-completing .task-checkmark::after { animation:tick-in 180ms cubic-bezier(.2,.75,.25,1) both; }
+.today-row.is-completing .task-checkmark::after { content:''; position:absolute; width:5px; height:9px; border:solid white; border-width:0 2px 2px 0; left:6px; top:3px; transform:rotate(45deg); }
+.today-row.is-completing .task-checkmark { background:var(--accent); transform:scale(1.06); }
+.today-row.is-completing .today-row-label { opacity:.55; text-decoration:line-through; }
+/* Switching notes fades the new one in. */
+#notes-content.note-entering { animation:view-enter 160ms cubic-bezier(.2,.75,.25,1); }
+.today-row .today-row-label { transition:opacity 140ms ease, color 140ms ease; }

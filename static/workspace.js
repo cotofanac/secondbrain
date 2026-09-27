@@ -279,6 +279,9 @@ async function openTask(id, options = {}) {
     }
     taskEditor = { id, scope, form, savedText: form.elements.text.value, dirty: false, changed: false };
     attachTaskEditor(taskEditor, row);
+    // Only a tap animates the editor in; re-attaching it after a refresh does not.
+    form.classList.add('is-opening');
+    setTimeout(() => form.classList.remove('is-opening'), 260);
     focusTaskEditor(taskEditor);
 }
 function openTodayTask(id) {
@@ -668,7 +671,7 @@ document.body.addEventListener('htmx:beforeSwap', e => {
 document.body.addEventListener('htmx:beforeRequest', e => {
     const form = e.detail.elt;
     if (form?.getAttribute('hx-post') === '/todos/toggle') {
-        const row = form.closest('.todo-item');
+        const row = form.closest('.todo-item, .today-row');
         if (row) {
             form._toggleDelta = row.classList.contains('done') ? -1 : 1;
             form._toggleProject = row.closest('.project-group');
@@ -709,7 +712,7 @@ function restoreFailedCapture(e) {
 document.body.addEventListener('htmx:responseError', restoreFailedCapture);
 document.body.addEventListener('htmx:sendError', restoreFailedCapture);
 function restoreFailedCompletion(e) {
-    e.detail.elt?.closest('.todo-item')?.classList.remove('is-completing');
+    e.detail.elt?.closest('.todo-item, .today-row')?.classList.remove('is-completing');
 }
 document.body.addEventListener('htmx:responseError', restoreFailedCompletion);
 document.body.addEventListener('htmx:sendError', restoreFailedCompletion);
@@ -762,6 +765,14 @@ document.body.addEventListener('htmx:afterSwap', e => {
     if (id === 'notes-content') {
         initNoteEditor();
         const editor = document.getElementById('note-editor');
+        // Opening another note fades it in; reloading the same note does not.
+        if (editor && noteViewState && noteViewState.id !== editor.dataset.noteId) {
+            const view = e.detail.target;
+            view.classList.remove('note-entering');
+            void view.offsetWidth;
+            view.classList.add('note-entering');
+            setTimeout(() => view.classList.remove('note-entering'), 220);
+        }
         if (editor && document.body.dataset.mode === 'notes')
             setDestination({ view: 'notes', note: editor.dataset.noteId });
         if (editor && noteViewState?.id === editor.dataset.noteId) {
