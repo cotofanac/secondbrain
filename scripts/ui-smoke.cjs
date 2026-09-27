@@ -84,11 +84,12 @@ const shot = name => require('node:path').join(process.env.SCREENSHOT_DIR || req
  await page.locator('#custom-dialog-confirm').click();
  await page.locator('.heading-group').waitFor({state:'detached'});
  await page.locator('[data-project-page]').getByRole('button',{name:'Book practical lessons',exact:true}).waitFor();
- await page.getByRole('button',{name:'Project details',exact:true}).click();
- await page.getByRole('button',{name:'Link note',exact:true}).click();
- await page.getByRole('button',{name:'Quick Notes',exact:true}).waitFor();
+ // The project's own actions sit in its … menu; Complete waits for open tasks.
+ await page.locator('[data-project-page] .project-menu > summary').click();
+ assert.equal(await page.getByRole('button',{name:'Complete project',exact:true}).isDisabled(),true,'project with open tasks can be completed');
+ await page.getByRole('button',{name:'Rename',exact:true}).waitFor();
  await page.screenshot({path:shot('secondbrain-desktop.png'),fullPage:true});
- await page.getByRole('button',{name:'Close details',exact:true}).click();
+ await page.locator('[data-project-page] .project-menu > summary').click();
  // One archive for everything, opened from the sidebar; Back returns to the project.
  await page.locator('.bottom-nav-btn[data-workspace="archive"]').click();
  await page.locator('.archive-kinds button.active').filter({hasText:'Tasks'}).waitFor();

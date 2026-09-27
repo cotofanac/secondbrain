@@ -6,7 +6,7 @@
 {{if eq .Kind "projects"}}
 {{range .Projects}}
 <div class="todo-item archived-item">
- <button type="button" class="todo-text archive-open" data-call="openProjectDetails" data-args='[{{.ID}}]'>{{.Name}}</button>
+ <span class="todo-text">{{.Name}}</span>
  <span class="archived-ago">{{if .Completed}}Completed{{else}}Archived{{end}} · {{.Group.Completed}}/{{.Group.Total}}</span>
  <form hx-post="/projects/action" hx-target="#todo-items" hx-swap="innerHTML" class="todo-action">
   <input type="hidden" name="id" value="{{.ID}}"><input type="hidden" name="return" value="archive">

@@ -170,21 +170,9 @@ func TestProjectArchiveCompletionAndCounts(t *testing.T) {
 	requireOK(t, formRequest(t, handleProjectAction, "/projects/action", url.Values{"id": {"1"}, "action": {"reopen"}}))
 }
 
-func TestProjectNoteLinksAndOrdering(t *testing.T) {
+func TestProjectOrdering(t *testing.T) {
 	setupWorkspaceDB(t)
 	execSQL(t, `INSERT INTO projects(id,name,position) VALUES(1,'Car',0),(2,'Home',1),(3,'Trip',2)`)
-	requireOK(t, formRequest(t, handleProjectNotes, "/projects/notes", url.Values{"project_id": {"1"}, "note_id": {"1"}, "action": {"link"}}))
-	requireOK(t, formRequest(t, handleProjectNotes, "/projects/notes", url.Values{"project_id": {"2"}, "note_id": {"1"}, "action": {"link"}}))
-	requireOK(t, formRequest(t, handleProjectNotes, "/projects/notes", url.Values{"project_id": {"1"}, "note_id": {"1"}, "action": {"unlink"}}))
-	var n int
-	db.QueryRow(`SELECT count(*) FROM notes WHERE id=1`).Scan(&n)
-	if n != 1 {
-		t.Fatal("unlink deleted original note")
-	}
-	db.QueryRow(`SELECT count(*) FROM project_notes WHERE project_id=2`).Scan(&n)
-	if n != 1 {
-		t.Fatal("unlink affected other project")
-	}
 	requireOK(t, formRequest(t, handleProjectAction, "/projects/action", url.Values{"id": {"3"}, "action": {"up"}}))
 	ws, _ := loadWorkspace()
 	if ws.Projects[1].ID != 3 {
@@ -200,7 +188,7 @@ func TestWorkspaceTemplatesAndSearch(t *testing.T) {
 	for _, c := range []struct {
 		path string
 		h    http.HandlerFunc
-	}{{"/", handleIndex}, {"/workspace", handleWorkspace}, {"/task/edit?id=1", handleTaskEdit}, {"/workspace/project?id=1", handleWorkspaceProject}, {"/projects/detail?id=1", handleProjectDetail}, {"/settings", handleSettings}, {"/search?q=Car", handleSearch}} {
+	}{{"/", handleIndex}, {"/workspace", handleWorkspace}, {"/task/edit?id=1", handleTaskEdit}, {"/workspace/project?id=1", handleWorkspaceProject}, {"/settings", handleSettings}, {"/search?q=Car", handleSearch}} {
 		w := httptest.NewRecorder()
 		c.h(w, httptest.NewRequest("GET", c.path, nil))
 		requireOK(t, w)

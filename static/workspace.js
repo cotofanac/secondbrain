@@ -1,5 +1,4 @@
 // State is limited to presentation and unsaved drafts; task truth stays on the server.
-let detailSelection = null;
 let pendingFocus = null;
 let workspaceState = null;
 let noteViewState = null;
@@ -210,25 +209,6 @@ function setDestination(values) {
     const state = { secondbrain: true, ...values };
     if (restoringHistory) history.replaceState(state, '', url);
     else history.pushState(state, '', url);
-}
-// The detail pane now only shows project details, which save on each action.
-function showDetail(url) {
-    const pane = document.getElementById('detail-pane');
-    const opening = pane.hidden;
-    if (pane.dataset.url !== url) {
-        pane.textContent = 'Loading details…';
-        pane.dataset.url = url;
-    }
-    pane.hidden = false;
-    if (opening) {
-        pane.classList.remove('detail-entering');
-        void pane.offsetWidth;
-        pane.classList.add('detail-entering');
-        setTimeout(() => pane.classList.remove('detail-entering'), 220);
-    }
-    pane.dataset.focusAfterLoad = '1';
-    document.querySelector('.task-layout').classList.add('has-detail');
-    return htmx.ajax('GET', url, '#detail-pane').catch(() => {});
 }
 function closePopupMenus() {
     document.querySelectorAll('.row-menu,.app-menu,.capture-options').forEach(d => (d.open = false));
@@ -559,9 +539,7 @@ function showProjectPage(id) {
 }
 async function openProject(id) {
     if (!id) return;
-    const pane = document.getElementById('detail-pane');
     if (isDesktop()) {
-        if (!pane.hidden) closeDetail();
         if (document.querySelector('#todo-items .archive-header')) await refreshWorkspace();
         showProjectPage(id);
         window.scrollTo({ top: 0, behavior: 'auto' });
@@ -577,25 +555,15 @@ async function openProject(id) {
         showWorkspaceContaining(el);
         expandAncestors(el);
         el.open = true;
+        el.scrollIntoView({ block: 'start' });
     }
     setDestination({ view: 'todos', project: id });
-    openProjectDetails(id);
-}
-function openProjectDetails(id) {
-    detailSelection = { kind: 'project', id };
-    showDetail('/projects/detail?id=' + id);
 }
 // A project page's title is not a disclosure: keep it open.
 document.addEventListener('click', e => {
     const summary = e.target.closest?.('[data-project-page] > summary');
     if (summary && isDesktop()) e.preventDefault();
 });
-function closeDetail() {
-    document.getElementById('detail-pane').hidden = true;
-    document.querySelector('.task-layout').classList.remove('has-detail');
-    detailSelection = null;
-    setDestination({ view: 'todos' });
-}
 
 function taskAction(label, onClick) {
     const button = document.createElement('button');
@@ -611,6 +579,7 @@ async function structureCreate(kind, parent) {
     if (name) structureAction(kind, 0, 'create', { name, project_id: parent });
 }
 async function structureRename(kind, id, el) {
+    closePopupMenus();
     const name = await showPrompt('Rename ' + kind, el.dataset.name);
     if (name) structureAction(kind, id, 'rename', { name });
 }
@@ -620,6 +589,7 @@ async function deleteHeading(id, el) {
         structureAction('heading', id, 'delete');
 }
 async function structureAction(kind, id, action, extra = {}) {
+    closePopupMenus();
     await htmx.ajax('POST', kind === 'project' ? '/projects/action' : '/headings/action', {
         target: '#todo-items',
         values: { id, action, ...extra }
@@ -630,7 +600,6 @@ async function structureAction(kind, id, action, extra = {}) {
 // wherever it was opened from.
 let archiveReturn = null;
 function openArchive(kind = 'todo') {
-    if (!document.getElementById('detail-pane').hidden) closeDetail();
     const mode = document.body.dataset.mode || 'todos';
     if (currentWorkspaceSection() !== 'archive' || mode !== 'todos')
         archiveReturn = { mode, workspace: currentWorkspaceSection(), project: document.body.dataset.projectId };
@@ -675,18 +644,6 @@ function routeLocation() {
     else switchMode('today');
 }
 document.body.addEventListener('htmx:beforeSwap', e => {
-    if (e.detail.target.id === 'detail-pane') {
-        const config = e.detail.requestConfig;
-        const pane = document.getElementById('detail-pane');
-        if (
-            config?.verb === 'get' &&
-            pane.dataset.url &&
-            e.detail.xhr.responseURL !== new URL(pane.dataset.url, location.origin).href
-        ) {
-            e.detail.shouldSwap = false;
-            return;
-        }
-    }
     if (e.detail.target.id === 'todo-items') {
         rememberWorkspace();
         const form = e.detail.requestConfig?.elt;
@@ -776,10 +733,7 @@ document.addEventListener('keydown', e => {
 document.body.addEventListener('htmx:beforeSwap', keepTaskEditor);
 document.body.addEventListener('htmx:afterSwap', e => {
     const id = e.detail.target.id;
-    if (id === 'todo-items') {
-        restoreWorkspace();
-        if (detailSelection?.kind === 'project') showDetail('/projects/detail?id=' + detailSelection.id);
-    }
+    if (id === 'todo-items') restoreWorkspace();
     // After the list has reopened its sections and started loading projects.
     restoreTaskEditor();
     const toggleForm = e.detail.requestConfig?.elt;
@@ -811,13 +765,6 @@ document.body.addEventListener('htmx:afterSwap', e => {
         e.detail.target.dataset.loaded = '1';
         restoreSections(e.detail.target);
         restoreCaptureDrafts(e.detail.target);
-    }
-    if (id === 'detail-pane') {
-        const pane = document.getElementById('detail-pane');
-        if (pane.dataset.focusAfterLoad) {
-            delete pane.dataset.focusAfterLoad;
-            pane.focus({ preventScroll: true });
-        }
     }
     if (id === 'notes-content') {
         initNoteEditor();
@@ -862,8 +809,6 @@ document.addEventListener('keydown', e => {
         closeSearch();
         closePopupMenus();
         if (taskEditor) closeTaskEditor();
-        else if (document.body.dataset.mode === 'todos' && !document.getElementById('detail-pane').hidden)
-            closeDetail();
     }
 });
 document.addEventListener('click', e =>
@@ -892,15 +837,4 @@ document.addEventListener('DOMContentLoaded', () => {
     restoringHistory = true;
     routeLocation();
     restoringHistory = false;
-});
-
-document.body.addEventListener('htmx:responseError', e => {
-    if (e.detail.target?.id !== 'detail-pane') return;
-    const pane = document.getElementById('detail-pane');
-    pane.textContent = 'This item is unavailable. It may have been archived.';
-    const close = document.createElement('button');
-    close.textContent = 'Close details';
-    close.className = 'btn';
-    close.onclick = closeDetail;
-    pane.appendChild(close);
 });

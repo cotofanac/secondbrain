@@ -26,8 +26,8 @@ needs one, and let completed work move quietly out of the way. A task can
 repeat daily, weekly, monthly, or yearly: check it off and the next one is
 waiting on its date, which makes routines simply part of your day.
 
-**Projects** for the things that take more than one step. Split them under headings, see real
-progress, and keep the notes behind a project close to the work itself.
+**Projects** for the things that take more than one step. Split them under headings
+and see real progress as you go.
 
 **Groceries** and **Buys** for the lists you come back to. Familiar items are
 remembered, so recurring errands stay effortless instead of becoming clutter.
@@ -40,7 +40,7 @@ stay simple enough that writing remains the point.
 Second Brain feels at home on both a desktop and a phone. The desktop gives
 your work room to breathe: a sidebar with counts for Today, the Inbox and each
 list, every project with its progress, and one Archive for everything put away.
-Each project opens as its own page, with details alongside. Mobile keeps the same structure close at hand with fast entry,
+Each project opens as its own page. Mobile keeps the same structure close at hand with fast entry,
 touch-friendly controls, and compact navigation.
 
 Every interaction is intentionally small. Press Return to capture. Tap a task to

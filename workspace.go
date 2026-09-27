@@ -43,7 +43,6 @@ type Project struct {
 	// whole project, headings included.
 	Group    TaskGroup
 	Headings []Heading
-	Notes    []Note
 }
 type Workspace struct {
 	Tasks, Groceries, Buys     TaskGroup
@@ -256,7 +255,7 @@ func parseList(tx *sql.Tx, raw string) (projectID, headingID int, err error) {
 	return projectID, headingID, nil
 }
 func registerWorkspaceRoutes() {
-	for path, h := range map[string]http.HandlerFunc{"/workspace": handleWorkspace, "/workspace/project": handleWorkspaceProject, "/projects/action": handleProjectAction, "/headings/action": handleHeadingAction, "/task/edit": handleTaskEdit, "/task/save": handleTaskSave, "/projects/detail": handleProjectDetail, "/projects/notes": handleProjectNotes, "/sidebar": handleSidebar, "/archive": handleArchive} {
+	for path, h := range map[string]http.HandlerFunc{"/workspace": handleWorkspace, "/workspace/project": handleWorkspaceProject, "/projects/action": handleProjectAction, "/headings/action": handleHeadingAction, "/task/edit": handleTaskEdit, "/task/save": handleTaskSave, "/sidebar": handleSidebar, "/archive": handleArchive} {
 		http.HandleFunc(path, authMiddleware(h))
 	}
 }
@@ -608,84 +607,4 @@ func handleTaskSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"status": "saved", "revision": revision + 1})
-}
-func handleProjectDetail(w http.ResponseWriter, r *http.Request) {
-	id, _ := strconv.Atoi(r.URL.Query().Get("id"))
-	ws, err := loadWorkspace()
-	if err != nil {
-		http.Error(w, "DB error", 500)
-		return
-	}
-	var project *Project
-	for _, p := range append(ws.Projects, ws.ArchivedProjects...) {
-		if p.ID == id {
-			v := p
-			project = &v
-			break
-		}
-	}
-	if project == nil {
-		http.Error(w, "Project unavailable", 404)
-		return
-	}
-	rows, err := db.Query(`SELECT n.id,n.title,EXISTS(SELECT 1 FROM project_notes pn WHERE pn.note_id=n.id AND pn.project_id=?) FROM notes n WHERE n.archived=0 ORDER BY n.title`, id)
-	if err != nil {
-		http.Error(w, "DB error", 500)
-		return
-	}
-	var available []Note
-	for rows.Next() {
-		var n Note
-		var linked bool
-		if err = rows.Scan(&n.ID, &n.Title, &linked); err != nil {
-			break
-		}
-		if linked {
-			project.Notes = append(project.Notes, n)
-		} else {
-			available = append(available, n)
-		}
-	}
-	if err == nil {
-		err = rows.Err()
-	}
-	rows.Close()
-	if err != nil {
-		http.Error(w, "DB error", 500)
-		return
-	}
-	renderTemplate(w, r, "project-detail.html", struct {
-		Project   *Project
-		Available []Note
-	}{project, available})
-}
-func handleProjectNotes(w http.ResponseWriter, r *http.Request) {
-	if !requirePost(w, r) {
-		return
-	}
-	p, _ := strconv.Atoi(r.FormValue("project_id"))
-	n, _ := strconv.Atoi(r.FormValue("note_id"))
-	var err error
-	switch r.FormValue("action") {
-	case "link":
-		var result sql.Result
-		result, err = db.Exec(`INSERT OR IGNORE INTO project_notes(project_id,note_id) SELECT p.id,n.id FROM projects p,notes n WHERE p.id=? AND n.id=? AND p.archived=0 AND n.archived=0`, p, n)
-		if err == nil {
-			if count, _ := result.RowsAffected(); count == 0 {
-				http.Error(w, "Note or project unavailable, or already linked", 409)
-				return
-			}
-		}
-	case "unlink":
-		_, err = db.Exec(`DELETE FROM project_notes WHERE project_id=? AND note_id=?`, p, n)
-	default:
-		http.Error(w, "Invalid action", 400)
-		return
-	}
-	if err != nil {
-		http.Error(w, "Could not update note link", 500)
-		return
-	}
-	r.URL.RawQuery = "id=" + strconv.Itoa(p)
-	handleProjectDetail(w, r)
 }

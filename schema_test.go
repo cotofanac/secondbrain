@@ -74,7 +74,7 @@ func TestMigrateRefusesOlderDatabases(t *testing.T) {
 	}
 }
 
-// The version 5 tables that migration 6 changes, as that release created them.
+// The version 5 tables that migrations 6 and 7 change, as that release created them.
 var version5Tables = []string{
 	`CREATE TABLE projects (id INTEGER PRIMARY KEY,
 		name TEXT NOT NULL,
@@ -107,6 +107,7 @@ var version5Tables = []string{
 	`CREATE INDEX idx_todos_archive_after ON todos(archive_after)`,
 	`CREATE INDEX idx_todos_repeated_from ON todos(repeated_from)`,
 	`CREATE INDEX idx_stages_project ON stages(project_id,position)`,
+	`CREATE TABLE project_notes(project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,note_id INTEGER NOT NULL,PRIMARY KEY(project_id,note_id))`,
 	`CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY,applied_at TEXT NOT NULL)`,
 	`INSERT INTO schema_migrations VALUES(1,''),(2,''),(3,''),(4,''),(5,'')`,
 }
@@ -189,6 +190,11 @@ func TestMigrateStagesToHeadings(t *testing.T) {
 	var headings, version int
 	conn.QueryRow(`SELECT count(*) FROM headings`).Scan(&headings)
 	conn.QueryRow(`SELECT max(version) FROM schema_migrations`).Scan(&version)
+	var linkTables int
+	conn.QueryRow(`SELECT count(*) FROM sqlite_master WHERE name='project_notes'`).Scan(&linkTables)
+	if linkTables != 0 {
+		t.Error("project_notes survived the migration")
+	}
 	if headings != 1 || version != schemaVersion {
 		t.Fatalf("%d headings at version %d, want 1 at %d", headings, version, schemaVersion)
 	}

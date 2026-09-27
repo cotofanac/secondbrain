@@ -15,7 +15,7 @@ func dbTime(t time.Time) string { return t.UTC().Format(time.RFC3339) }
 const sqlNow = `strftime('%Y-%m-%dT%H:%M:%SZ','now')`
 
 // schemaVersion is the migration number the tables below correspond to.
-const schemaVersion = 6
+const schemaVersion = 7
 
 type tableDef struct{ name, columns string }
 
@@ -57,9 +57,6 @@ var schemaTables = []tableDef{
 		revision INTEGER NOT NULL DEFAULT 1,
 		created_at TEXT NOT NULL DEFAULT (` + sqlNow + `),
 		updated_at TEXT NOT NULL DEFAULT (` + sqlNow + `)`},
-	{"project_notes", `project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-		note_id INTEGER NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
-		PRIMARY KEY(project_id,note_id)`},
 	{"sessions", `token TEXT PRIMARY KEY,
 		expires_at TEXT NOT NULL,
 		last_seen TEXT NOT NULL`},
@@ -113,6 +110,8 @@ var migrations = map[int][]string{
 		`CREATE INDEX idx_todos_project_heading ON todos(project_id,heading_id,archived)`,
 		`CREATE INDEX idx_headings_project ON headings(project_id,position)`,
 	},
+	// Linking notes to projects was retired; nothing links them any more.
+	7: {`DROP TABLE project_notes`},
 }
 
 // migrate creates a new database from the schema, or brings an existing one

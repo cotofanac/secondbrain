@@ -5,10 +5,10 @@
 // data-args stand for the element, its value and its form. Only functions
 // listed here can be called.
 const CALLABLE = new Set([
-    'chooseMobileUtility', 'chooseMobileWorkspace', 'closeDetail', 'closeNotePicker', 'closeSearch', 'createNote',
+    'chooseMobileUtility', 'chooseMobileWorkspace', 'closeNotePicker', 'closeSearch', 'createNote',
     'archiveNote', 'closeTaskEditor', 'deleteHeading', 'disablePush', 'enablePush', 'filterNotes', 'hideArchive',
     'leaveSecondaryView', 'openArchive', 'openMobileWorkspaceSwitcher',
-    'openNoteResult', 'openProject', 'openProjectDetails', 'openProjectResult', 'openSearch', 'openSettings',
+    'openNoteResult', 'openProject', 'openProjectResult', 'openSearch', 'openSettings',
     'openTask', 'openToday', 'openTodayTask', 'openTodoResult', 'renameNote',
     'selectNote', 'showNotesArchive', 'structureAction', 'structureCreate', 'structureRename',
     'switchMode', 'switchWorkspaceSection', 'testPush', 'toggleNotePicker'
@@ -149,8 +149,6 @@ document.addEventListener('keydown', function(e) {
 
 function switchWorkspaceSection(section, options = {}) {
     if (!['tasks', 'groceries', 'shopping'].includes(section)) section = 'tasks';
-    const pane = document.getElementById('detail-pane');
-    if (pane && !pane.hidden && typeof closeDetail === 'function') closeDetail();
     document.body.dataset.workspaceSection = section;
     try { localStorage.setItem('desktop-workspace', section); } catch (_) {}
     if (document.querySelector('#todo-items .archive-header')) refreshWorkspace();

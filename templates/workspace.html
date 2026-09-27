@@ -26,7 +26,14 @@
 </details>
 {{end}}
 {{define "project-body"}}
-<div class="section-footer"><button class="action-with-icon" data-call="openProjectDetails" data-args='[{{.ID}}]'>{{template "icon-edit"}}<span>Project details</span></button><button class="action-with-icon" data-call="structureCreate" data-args='["heading",{{.ID}}]'>{{template "icon-plus"}}<span>Heading</span></button></div>
+<div class="section-footer project-footer"><button class="action-with-icon" data-call="structureCreate" data-args='["heading",{{.ID}}]'>{{template "icon-plus"}}<span>Heading</span></button>
+ <details class="row-menu project-menu"><summary class="icon-button" aria-label="Actions for project {{.Name}}">{{template "icon-more"}}</summary><div class="menu-panel">
+  <button type="button" data-call="structureRename" data-args='["project",{{.ID}},"$el"]' data-name="{{.Name}}">Rename</button>
+  <button type="button" data-call="structureAction" data-args='["project",{{.ID}},"up"]'>Move up</button>
+  <button type="button" data-call="structureAction" data-args='["project",{{.ID}},"down"]'>Move down</button>
+  <button type="button" data-call="structureAction" data-args='["project",{{.ID}},"complete"]' {{if ne .Group.Completed .Group.Total}}disabled title="Complete or archive the remaining tasks first"{{end}}>Complete project</button>
+  <button type="button" data-call="structureAction" data-args='["project",{{.ID}},"archive"]'>Archive project</button>
+ </div></details></div>
 {{template "task-group" .Group}}
 {{range .Headings}}
 <section class="heading-group" id="heading-{{.ID}}" aria-labelledby="heading-title-{{.ID}}">
