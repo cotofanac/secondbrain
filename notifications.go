@@ -167,7 +167,7 @@ func handlePushTest(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, 404, "Enable this device before sending a test")
 		return
 	}
-	result := deliverPush(endpoint, p256dh, auth, pushPayload{Title: "SecondBrain", Body: "This device can receive notifications.", Tag: "test", URL: "/?view=settings"})
+	result := deliverPush(endpoint, p256dh, auth, pushPayload{Title: "SecondBrain", Body: "This device can receive notifications.", Tag: "test", URL: "/?view=today"})
 	status := "failed"
 	if result.Accepted {
 		status = "accepted"

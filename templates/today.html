@@ -39,7 +39,12 @@
 
  {{if .Upcoming}}<section class="today-section today-upcoming"><h2>Next <span>7 days</span></h2>{{range .Upcoming}}{{template "today-task" .}}{{end}}</section>{{end}}
 
- <footer class="today-footer"><button type="button" class="text-action action-with-icon" data-call="openSettings">{{template "icon-settings"}}<span>Reminders &amp; notifications</span></button></footer>
+ {{if .Reminder}}<footer class="today-footer today-reminder">
+  <p class="today-reminder-line">{{template "icon-bell"}}<span>Reminder at {{.Reminder}} when tasks are due</span></p>
+  <p id="push-status" class="today-reminder-status" role="status"></p>
+  <p id="push-last-result" class="today-reminder-status"></p>
+  <div class="today-reminder-actions"><button type="button" class="text-action" id="push-enable" data-call="enablePush" disabled>Enable on this device</button><button type="button" class="text-action" id="push-test" data-call="testPush" hidden>Send test</button><button type="button" class="text-action" id="push-disable" data-call="disablePush" hidden>Turn off</button></div>
+ </footer>{{end}}
 </div>
 
 {{define "today-task"}}

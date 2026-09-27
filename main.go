@@ -234,6 +234,7 @@ func main() {
 		log.Printf("Inactivity logout set to %d minutes", inactivityTimeoutMinutes)
 	}
 
+	configureCalendar()
 	configurePushReminders()
 	configureTrustedProxies()
 
@@ -242,7 +243,6 @@ func main() {
 	defer db.Close()
 
 	initPush()
-	initScheduleSettings()
 
 	funcMap := template.FuncMap{
 		"formatDate": formatDueDate,

@@ -2,9 +2,10 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
 	"log"
 	"net/http"
+	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -12,65 +13,37 @@ import (
 	_ "time/tzdata"
 )
 
+// calendarZone is the zone "today" is counted in. It comes from TZ, set once
+// in the deployment; tests swap it.
 var calendarZone atomic.Pointer[time.Location]
+
+const defaultZone = "Europe/Bucharest"
 
 func appLocation() *time.Location {
 	if loc := calendarZone.Load(); loc != nil {
 		return loc
 	}
-	loc, _ := time.LoadLocation("Europe/Bucharest")
+	loc, _ := time.LoadLocation(defaultZone)
 	return loc
 }
 func appNow() time.Time { return time.Now().In(appLocation()) }
 
-type ScheduleSettings struct {
-	TaskEnabled        bool
-	TaskTime, Timezone string
-}
-
-func initScheduleSettings() {
-	defaults := map[string]string{"task_enabled": strconv.FormatBool(taskReminder.enabled), "task_time": fmt.Sprintf("%02d:%02d", taskReminder.hour, taskReminder.min), "timezone": "Europe/Bucharest", "queued_task": ""}
-	for k, v := range defaults {
-		if _, err := db.Exec(`INSERT OR IGNORE INTO settings(key,value) VALUES(?,?)`, k, v); err != nil {
-			log.Fatalf("Initialize schedules: %v", err)
-		}
+// configureCalendar reads TZ (a named zone such as Europe/London); unset
+// means Europe/Bucharest. Call from main() before the database opens.
+func configureCalendar() {
+	name := strings.TrimSpace(os.Getenv("TZ"))
+	if name == "" || name == "Local" {
+		name = defaultZone
 	}
-	settings, err := loadSchedule()
+	loc, err := time.LoadLocation(name)
 	if err != nil {
-		log.Fatal(err)
-	}
-	loc, err := time.LoadLocation(settings.Timezone)
-	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("TZ: %v", err)
 	}
 	calendarZone.Store(loc)
+	log.Printf("Calendar time zone: %s", loc)
 }
-func loadSchedule() (ScheduleSettings, error) {
-	var s ScheduleSettings
-	values := map[string]string{}
-	rows, err := db.Query(`SELECT key,value FROM settings WHERE key IN ('task_enabled','task_time','timezone')`)
-	if err != nil {
-		return s, err
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var k, v string
-		if err = rows.Scan(&k, &v); err != nil {
-			return s, err
-		}
-		values[k] = v
-	}
-	if err = rows.Err(); err != nil {
-		return s, err
-	}
-	s.TaskEnabled = values["task_enabled"] == "true"
-	s.TaskTime = values["task_time"]
-	s.Timezone = values["timezone"]
-	return s, nil
-}
+
 func registerScheduleRoutes() {
-	http.HandleFunc("/settings", authMiddleware(handleSettings))
-	http.HandleFunc("/settings/save", authMiddleware(handleSaveSettings))
 	http.HandleFunc("/today", authMiddleware(handleToday))
 	http.HandleFunc("/today/reschedule", authMiddleware(handleTodayReschedule))
 	http.HandleFunc("/push/status", authMiddleware(handlePushStatus))
@@ -87,6 +60,8 @@ type TodayView struct {
 	Overdue, Due, Upcoming  []TodayItem
 	Suggestions             []TodayItem
 	CompletedToday, DueLeft int
+	// Reminder is the daily reminder time ("09:00"), empty when it is off.
+	Reminder string
 }
 
 func scanTodayItems(query string, args ...any) ([]TodayItem, error) {
@@ -148,6 +123,9 @@ func loadToday(now time.Time) (TodayView, error) {
 		return view, err
 	}
 	view.DueLeft = len(view.Overdue) + len(view.Due)
+	if taskReminder.enabled {
+		view.Reminder = reminderDesc(taskReminder)
+	}
 	return view, nil
 }
 
@@ -192,57 +170,6 @@ func handleTodayReschedule(w http.ResponseWriter, r *http.Request) {
 	hxTrigger(w, "sbWorkspaceChanged", map[string]any{"message": "Task scheduled"})
 	handleToday(w, r)
 }
-func handleSettings(w http.ResponseWriter, r *http.Request) {
-	s, err := loadSchedule()
-	if err != nil {
-		http.Error(w, "Could not load settings", 500)
-		return
-	}
-	renderTemplate(w, r, "settings.html", s)
-}
-func handleSaveSettings(w http.ResponseWriter, r *http.Request) {
-	if !requirePost(w, r) {
-		return
-	}
-	zone := strings.TrimSpace(r.FormValue("timezone"))
-	if zone == "" || zone == "Local" {
-		http.Error(w, "Enter a named time zone, for example Europe/Bucharest", 400)
-		return
-	}
-	loc, err := time.LoadLocation(zone)
-	if err != nil {
-		http.Error(w, "Choose a valid time zone, for example Europe/Bucharest", 400)
-		return
-	}
-	vals := map[string]string{"timezone": loc.String()}
-	rt, err := parseReminderTime(r.FormValue("task_time"), reminderTime{})
-	if err != nil || !rt.enabled {
-		http.Error(w, "Enter a valid reminder time", 400)
-		return
-	}
-	vals["task_time"] = fmt.Sprintf("%02d:%02d", rt.hour, rt.min)
-	vals["task_enabled"] = strconv.FormatBool(r.FormValue("task_enabled") == "on")
-	tx, err := db.Begin()
-	if err != nil {
-		http.Error(w, "DB error", 500)
-		return
-	}
-	defer tx.Rollback()
-	for k, v := range vals {
-		if _, err = tx.Exec(`INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, k, v); err != nil {
-			http.Error(w, "Could not save settings", 500)
-			return
-		}
-	}
-	if err = tx.Commit(); err != nil {
-		http.Error(w, "Could not save settings", 500)
-		return
-	}
-	calendarZone.Store(loc)
-	hxTrigger(w, "sbNotice", map[string]any{"message": "Settings saved"})
-	handleSettings(w, r)
-}
-
 func queueNotification(event string, payload pushPayload, now, expires time.Time) error {
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -266,40 +193,38 @@ func pruneDeliveries(now time.Time) (int64, error) {
 	return res.RowsAffected()
 }
 
-// Tick receives its clock explicitly. Persistence prevents duplicates across restarts.
+// runScheduleTick queues the day's reminder once its time has come and sends
+// whatever is waiting. It receives its clock explicitly; the queued_task
+// setting keeps a restart from sending the same day twice.
 func runScheduleTick(now time.Time) error {
-	settings, err := loadSchedule()
-	if err != nil {
-		return err
-	}
-	loc, err := time.LoadLocation(settings.Timezone)
-	if err != nil {
-		return err
-	}
-	now = now.In(loc)
+	now = now.In(appLocation())
 	today := now.Format("2006-01-02")
-	expires := time.Date(now.Year(), now.Month(), now.Day()+1, 0, 0, 0, 0, loc)
-	rt, err := parseReminderTime(settings.TaskTime, reminderTime{})
-	if err != nil {
-		return err
-	}
-	rt.enabled = settings.TaskEnabled
-	if shouldSendReminder(rt, now, "") && getSetting("queued_task") != today {
+	if shouldSendReminder(taskReminder, now, getSetting("queued_task")) {
 		tasks, err := dueTodayTasks(now)
 		if err != nil {
 			return err
 		}
-		if len(tasks) > 0 {
+		// The day is settled at the reminder time either way, so a task added
+		// later that day never sets off a late reminder. Nothing due stays silent.
+		if len(tasks) == 0 {
+			log.Printf("Reminder %s: nothing due, not sent", today)
+		} else {
 			payload := pushPayload{Title: "Tasks due", Body: taskReminderBody(tasks), Tag: "tasks", URL: "/?view=today"}
+			expires := time.Date(now.Year(), now.Month(), now.Day()+1, 0, 0, 0, 0, now.Location())
 			if err = queueNotification("task:"+today, payload, now, expires); err != nil {
 				return err
 			}
-			setSetting("queued_task", today)
+			var devices int
+			if err = db.QueryRow(`SELECT count(*) FROM push_subscriptions`).Scan(&devices); err != nil {
+				return err
+			}
+			log.Printf("Reminder %s: %d task(s) due, queued for %d device(s)", today, len(tasks), devices)
 		}
+		setSetting("queued_task", today)
 	}
-	return processDeliveries(now, settings)
+	return processDeliveries(now)
 }
-func processDeliveries(now time.Time, settings ScheduleSettings) error {
+func processDeliveries(now time.Time) error {
 	rows, err := db.Query(`SELECT d.endpoint,d.event_key,d.payload,d.attempts,d.expires_at,s.p256dh,s.auth FROM push_deliveries d JOIN push_subscriptions s ON s.endpoint=d.endpoint WHERE d.status='pending' AND d.next_attempt<=? ORDER BY d.next_attempt LIMIT 50`, now.UTC().Format(time.RFC3339))
 	if err != nil {
 		return err
@@ -325,7 +250,7 @@ func processDeliveries(now time.Time, settings ScheduleSettings) error {
 	}
 	for _, d := range ds {
 		// Only task reminders remain; anything else still queued is skipped.
-		enabled := strings.HasPrefix(d.Key, "task:") && settings.TaskEnabled
+		enabled := strings.HasPrefix(d.Key, "task:") && taskReminder.enabled
 		expiry, _ := time.Parse(time.RFC3339, d.Expires)
 		if !enabled || !now.Before(expiry) {
 			_, err = db.Exec(`UPDATE push_deliveries SET status='skipped',result='Disabled or expired' WHERE endpoint=? AND event_key=?`, d.Endpoint, d.Key)
@@ -345,6 +270,7 @@ func processDeliveries(now time.Time, settings ScheduleSettings) error {
 		} else if result.Retry && d.Attempts < 2 {
 			status = "pending"
 		}
+		log.Printf("Reminder delivery to %s: %s (%s)", pushHost(d.Endpoint), status, result.Message)
 		delay := time.Minute
 		if d.Attempts > 0 {
 			delay = 5 * time.Minute
@@ -355,4 +281,13 @@ func processDeliveries(now time.Time, settings ScheduleSettings) error {
 		}
 	}
 	return nil
+}
+
+// pushHost names a device's push service (Apple, Google, Mozilla) for the log
+// without writing its full, secret subscription URL there.
+func pushHost(endpoint string) string {
+	if u, err := url.Parse(endpoint); err == nil && u.Host != "" {
+		return u.Host
+	}
+	return "unknown push service"
 }

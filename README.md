@@ -56,7 +56,9 @@ from unscheduled work, and the next seven days into one calm, actionable place.
 Task lists remain available as one continuous, quickly scannable page on mobile.
 
 Due dates highlight what needs attention without making everything feel urgent.
-An optional daily reminder brings back tasks due today.
+An optional daily reminder, at the time set in your compose file, lists the
+tasks due today; on days with nothing due it stays quiet. Each device turns it
+on from the bottom of Today.
 
 The “What next” section offers a few unscheduled tasks with a plain explanation
 of where each came from. One tap can bring a suggestion into Today, complete it,
@@ -87,6 +89,7 @@ Create a `.env` file with your own eight-digit passcode:
 ```dotenv
 PASSCODE=12345678
 TZ=Europe/Bucharest
+TASK_REMINDER_TIME=09:00
 ```
 
 Then start Second Brain:

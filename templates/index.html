@@ -16,7 +16,6 @@
     <div id="app">
     <!-- Top nav: mode switcher -->
     <header class="topbar" id="topbar">
-        <button type="button" class="topbar-back icon-button" id="topbar-back" data-call="leaveSecondaryView" aria-label="Back" hidden>{{template "icon-back"}}</button>
         <button type="button" class="topbar-title workspace-switcher can-switch-workspace" id="topbar-title" data-call="openMobileWorkspaceSwitcher" aria-label="Choose destination, current view Today" aria-haspopup="dialog">Today</button>
         <button type="button" class="topbar-stat" id="topbar-stat" data-call="openToday" aria-label="Open Today"></button>
         <button class="header-action icon-button" data-call="openSearch" aria-label="Search">{{template "icon-search"}}</button>
@@ -40,7 +39,6 @@
 
     <main id="todos-view" class="view"><div class="task-layout"><div id="todo-items">{{template "workspace.html" .Workspace}}</div></div>
     <datalist id="grocery-suggestions">{{range .GrocerySuggestions}}<option value="{{.}}">{{end}}</datalist><datalist id="shopping-suggestions">{{range .ShoppingSuggestions}}<option value="{{.}}">{{end}}</datalist></main>
-    <main id="settings-view" class="view"><div id="settings-content"></div></main>
     <main id="today-view" class="view active"><div id="today-content">{{template "today.html" .Today}}</div></main>
 
     <!-- Notes view -->
@@ -89,7 +87,7 @@
             </div>
             <div class="mobile-workspace-options mobile-sheet-secondary">
                 <button type="button" data-mode-option="archive" data-call="chooseMobileUtility" data-args='["archive"]'>{{template "icon-archive"}}<span>Archive</span><span class="sheet-count" aria-hidden="true"></span>{{template "icon-check"}}</button>
-                <button type="button" data-mode-option="settings" data-call="chooseMobileUtility" data-args='["settings"]'>{{template "icon-settings"}}<span>Reminders &amp; notifications</span><span class="sheet-count" aria-hidden="true"></span>{{template "icon-check"}}</button>
+                <button type="button" data-call="doLogout">{{template "icon-logout"}}<span>Log out</span><span class="sheet-count" aria-hidden="true"></span>{{template "icon-check"}}</button>
             </div>
         </div>
     </div>
@@ -133,7 +131,7 @@
         </button>
         <div class="sidebar-footer sidebar-only">
             <button type="button" class="sidebar-link" data-call="structureCreate" data-args='["project",0]'>{{template "icon-plus"}}<span>New project</span></button>
-            <button type="button" class="icon-button sidebar-settings" data-mode="settings" data-call="openSettings" aria-label="Reminders &amp; notifications" title="Reminders &amp; notifications">{{template "icon-settings"}}</button>
+            <button type="button" class="icon-button sidebar-logout" data-call="doLogout" aria-label="Log out" title="Log out">{{template "icon-logout"}}</button>
         </div>
     </nav>
 

@@ -29,7 +29,7 @@ func setupWorkspaceDB(t *testing.T) {
 	zone := calendarZone.Load()
 	t.Setenv("DATA_DIR", t.TempDir())
 	initDB()
-	initScheduleSettings()
+	configureCalendar()
 	setupTestTemplates(t)
 	t.Cleanup(func() { db.Close(); db = previous; calendarZone.Store(zone) })
 }
@@ -188,7 +188,7 @@ func TestWorkspaceTemplatesAndSearch(t *testing.T) {
 	for _, c := range []struct {
 		path string
 		h    http.HandlerFunc
-	}{{"/", handleIndex}, {"/workspace", handleWorkspace}, {"/task/edit?id=1", handleTaskEdit}, {"/workspace/project?id=1", handleWorkspaceProject}, {"/settings", handleSettings}, {"/search?q=Car", handleSearch}} {
+	}{{"/", handleIndex}, {"/workspace", handleWorkspace}, {"/task/edit?id=1", handleTaskEdit}, {"/workspace/project?id=1", handleWorkspaceProject}, {"/search?q=Car", handleSearch}} {
 		w := httptest.NewRecorder()
 		c.h(w, httptest.NewRequest("GET", c.path, nil))
 		requireOK(t, w)
@@ -278,12 +278,12 @@ func TestDeliveryRetriesArePerDeviceAndBounded(t *testing.T) {
 		return PushResult{Retry: true, Message: "temporary failure"}
 	}
 	now := date("2026-09-13")
-	s := ScheduleSettings{TaskEnabled: true}
+
 	if err := queueNotification("task:2026-09-13", pushPayload{Title: "test"}, now, now.AddDate(0, 0, 1)); err != nil {
 		t.Fatal(err)
 	}
 	for _, after := range []time.Duration{0, time.Minute, 6 * time.Minute, 15 * time.Minute} {
-		if err := processDeliveries(now.Add(after), s); err != nil {
+		if err := processDeliveries(now.Add(after)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -363,7 +363,7 @@ func TestPushTestTargetsCurrentDeviceAndAuth(t *testing.T) {
 	}
 }
 
-func TestDisabledExpiredDeliveryAndSettings(t *testing.T) {
+func TestDisabledAndExpiredDeliveriesAreSkipped(t *testing.T) {
 	setupWorkspaceDB(t)
 	old := deliverPush
 	t.Cleanup(func() { deliverPush = old })
@@ -380,24 +380,11 @@ func TestDisabledExpiredDeliveryAndSettings(t *testing.T) {
 	if err := queueNotification("habit:disabled", pushPayload{}, now, now.Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
-	if err := processDeliveries(now, ScheduleSettings{TaskEnabled: true}); err != nil {
+	if err := processDeliveries(now); err != nil {
 		t.Fatal(err)
 	}
 	if calls != 0 {
 		t.Fatal("sent disabled or expired notification")
-	}
-	bad := formRequest(t, handleSaveSettings, "/settings/save", url.Values{"timezone": {"Not/AZone"}})
-	if bad.Code != 400 {
-		t.Fatal("invalid timezone accepted")
-	}
-	before, _ := loadSchedule()
-	if before.Timezone != "Europe/Bucharest" {
-		t.Fatal("invalid save altered timezone")
-	}
-	good := formRequest(t, handleSaveSettings, "/settings/save", url.Values{"timezone": {"Europe/London"}, "task_time": {"10:00"}, "task_enabled": {"on"}})
-	requireOK(t, good)
-	if appLocation().String() != "Europe/London" {
-		t.Fatal("shared calendar timezone was not updated")
 	}
 }
 
@@ -844,5 +831,52 @@ func TestNoteListRecentFirst(t *testing.T) {
 	requireOK(t, w)
 	if !strings.Contains(w.Body.String(), `<span class="note-updated">Edited`) {
 		t.Fatal("note page lacks its edited line")
+	}
+}
+
+func TestDailyReminderIsQueuedOnceAtItsTime(t *testing.T) {
+	setupWorkspaceDB(t)
+	oldDeliver, oldReminder := deliverPush, taskReminder
+	t.Cleanup(func() { deliverPush, taskReminder = oldDeliver, oldReminder })
+	sent := 0
+	deliverPush = func(endpoint, p, a string, payload pushPayload) PushResult {
+		sent++
+		return PushResult{Accepted: true, Message: "accepted"}
+	}
+	taskReminder = reminderTime{hour: 9, min: 30, enabled: true}
+	execSQL(t, `INSERT INTO push_subscriptions(endpoint,p256dh,auth) VALUES('https://push.example/a','p','a')`)
+	at := func(day, clock string) time.Time {
+		tm, err := time.ParseInLocation("2006-01-02 15:04", day+" "+clock, appLocation())
+		if err != nil {
+			t.Fatal(err)
+		}
+		return tm
+	}
+	tick := func(tm time.Time) {
+		t.Helper()
+		if err := runScheduleTick(tm); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Nothing due: the day passes silently, and a task added later that day
+	// does not set off a late reminder.
+	tick(at("2026-09-13", "09:30"))
+	execSQL(t, `INSERT INTO todos(category,text,due_date) VALUES('todo','Pay rent','2026-09-13')`)
+	tick(at("2026-09-13", "12:00"))
+	if sent != 0 {
+		t.Fatalf("sent %d reminders on a day with nothing due at reminder time", sent)
+	}
+	// Next day the task is overdue: nothing before the time, then exactly one.
+	tick(at("2026-09-14", "09:29"))
+	tick(at("2026-09-14", "09:30"))
+	tick(at("2026-09-14", "09:31"))
+	if sent != 1 {
+		t.Fatalf("sent %d reminders, want 1", sent)
+	}
+	// Turned off in the deployment: nothing is queued or sent.
+	taskReminder = reminderTime{}
+	tick(at("2026-09-15", "10:00"))
+	if sent != 1 {
+		t.Fatal("reminder sent while turned off")
 	}
 }

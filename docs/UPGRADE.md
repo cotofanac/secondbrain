@@ -1,5 +1,13 @@
 # Database upgrade notes
 
+## Migrations 6–8: headings, no note links, reminders from the deployment (2026-09)
+
+Before migrating, the app copies the database next to itself as `secondbrain.db.v<old version>-<UTC time>`. Restore that copy together with the older image to roll back; older images cannot run on the migrated database.
+
+- **6:** stages become headings. Tasks under an archived stage are archived themselves (restorable from the Archive, at the top of their project); the stage archive flag is dropped and `todos.stage_id` becomes `heading_id`.
+- **7:** linking notes to projects is retired and `project_notes` is dropped. Notes are unchanged.
+- **8:** the reminder settings saved by the old settings screen (`task_time`, `task_enabled`, `timezone`) are removed. The reminder time now comes only from `TASK_REMINDER_TIME` (default `09:00`, or `off`) and the calendar zone only from `TZ` (default `Europe/Bucharest`). Set both in your compose file if the defaults are not what you want; changes apply on restart.
+
 ## Migration 5: clean database format (2026-09)
 
 On first startup this version rebuilds every table in its final shape and copies the rows across. It first writes `secondbrain-before-v5.db` to the backup folder (`BACKUP_DIR`, default `backups/` next to the database) and runs the rebuild in one transaction that checks row counts, timestamps and references before committing.
@@ -61,9 +69,9 @@ No live database, deployment, image publication, or repository push was performe
 
 ## Schedule and PWA changes
 
-On first startup, existing `TASK_REMINDER_TIME` and `HABIT_REMINDER_TIME` values seed the shared reminder schedule. After initialization, the saved schedule under Today → Reminders & notifications is authoritative; changing these environment variables does not overwrite saved preferences. Existing daily sent markers are retained to avoid duplicate reminders on migration day.
+_Superseded by migration 8: the reminder time and calendar zone now come only from `TASK_REMINDER_TIME` and `TZ`._
 
-The shared calendar time zone defaults to Europe/Bucharest and is editable under Today → Reminders & notifications. It determines due-date comparisons, habit days, and daily reminder times. Scheduled weekly reviews are retired; existing saved reviews remain readable from their old links and their database rows are preserved.
+The shared calendar time zone (`TZ`, default Europe/Bucharest) determines due-date comparisons, habit days, and daily reminder times. Scheduled weekly reviews are retired; existing saved reviews remain readable from their old links and their database rows are preserved.
 
 Each device opts into delivery separately. Subscription registration is confirmed by the server. Revoked subscriptions are removed and remembered by an endpoint hash in settings, so resuming the app cannot silently re-register a revoked endpoint. Failed transient deliveries retry at most twice, after one and then five minutes; successful devices are not retried. Queued daily delivery attempts expire at the next local midnight. Legacy queued weekly deliveries are skipped. Server acceptance cannot establish that an Apple device actually displayed a banner.
 

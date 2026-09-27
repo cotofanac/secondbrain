@@ -135,11 +135,12 @@ const shot = name => require('node:path').join(process.env.SCREENSHOT_DIR || req
  assert.equal(await page.locator('#section-groceries').isVisible(),true,'mobile workspace selection did not change');
  await page.locator('#topbar-title').click();await page.locator('[data-workspace-option="tasks"]').click();
  await page.locator('#topbar-stat').click();await page.locator('#today-content .today-heading').waitFor();
- await page.getByRole('button',{name:'Reminders & notifications',exact:true}).click();
- assert.equal(await page.evaluate(()=>document.body.dataset.mode),'settings','notifications did not open');
- assert.equal(await page.locator('#topbar-back').isVisible(),true,'notifications has no mobile return control');
- await page.locator('#topbar-back').click();
- assert.equal(await page.evaluate(()=>document.body.dataset.mode),'today','notifications back did not return to Today');
+ // Today's footer says when the daily reminder goes out; there is no settings screen.
+ assert.match(await page.locator('#today-content .today-reminder-line').textContent(),/Reminder at \d\d:\d\d when tasks are due/);
+ await page.locator('#push-status').filter({hasText:/\S/}).waitFor();
+ await page.locator('#topbar-title').click();
+ assert.equal(await page.locator('#mobile-workspace-menu').getByRole('button',{name:'Log out',exact:true}).isVisible(),true,'Go-to sheet has no Log out');
+ await page.keyboard.press('Escape');
  await page.locator('#topbar-title').click();await page.locator('#mobile-workspace-menu').getByRole('button',{name:'Today',exact:true}).click();
  assert.equal(await page.evaluate(()=>document.body.dataset.mode),'today','Today did not open');
  await page.locator('#today-content .today-heading').waitFor();
@@ -191,10 +192,6 @@ const shot = name => require('node:path').join(process.env.SCREENSHOT_DIR || req
  await page.waitForFunction(()=>!document.getElementById('note-editor').dataset.dirty);
  assert.equal(await page.locator('#note-editor').inputValue(),'Newer note revision');
  await page.evaluate(()=>{window.fetch=window.smokeOriginalFetch;delete window.smokeOriginalFetch;delete window.smokeReleaseNote;});
- await page.evaluate(()=>openSettings());
- await page.locator('#schedule-form').waitFor();
- await page.locator('[name=task_enabled]').check();await page.getByRole('button',{name:'Save reminders',exact:true}).click();
- await page.waitForTimeout(200);assert.equal(await page.locator('[name=task_enabled]').isChecked(),true);
  await page.evaluate(()=>openToday());await page.getByRole('heading',{name:'Today',exact:true}).waitFor();
  // Root service worker must become ready, unlike the old /static/ scope.
  const scope=await page.evaluate(async()=> (await navigator.serviceWorker.ready).scope);assert.equal(scope,base+'/');
@@ -214,5 +211,5 @@ const shot = name => require('node:path').join(process.env.SCREENSHOT_DIR || req
  await page.evaluate(()=>doLogout());await page.waitForURL(url=>url.pathname==='/login');
  assert.equal(await page.evaluate(()=>caches.has('secondbrain-page')),false,'offline copy survived logout');
  assert.deepEqual(errors,[],'browser errors');
- await browser.close();console.log('UI smoke passed: Today, projects, headings, in-place task editing, completion, drafts, notes, notifications, root worker, offline copy, six viewport widths.');
+ await browser.close();console.log('UI smoke passed: Today, projects, headings, in-place task editing, completion, drafts, notes, reminder line, root worker, offline copy, six viewport widths.');
 })().catch(error=>{console.error(error);process.exit(1)});

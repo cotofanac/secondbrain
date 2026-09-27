@@ -74,7 +74,7 @@ func TestMigrateRefusesOlderDatabases(t *testing.T) {
 	}
 }
 
-// The version 5 tables that migrations 6 and 7 change, as that release created them.
+// The version 5 tables that migrations 6 to 8 change, as that release created them.
 var version5Tables = []string{
 	`CREATE TABLE projects (id INTEGER PRIMARY KEY,
 		name TEXT NOT NULL,
@@ -108,6 +108,8 @@ var version5Tables = []string{
 	`CREATE INDEX idx_todos_repeated_from ON todos(repeated_from)`,
 	`CREATE INDEX idx_stages_project ON stages(project_id,position)`,
 	`CREATE TABLE project_notes(project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,note_id INTEGER NOT NULL,PRIMARY KEY(project_id,note_id))`,
+	`CREATE TABLE settings(key TEXT PRIMARY KEY,value TEXT NOT NULL)`,
+	`INSERT INTO settings VALUES('task_time','08:00'),('task_enabled','true'),('timezone','Europe/London'),('vapid_public_key','k')`,
 	`CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY,applied_at TEXT NOT NULL)`,
 	`INSERT INTO schema_migrations VALUES(1,''),(2,''),(3,''),(4,''),(5,'')`,
 }
@@ -153,7 +155,7 @@ func tableShape(t *testing.T, conn *sql.DB, table string) string {
 	return strings.Join(shape, "\n") + "\nFK " + strings.Join(fks, ",") + "\nIDX " + strings.Join(indexes, ",")
 }
 
-func TestMigrateStagesToHeadings(t *testing.T) {
+func TestMigrateFromVersion5(t *testing.T) {
 	dir := t.TempDir()
 	conn := openTestDB(t, filepath.Join(dir, "v5.db"))
 	for _, q := range version5Tables {
@@ -190,6 +192,12 @@ func TestMigrateStagesToHeadings(t *testing.T) {
 	var headings, version int
 	conn.QueryRow(`SELECT count(*) FROM headings`).Scan(&headings)
 	conn.QueryRow(`SELECT max(version) FROM schema_migrations`).Scan(&version)
+	var staleSettings, keptSettings int
+	conn.QueryRow(`SELECT count(*) FROM settings WHERE key IN ('task_time','task_enabled','timezone')`).Scan(&staleSettings)
+	conn.QueryRow(`SELECT count(*) FROM settings WHERE key='vapid_public_key'`).Scan(&keptSettings)
+	if staleSettings != 0 || keptSettings != 1 {
+		t.Errorf("settings after migration: %d stale, %d kept, want 0 and 1", staleSettings, keptSettings)
+	}
 	var linkTables int
 	conn.QueryRow(`SELECT count(*) FROM sqlite_master WHERE name='project_notes'`).Scan(&linkTables)
 	if linkTables != 0 {

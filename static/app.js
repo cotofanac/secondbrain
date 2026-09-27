@@ -7,8 +7,8 @@
 const CALLABLE = new Set([
     'chooseMobileUtility', 'chooseMobileWorkspace', 'closeNotePicker', 'closeSearch', 'createNote',
     'archiveNote', 'closeTaskEditor', 'deleteHeading', 'disablePush', 'enablePush', 'filterNotes', 'hideArchive',
-    'leaveSecondaryView', 'openArchive', 'openMobileWorkspaceSwitcher',
-    'openNoteResult', 'openProject', 'openProjectResult', 'openSearch', 'openSettings',
+    'doLogout', 'openArchive', 'openMobileWorkspaceSwitcher',
+    'openNoteResult', 'openProject', 'openProjectResult', 'openSearch',
     'openTask', 'openToday', 'openTodayTask', 'openTodoResult', 'renameNote',
     'selectNote', 'showNotesArchive', 'structureAction', 'structureCreate', 'structureRename',
     'switchMode', 'switchWorkspaceSection', 'testPush', 'toggleNotePicker'
@@ -25,7 +25,7 @@ function dispatchCall(e) {
 ['click', 'change', 'input'].forEach(type => document.addEventListener(type, dispatchCall));
 
 // --- Mode switching (Today / Tasks / Notes) ---
-const MODE_TITLES = { todos: 'Tasks', today: 'Today', notes: 'Notes', settings: 'Reminders & notifications' };
+const MODE_TITLES = { todos: 'Tasks', today: 'Today', notes: 'Notes' };
 const WORKSPACE_TITLES = { tasks: 'Tasks', groceries: 'Groceries', shopping: 'Buys', project: 'Project', archive: 'Archive' };
 // The sidebar, project pages and counts beside each list appear from this width.
 const isDesktop = () => matchMedia('(min-width: 1024px)').matches;
@@ -36,7 +36,6 @@ function currentProjectName() {
 function workspaceTitle(section = currentWorkspaceSection()) {
     return section === 'project' ? currentProjectName() : WORKSPACE_TITLES[section];
 }
-let secondaryReturnDestination = { mode: 'todos', workspace: 'tasks' };
 function currentWorkspaceSection() {
     return WORKSPACE_TITLES[document.body.dataset.workspaceSection] ? document.body.dataset.workspaceSection : 'tasks';
 }
@@ -50,16 +49,12 @@ function updateNavigation(mode) {
     document.querySelectorAll('.bottom-nav-btn').forEach(button => mark(button, mode === 'todos'
         ? button.dataset.mode === 'todos' && button.dataset.workspace === workspace
         : button.dataset.mode === mode));
-    document.querySelectorAll('.sidebar-settings').forEach(button => mark(button, mode === 'settings'));
     document.querySelectorAll('.sidebar-project').forEach(button => mark(button, mode === 'todos' && workspace === 'project'
         && button.dataset.projectId === document.body.dataset.projectId));
 }
 function switchMode(mode) {
     if (!MODE_TITLES[mode]) mode='todos';
     const previousMode = document.body.dataset.mode || 'todos';
-    if (mode === 'settings' && previousMode !== 'settings') {
-        secondaryReturnDestination = { mode: previousMode, workspace: currentWorkspaceSection() };
-    }
     flushPendingNoteSave();
     updateNavigation(mode);
     // Each mode owns an independent page-length layout. Keeping the previous
@@ -82,24 +77,10 @@ function switchMode(mode) {
     title.textContent=mode === 'todos' ? workspaceTitle() : MODE_TITLES[mode];
     title.classList.toggle('can-switch-workspace', mode === 'todos' || mode === 'today');
     title.setAttribute('aria-label', mode === 'todos' ? 'Choose task list, current list '+workspaceTitle() : mode === 'today' ? 'Choose destination, current view Today' : MODE_TITLES[mode]);
-    const back = document.getElementById('topbar-back');
-    if (back) {
-        const secondary = mode === 'settings';
-        back.hidden = !secondary;
-        back.setAttribute('aria-label', 'Back to ' + (secondaryReturnDestination.mode === 'todos' ? WORKSPACE_TITLES[secondaryReturnDestination.workspace] : MODE_TITLES[secondaryReturnDestination.mode]));
-    }
     document.querySelectorAll('.app-menu').forEach(d=>d.open=false);
     document.body.dataset.mode=mode;
     if(typeof setDestination==='function')setDestination({view:mode});
     updateTopbarStat();
-}
-
-function leaveSecondaryView() {
-    if (secondaryReturnDestination.mode === 'todos') {
-        switchWorkspaceSection(secondaryReturnDestination.workspace, { preserveScroll: true });
-        return;
-    }
-    switchMode(secondaryReturnDestination.mode);
 }
 
 function openMobileWorkspaceSwitcher() {
@@ -137,7 +118,6 @@ function chooseMobileWorkspace(section) {
 function chooseMobileUtility(mode) {
     closeMobileWorkspaceSwitcher();
     if (mode === 'today') openToday();
-    if (mode === 'settings') openSettings();
     if (mode === 'archive') openArchive('todo');
 }
 document.addEventListener('click', function(e) {

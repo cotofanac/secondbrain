@@ -15,7 +15,7 @@ func dbTime(t time.Time) string { return t.UTC().Format(time.RFC3339) }
 const sqlNow = `strftime('%Y-%m-%dT%H:%M:%SZ','now')`
 
 // schemaVersion is the migration number the tables below correspond to.
-const schemaVersion = 7
+const schemaVersion = 8
 
 type tableDef struct{ name, columns string }
 
@@ -112,6 +112,9 @@ var migrations = map[int][]string{
 	},
 	// Linking notes to projects was retired; nothing links them any more.
 	7: {`DROP TABLE project_notes`},
+	// The reminder time and calendar zone now come only from the deployment
+	// (TASK_REMINDER_TIME, TZ); drop the copies the settings screen kept.
+	8: {`DELETE FROM settings WHERE key IN ('task_enabled','task_time','timezone')`},
 }
 
 // migrate creates a new database from the schema, or brings an existing one

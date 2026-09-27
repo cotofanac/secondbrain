@@ -615,16 +615,10 @@ function hideArchive() {
         if (back.mode !== 'todos') {
             document.body.dataset.workspaceSection = readLocal('desktop-workspace') || 'tasks';
             if (back.mode === 'today') openToday();
-            else if (back.mode === 'settings') openSettings();
             else switchMode(back.mode);
         } else if (back.workspace === 'project' && back.project) showProjectPage(Number(back.project));
         else switchWorkspaceSection(back.workspace === 'archive' ? 'tasks' : back.workspace, { preserveScroll: true });
     });
-}
-function openSettings() {
-    switchMode('settings');
-    setDestination({ view: 'settings' });
-    htmx.ajax('GET', '/settings', '#settings-content');
 }
 function openToday() {
     switchMode('today');
@@ -635,9 +629,8 @@ function routeLocation() {
     const q = new URLSearchParams(location.search);
     if (q.get('task')) openTask(Number(q.get('task')));
     else if (q.get('project')) openProject(Number(q.get('project')));
-    // Habits and weekly reviews were retired; keep old links working.
-    else if (['today', 'habits', 'review'].includes(q.get('view'))) openToday();
-    else if (q.get('view') === 'settings') openSettings();
+    // Habits, weekly reviews and the settings screen were retired; keep old links working.
+    else if (['today', 'habits', 'review', 'settings'].includes(q.get('view'))) openToday();
     else if (q.get('view') === 'archive') openArchive(q.get('kind') || 'todo');
     else if (q.get('note')) openNoteResult(Number(q.get('note')));
     else if (q.get('view')) switchMode(q.get('view'));
@@ -778,12 +771,8 @@ document.body.addEventListener('htmx:afterSwap', e => {
         }
         noteViewState = null;
     }
-    if (id === 'settings-content') {
-        document.body.dataset.timezone =
-            document.querySelector('#schedule-form [name=timezone]')?.value || document.body.dataset.timezone;
-        updateTopbarStat();
-        preparePush();
-    }
+    // The notifications line lives in the Today footer.
+    if (id === 'today-content') renderPush();
 });
 document.body.addEventListener('sbWorkspaceChanged', e => {
     refreshWorkspace();
