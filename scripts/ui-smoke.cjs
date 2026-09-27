@@ -112,6 +112,12 @@ const shot = name => require('node:path').join(process.env.SCREENSHOT_DIR || req
  assert.equal(taskNav.nav.height,52,'mobile navigation has an unstable content height');
  assert.equal(taskNav.buttons.every(button=>button.top>=taskNav.nav.top&&button.height===51&&button.top+button.height<=taskNav.nav.bottom),true,'mobile navigation buttons escape the compact tab row');
  await page.getByRole('button',{name:'Notes',exact:true}).click();const notesNav=await mobileNavGeometry();
+ // On phones the note title opens the note list as a sheet; the backdrop closes it.
+ assert.equal(await page.locator('.note-desktop-action').first().isVisible(),false,'phone shows desktop note actions');
+ await page.locator('.note-picker-btn').click();await page.locator('#note-picker-panel').waitFor();
+ assert.equal(await page.locator('#note-picker-panel').evaluate(el=>{const b=el.getBoundingClientRect();return b.left>=0&&b.right<=innerWidth&&b.bottom<=innerHeight}),true,'note sheet overflows');
+ await page.locator('#note-sheet-backdrop').click({position:{x:5,y:5}});await page.locator('#note-picker-panel').waitFor({state:'hidden'});
+ await page.locator('.note-menu > summary').click();await page.getByRole('button',{name:'Rename',exact:true}).waitFor();await page.locator('.note-menu > summary').click();
  await page.getByRole('button',{name:'Tasks',exact:true}).click();
  await page.evaluate(()=>window.scrollTo(0,document.documentElement.scrollHeight));
  await page.locator('.bottom-nav-btn[data-mode="today"]').click();

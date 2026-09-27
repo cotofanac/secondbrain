@@ -21,19 +21,10 @@ type Note struct {
 func handleNotes(w http.ResponseWriter, r *http.Request) {
 	noteIDStr := r.URL.Query().Get("id")
 
-	// Get all note titles for dropdown
-	rows, err := db.Query("SELECT id, title FROM notes WHERE archived = 0 ORDER BY title ASC")
+	notesList, err := loadNoteList()
 	if err != nil {
 		http.Error(w, "DB error", http.StatusInternalServerError)
 		return
-	}
-	defer rows.Close()
-
-	var notesList []Note
-	for rows.Next() {
-		var n Note
-		rows.Scan(&n.ID, &n.Title)
-		notesList = append(notesList, n)
 	}
 
 	if len(notesList) == 0 {
@@ -309,4 +300,22 @@ func handlePermanentDeleteNote(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	renderArchive(w, r, "notes")
+}
+
+// loadNoteList lists the active notes, most recently edited first.
+func loadNoteList() ([]Note, error) {
+	rows, err := db.Query("SELECT id, title, updated_at FROM notes WHERE archived = 0 ORDER BY updated_at DESC, id DESC")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var notes []Note
+	for rows.Next() {
+		var n Note
+		if err := rows.Scan(&n.ID, &n.Title, &n.UpdatedAt); err != nil {
+			return nil, err
+		}
+		notes = append(notes, n)
+	}
+	return notes, rows.Err()
 }

@@ -5,7 +5,7 @@
 // data-args stand for the element, its value and its form. Only functions
 // listed here can be called.
 const CALLABLE = new Set([
-    'chooseMobileUtility', 'chooseMobileWorkspace', 'closeDetail', 'closeSearch', 'createNote',
+    'chooseMobileUtility', 'chooseMobileWorkspace', 'closeDetail', 'closeNotePicker', 'closeSearch', 'createNote',
     'archiveNote', 'closeTaskEditor', 'deleteHeading', 'disablePush', 'enablePush', 'filterNotes', 'hideArchive',
     'leaveSecondaryView', 'openArchive', 'openMobileWorkspaceSwitcher',
     'openNoteResult', 'openProject', 'openProjectDetails', 'openProjectResult', 'openSearch', 'openSettings',
@@ -378,6 +378,8 @@ function doLogout() {
 
 // --- Archive ---
 async function showNotesArchive() {
+    closeNoteMenu();
+    closeNotePicker();
     if (!await saveBeforeNoteAction()) return;
     openArchive('notes');
 }
@@ -625,8 +627,7 @@ function openProjectResult(id) { closeSearch(); openProject(id); }
 document.addEventListener('keydown', function(e) {
     if (e.key !== 'Escape') return;
     closeSearch();
-    const pickerPanel = document.getElementById('note-picker-panel');
-    if (pickerPanel) pickerPanel.hidden = true;
+    closeNotePicker();
 });
 
 

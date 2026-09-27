@@ -608,7 +608,7 @@ html, body {
 
 .note-meta {
     display: flex;
-    justify-content: space-between;
+    gap: .35rem;
     align-items: center;
     padding: 0 1rem;
     height: 1.25rem;
@@ -1638,4 +1638,35 @@ details[open] > summary > .disclosure-icon .icon { transform: rotate(90deg); }
     body[data-workspace-section="project"] .project-group[data-project-page] > summary .project-progress::after { inset: 4px; }
     body[data-workspace-section="project"] .project-group[data-project-page] > summary .section-count { margin-left: auto; font-size: .8rem; font-weight: 500; }
     body[data-workspace-section="project"] .project-group[data-project-page] .task-group { padding-left: .25rem; }
+}
+
+/* Notes: one quiet line under the title, "Edited 12:35 AM · Saved". */
+.note-meta { margin: 0; }
+.note-updated + .note-status:not(:empty)::before { content: '· '; }
+.note-sheet-backdrop { position: fixed; inset: 0; z-index: 1240; background: #0007; }
+.note-menu { position: relative; }
+.note-menu .menu-panel { top: 100%; right: 0; }
+.note-picker-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.note-picker-time { flex: 0 0 auto; font-size: .75rem; color: var(--text-dim); }
+@media (min-width: 1024px) {
+    .note-menu, .note-sheet-only, .note-picker-time, .note-sheet-backdrop { display: none !important; }
+}
+/* Phones and tablets: the note's title is the heading and opens the list as
+   a sheet; New stays one tap away and the rest sits in the … menu. */
+@media (max-width: 1023px) {
+    .notes-toolbar { flex-wrap: nowrap; gap: .15rem; min-height: 0; padding: .2rem 0 0; border: 0; background: transparent; }
+    .note-picker { flex: 1; min-width: 0; position: static; }
+    .note-picker-btn { width: auto; max-width: 100%; justify-content: flex-start; gap: .35rem; min-height: 44px; padding: .25rem .3rem; border: 0; background: none; font-size: 1.35rem; font-weight: 700; letter-spacing: -.015em; }
+    .note-picker-btn .icon { width: 18px; height: 18px; flex: 0 0 auto; color: var(--text-dim); }
+    .note-desktop-action { display: none; }
+    .notes-actions { flex: 0 0 auto; gap: 0; }
+    .note-picker-panel { position: fixed; top: auto; left: max(.75rem, env(safe-area-inset-left)); right: max(.75rem, env(safe-area-inset-right)); bottom: calc(.75rem + var(--safe-bottom)); z-index: 1250; display: flex; flex-direction: column; max-width: 460px; max-height: min(75dvh, 560px); margin-inline: auto; padding: .45rem .55rem .6rem; border-radius: 14px; box-shadow: 0 -10px 40px #0005; animation: mobile-sheet-in 170ms cubic-bezier(.2,.75,.25,1); }
+    .note-picker-panel[hidden] { display: none; }
+    .note-picker-search { flex: 0 0 auto; min-height: 44px; margin-bottom: .35rem; border: 0; border-radius: 8px; }
+    .note-picker-list { flex: 1; max-height: none; overflow-y: auto; overscroll-behavior: contain; }
+    .note-picker-item { display: flex; align-items: baseline; justify-content: space-between; gap: .75rem; min-height: 48px; padding: .75rem .7rem; border: 0; border-radius: 8px; font-size: 1rem; }
+    .note-picker-item.active { background: var(--accent-dim); }
+    .note-picker-archived { display: none; }
+    .note-meta { height: auto; min-height: 1.1rem; padding: 0 .3rem .6rem; }
+    .note-editor { padding-inline: .3rem; }
 }

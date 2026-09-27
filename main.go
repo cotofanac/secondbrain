@@ -465,15 +465,10 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Fetch notes list and current note
-	noteRows, err := db.Query("SELECT id, title FROM notes WHERE archived = 0 ORDER BY title ASC")
-	var notesList []Note
-	if err == nil {
-		defer noteRows.Close()
-		for noteRows.Next() {
-			var n Note
-			noteRows.Scan(&n.ID, &n.Title)
-			notesList = append(notesList, n)
-		}
+	notesList, err := loadNoteList()
+	if err != nil {
+		http.Error(w, "Could not load notes", 500)
+		return
 	}
 
 	var currentNote Note

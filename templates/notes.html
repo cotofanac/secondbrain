@@ -4,18 +4,21 @@
             <span class="section-kind-icon notes-icon">{{template "icon-notes"}}</span>
             <span class="feature-title">Notes</span>
         </div>
-        <button type="button" class="note-picker-btn" data-call="toggleNotePicker">
+        <!-- On phones the note's title is the heading; tapping it switches notes. -->
+        <button type="button" class="note-picker-btn" data-call="toggleNotePicker" aria-haspopup="dialog" aria-label="{{.CurrentNote.Title}}, switch note">
             <span class="note-picker-label">{{.CurrentNote.Title}}</span>
             {{template "icon-down"}}
         </button>
-        <div class="note-picker-panel" id="note-picker-panel" hidden>
+        <div class="note-sheet-backdrop" id="note-sheet-backdrop" data-call="closeNotePicker" hidden></div>
+        <div class="note-picker-panel" id="note-picker-panel" role="dialog" aria-label="Notes" hidden>
+            <div class="mobile-sheet-handle note-sheet-only" aria-hidden="true"></div>
             <input type="text" class="note-picker-search" id="note-picker-search"
-                   placeholder="Filter notes..." autocomplete="off"
+                   placeholder="Filter notes..." aria-label="Filter notes" autocomplete="off"
                    data-call="filterNotes" data-args='["$value"]' data-event="input">
             <div class="note-picker-list">
                 {{range .Notes}}
                 <button type="button" class="note-picker-item {{if eq .ID $.CurrentNote.ID}}active{{end}}"
-                        data-title="{{.Title}}" data-call="selectNote" data-args='[{{.ID}}]'>{{.Title}}</button>
+                        data-title="{{.Title}}" data-call="selectNote" data-args='[{{.ID}}]'><span class="note-picker-title">{{.Title}}</span>{{if .UpdatedAt}}<span class="note-picker-time">{{formatUpdated .UpdatedAt}}</span>{{end}}</button>
                 {{end}}
             </div>
             <div class="section-footer note-picker-archived"><button type="button" class="action-with-icon" data-call="showNotesArchive">{{template "icon-archive"}}<span>Archived notes</span></button></div>
@@ -26,18 +29,20 @@
         <button class="icon-button" data-call="createNote" title="New note" aria-label="New note">
             {{template "icon-plus"}}
         </button>
-        <button class="icon-button" data-call="renameNote" title="Rename note" aria-label="Rename note">
+        <button class="icon-button note-desktop-action" data-call="renameNote" title="Rename note" aria-label="Rename note">
             {{template "icon-edit"}}
         </button>
-        <button class="icon-button" data-call="archiveNote" title="Archive note" aria-label="Archive note">
+        <button class="icon-button note-desktop-action" data-call="archiveNote" title="Archive note" aria-label="Archive note">
             {{template "icon-archive"}}
         </button>
+        <details class="row-menu note-menu"><summary class="icon-button" aria-label="Note actions">{{template "icon-more"}}</summary><div class="menu-panel">
+            <button type="button" data-call="renameNote">Rename</button>
+            <button type="button" data-call="archiveNote">Archive note</button>
+            <button type="button" data-call="showNotesArchive">Archived notes</button>
+        </div></details>
     </div>
 </div>
-<div class="note-meta">
-    <span id="note-status" class="note-status" role="status" aria-live="polite"></span>
-    {{if .CurrentNote.UpdatedAt}}<span class="note-updated">{{formatUpdated .CurrentNote.UpdatedAt}}</span>{{end}}
-</div>
+<p class="note-meta">{{if .CurrentNote.UpdatedAt}}<span class="note-updated">Edited {{formatUpdated .CurrentNote.UpdatedAt}}</span>{{end}}<span id="note-status" class="note-status" role="status" aria-live="polite"></span></p>
 <textarea id="note-editor" class="note-editor"
           data-note-id="{{.CurrentNote.ID}}"
           data-updated-at="{{.CurrentNote.UpdatedAt}}"

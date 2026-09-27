@@ -835,3 +835,26 @@ func TestSidebarCountsAndArchive(t *testing.T) {
 		t.Fatal("project not reopened from the archive")
 	}
 }
+
+func TestNoteListRecentFirst(t *testing.T) {
+	setupWorkspaceDB(t)
+	execSQL(t, `INSERT INTO notes(title,updated_at) VALUES('Old','2026-01-01T00:00:00Z'),('New','2026-09-01T00:00:00Z')`)
+	execSQL(t, `UPDATE notes SET updated_at='2026-05-01T00:00:00Z' WHERE title='Quick Notes'`)
+	notes, err := loadNoteList()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var titles []string
+	for _, n := range notes {
+		titles = append(titles, n.Title)
+	}
+	if strings.Join(titles, ",") != "New,Quick Notes,Old" {
+		t.Fatalf("note order %v, want most recently edited first", titles)
+	}
+	w := httptest.NewRecorder()
+	handleNotes(w, httptest.NewRequest("GET", "/notes", nil))
+	requireOK(t, w)
+	if !strings.Contains(w.Body.String(), `<span class="note-updated">Edited`) {
+		t.Fatal("note page lacks its edited line")
+	}
+}

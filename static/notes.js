@@ -232,19 +232,36 @@ document.addEventListener('visibilitychange', function() {
 });
 window.addEventListener('pagehide', flushPendingNoteSave);
 
+// On phones the note list opens as a sheet over a backdrop; on desktop it is
+// always shown beside the note, so these only matter below that width.
+function setNotePickerOpen(open) {
+    const panel = document.getElementById('note-picker-panel');
+    if (!panel) return;
+    panel.hidden = !open;
+    const backdrop = document.getElementById('note-sheet-backdrop');
+    if (backdrop) backdrop.hidden = !open;
+    document.querySelector('.note-picker-btn')?.setAttribute('aria-expanded', String(open));
+}
+function closeNotePicker() {
+    setNotePickerOpen(false);
+}
 function toggleNotePicker() {
     const panel = document.getElementById('note-picker-panel');
     const search = document.getElementById('note-picker-search');
     if (!panel) return;
     const opening = panel.hidden;
-    panel.hidden = !opening;
+    setNotePickerOpen(opening);
     if (opening && search) {
         search.value = '';
         filterNotes('');
+        panel.querySelector('.note-picker-list').scrollTop = 0;
         // Focusing on touch screens raises the keyboard when the user usually
         // just wants to tap another note; they can tap the filter to type.
         if (matchMedia('(hover: hover) and (pointer: fine)').matches) search.focus();
     }
+}
+function closeNoteMenu() {
+    document.querySelectorAll('.note-menu').forEach(menu => (menu.open = false));
 }
 
 function filterNotes(query) {
@@ -256,16 +273,13 @@ function filterNotes(query) {
 
 async function selectNote(id) {
     if(!await saveBeforeNoteAction()) return;
-    const panel=document.getElementById('note-picker-panel');if(panel)panel.hidden=true;
+    closeNotePicker();
     htmx.ajax('GET','/notes?id='+id,'#notes-content');
 }
 
 document.addEventListener('click', function(e) {
     const picker = document.getElementById('note-picker');
-    if (picker && !picker.contains(e.target)) {
-        const panel = document.getElementById('note-picker-panel');
-        if (panel) panel.hidden = true;
-    }
+    if (picker && !picker.contains(e.target)) closeNotePicker();
 });
 
 
@@ -361,6 +375,7 @@ function showConfirm(message) {
 }
 
 async function archiveNote() {
+    closeNoteMenu();
     const editor = document.getElementById('note-editor');
     if (!editor) return;
     const ok = await showConfirm('Archive this note?');
@@ -373,6 +388,7 @@ async function archiveNote() {
 }
 
 async function renameNote() {
+    closeNoteMenu();
     const editor = document.getElementById('note-editor');
     if (!editor) return;
     const label = document.querySelector('.note-picker-label');
