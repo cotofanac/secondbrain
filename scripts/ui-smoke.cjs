@@ -90,12 +90,13 @@ const shot = name => require('node:path').join(process.env.SCREENSHOT_DIR || req
  await page.getByRole('button',{name:'Notes',exact:true}).click();const notesNav=await mobileNavGeometry();
  await page.getByRole('button',{name:'Tasks',exact:true}).click();
  await page.evaluate(()=>window.scrollTo(0,document.documentElement.scrollHeight));
- await page.getByRole('button',{name:'Habits',exact:true}).click();
+ await page.locator('.bottom-nav-btn[data-mode="today"]').click();
  await page.waitForFunction(()=>scrollY===0);
  await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
- const habitsNav=await mobileNavGeometry();
+ const todayNav=await mobileNavGeometry();
+ assert.equal(taskNav.buttons.length,3,'mobile navigation should offer Today, Tasks and Notes');
  assert.deepEqual(notesNav,taskNav,'mobile navigation moved in Notes');
- assert.deepEqual(habitsNav,taskNav,'mobile navigation moved in Habits');
+ assert.deepEqual(todayNav,taskNav,'mobile navigation moved in Today');
  await page.getByRole('button',{name:'Tasks',exact:true}).click();
  await page.locator('#topbar-title').click();
  assert.equal(await page.locator('#mobile-workspace-menu').isVisible(),true,'mobile workspace sheet did not open');
@@ -108,7 +109,7 @@ const shot = name => require('node:path').join(process.env.SCREENSHOT_DIR || req
  assert.equal(await page.locator('#topbar-back').isVisible(),true,'notifications has no mobile return control');
  await page.locator('#topbar-back').click();
  assert.equal(await page.evaluate(()=>document.body.dataset.mode),'today','notifications back did not return to Today');
- await page.locator('#topbar-title').click();await page.getByRole('button',{name:'Today',exact:true}).click();
+ await page.locator('#topbar-title').click();await page.locator('#mobile-workspace-menu').getByRole('button',{name:'Today',exact:true}).click();
  assert.equal(await page.evaluate(()=>document.body.dataset.mode),'today','Today did not open');
  await page.locator('#today-content .today-heading').waitFor();
  await page.locator('#topbar-title').click();await page.locator('[data-workspace-option="groceries"]').click();

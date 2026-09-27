@@ -8,7 +8,6 @@
 <details class="settings-card secondary-settings" open><summary>Daily reminders</summary><p class="muted">These times apply to all enabled devices. They usually only need to be configured once.</p>
 <form id="schedule-form" class="detail-form" hx-post="/settings/save" hx-target="#settings-content">
  <label class="toggle-label"><input type="checkbox" name="task_enabled" {{if .TaskEnabled}}checked{{end}}>Tasks due or overdue</label><label>Task reminder time<input type="time" name="task_time" value="{{.TaskTime}}" required></label>
- <label class="toggle-label"><input type="checkbox" name="habit_enabled" {{if .HabitEnabled}}checked{{end}}>Unfinished daily habits</label><label>Habit reminder time<input type="time" name="habit_time" value="{{.HabitTime}}" required></label>
  <label>Time zone<input name="timezone" value="{{.Timezone}}" placeholder="Europe/Bucharest" list="timezones" required></label><datalist id="timezones"><option value="Europe/Bucharest"><option value="Europe/London"><option value="Europe/Paris"><option value="America/New_York"><option value="UTC"></datalist>
  <button class="btn btn-primary">Save reminders</button>
 </form></details>

@@ -2,7 +2,7 @@
 <div class="todo-item {{if .Done}}done{{end}}" id="task-{{.ID}}" data-task-id="{{.ID}}" data-revision="{{.Revision}}">
  <form hx-post="/todos/toggle" hx-target="closest .task-group" hx-swap="outerHTML swap:140ms"><input type="hidden" name="id" value="{{.ID}}"><input type="hidden" name="response" value="task-group"><button class="check-btn {{if .Done}}checked{{end}}" aria-label="{{if .Done}}Reopen{{else}}Complete{{end}} {{.Text}}"><span class="task-checkmark" aria-hidden="true"></span></button></form>
  <button type="button" class="task-label" data-call="openTask" data-args='[{{.ID}}]'>{{.Text}}</button>
- {{if .DueDate}}<span class="todo-date {{if and (not .Done) (isOverdue .DueDate)}}overdue{{end}}">{{formatDate .DueDate}}</span>{{end}}
+ {{if or .DueDate .Repeat}}<span class="todo-date {{if and (not .Done) (isOverdue .DueDate)}}overdue{{end}}">{{if .Repeat}}{{template "repeat-badge" .Repeat}}{{end}}{{formatDate .DueDate}}</span>{{end}}
  <details class="row-menu"><summary class="icon-button" aria-label="Task actions">{{template "icon-more"}}</summary><div class="menu-panel"><form hx-post="/todos/delete" hx-target="#todo-items"><input type="hidden" name="id" value="{{.ID}}"><button class="action-with-icon">{{template "icon-archive"}}<span>Archive</span></button></form></div></details>
 </div>
 {{end}}

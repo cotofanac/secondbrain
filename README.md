@@ -5,7 +5,7 @@
 
   **Everything on your mind. One calm place to put it.**
 
-  A private, self-hosted home for tasks, projects, notes, lists, and habits.
+  A private, self-hosted home for tasks, projects, notes, and lists.
 </div>
 
 ---
@@ -14,15 +14,17 @@ Second Brain is made for the quiet work of keeping your life together.
 
 Capture something before it disappears. Turn it into a task when it matters.
 Give larger plans a little structure. Keep the groceries separate from the
-ideas, and the habits visible without letting any of it take over your day.
+ideas, and the routines visible without letting any of it take over your day.
 
 No feeds. No team dashboards. No productivity theatre. Just your things, in a
 place that feels considered.
 
-## One Place, Six Clear Spaces
+## One Place, Five Clear Spaces
 
 **Tasks** for what needs doing. Add one in a moment, give it a date when it
-needs one, and let completed work move quietly out of the way.
+needs one, and let completed work move quietly out of the way. A task can
+repeat daily, weekly, monthly, or yearly: check it off and the next one is
+waiting on its date, which makes routines simply part of your day.
 
 **Projects** for the things that take more than one step. Add stages, see real
 progress, and keep the notes behind a project close to the work itself.
@@ -32,10 +34,6 @@ remembered, so recurring errands stay effortless instead of becoming clutter.
 
 **Notes** for thoughts that need somewhere to land. They save as you write and
 stay simple enough that writing remains the point.
-
-**Habits** for the rhythms you want to keep. Track a daily practice or work
-toward a weekly, monthly, or yearly target without turning your life into a
-spreadsheet.
 
 ## Designed to Get Out of the Way
 
@@ -52,13 +50,12 @@ and it opens like an app, without giving up ownership of your data.
 
 ## A Gentle Look Ahead
 
-Today is the home view. It brings due tasks, habits, transparent suggestions
+Today is the home view. It brings due and repeating tasks, transparent suggestions
 from unscheduled work, and the next seven days into one calm, actionable place.
 Task lists remain available as one continuous, quickly scannable page on mobile.
 
 Due dates highlight what needs attention without making everything feel urgent.
-Optional reminders bring back tasks due today and habits still waiting for a
-check-in.
+An optional daily reminder brings back tasks due today.
 
 The “What next” section offers a few unscheduled tasks with a plain explanation
 of where each came from. One tap can bring a suggestion into Today, complete it,

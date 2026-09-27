@@ -17,9 +17,10 @@ type Todo struct {
 	Done       bool   `json:"done"`
 	CreatedAt  string
 	ArchivedAt string
-	ProjectID  int `json:"project_id"`
-	StageID    int `json:"stage_id"`
-	Revision   int `json:"revision"`
+	ProjectID  int    `json:"project_id"`
+	StageID    int    `json:"stage_id"`
+	Revision   int    `json:"revision"`
+	Repeat     string `json:"repeat"`
 }
 
 // handleTodos renders the task workspace. Mutations call it after changing a
@@ -150,18 +151,44 @@ func handleToggleTodo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	tx, err := db.Begin()
+	if err != nil {
+		http.Error(w, "DB error", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
 	var category string
 	var projectID, stageID int
-	err := db.QueryRow(`SELECT t.category,COALESCE(t.project_id,0),COALESCE(t.stage_id,0) FROM todos t WHERE t.id=? AND `+activeTaskSQL, id).Scan(&category, &projectID, &stageID)
+	var done bool
+	err = tx.QueryRow(`SELECT t.category,COALESCE(t.project_id,0),COALESCE(t.stage_id,0),t.done FROM todos t WHERE t.id=? AND `+activeTaskSQL, id).Scan(&category, &projectID, &stageID, &done)
 	if err != nil {
 		http.Error(w, "Not found", http.StatusNotFound)
 		return
 	}
 
-	if _, err := db.Exec(`UPDATE todos SET completed_at=CASE WHEN done=0 THEN ? ELSE NULL END,
- archive_after=CASE WHEN done=0 THEN ? ELSE NULL END, done=1-done WHERE id=?`, appNow().UTC().Format(time.RFC3339), appNow().UTC().AddDate(0, 0, 7).Format(time.RFC3339), id); err != nil {
+	now := appNow()
+	if _, err = tx.Exec(`UPDATE todos SET completed_at=CASE WHEN done=0 THEN ? ELSE NULL END,
+ archive_after=CASE WHEN done=0 THEN ? ELSE NULL END, done=1-done WHERE id=?`, now.UTC().Format(time.RFC3339), now.UTC().AddDate(0, 0, 7).Format(time.RFC3339), id); err != nil {
 		http.Error(w, "DB error", http.StatusInternalServerError)
 		return
+	}
+	next, repeats, err := repeatAfterToggle(tx, id, !done, now.Format("2006-01-02"))
+	if err == nil {
+		err = tx.Commit()
+	}
+	if err != nil {
+		http.Error(w, "DB error", http.StatusInternalServerError)
+		return
+	}
+	if repeats {
+		// The next occurrence changes counts outside the swapped task group.
+		// The event fires before the swap, while the form is still in the page;
+		// if the refresh lands first, the late swap only touches detached nodes.
+		detail := map[string]any{}
+		if next != "" {
+			detail["message"] = "Next one due " + formatDueDate(next)
+		}
+		hxTrigger(w, "sbWorkspaceChanged", detail)
 	}
 	log.Printf("Todo toggled: id=%d [%s]", id, category)
 

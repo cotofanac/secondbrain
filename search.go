@@ -9,7 +9,6 @@ type SearchResultData struct {
 	Query    string
 	Notes    []Note
 	Todos    []Todo
-	Habits   []Habit
 	Projects []Project
 	Stages   []Stage
 }
@@ -39,16 +38,6 @@ func handleSearch(w http.ResponseWriter, r *http.Request) {
 			var t Todo
 			if rows.Scan(&t.ID, &t.Category, &t.Text, &t.Done) == nil {
 				data.Todos = append(data.Todos, t)
-			}
-		}
-		rows.Close()
-	}
-	rows, err = db.Query(`SELECT id,name,period,target FROM habits WHERE archived=0 AND name LIKE ? ORDER BY name LIMIT 10`, pattern)
-	if err == nil {
-		for rows.Next() {
-			var h Habit
-			if rows.Scan(&h.ID, &h.Name, &h.Period, &h.Target) == nil {
-				data.Habits = append(data.Habits, h)
 			}
 		}
 		rows.Close()

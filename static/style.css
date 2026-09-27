@@ -251,24 +251,6 @@ html, body {
 .mobile-workspace-sheet button.selected>.icon:last-child { visibility:visible; }
 @keyframes mobile-sheet-in { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:translateY(0); } }
 
-.nav-btn-icon-wrap {
-    position: relative;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-}
-
-.nav-badge {
-    position: absolute;
-    top: -3px;
-    right: -5px;
-    background: var(--accent-dim);
-    border-radius: 50%;
-    width: 8px;
-    height: 8px;
-    pointer-events: none;
-}
-
 /* Search */
 .search-overlay {
     overflow: hidden;
@@ -386,8 +368,7 @@ html, body {
    despite being the destructive one. Height is essentially free here because
    the rows already stood ~53px tall, so the extra size is paid for by trimming
    each row's own vertical padding rather than by making rows taller. Width is
-   held at 40px so the denser habit-goal row (check, name, count, streak, minus,
-   delete) still fits comfortably. */
+   held at 40px to leave room for the task text. */
 .check-btn {
     background: none;
     border: none;
@@ -420,8 +401,7 @@ html, body {
 /* Press-and-hold on these labels opens the inline editor, so stop iOS from
    claiming the same gesture for its selection magnifier and callout. Scoped to
    live rows: archived text isn't editable and stays selectable. */
-.todo-item:not(.archived-item) .todo-text,
-.habit-item:not(.archived-item) .habit-name {
+.todo-item:not(.archived-item) .todo-text {
     -webkit-touch-callout: none;
     -webkit-user-select: none;
     user-select: none;
@@ -526,10 +506,6 @@ html, body {
     font-weight: 700;
 }
 
-.habits-heading {
-    flex: 1;
-}
-
 .notes-heading,
 .note-current-title {
     display: none;
@@ -540,14 +516,8 @@ html, body {
     background: #e4ecf7;
 }
 
-.section-kind-icon.habits-icon {
-    color: #287548;
-    background: #e5f1eb;
-}
-
 @media (prefers-color-scheme: dark) {
     .section-kind-icon.notes-icon { color: #a9c8f4; background: #25364d; }
-    .section-kind-icon.habits-icon { color: #9bd1b8; background: #203b31; }
 }
 
 .note-picker-btn {
@@ -774,185 +744,6 @@ html, body {
     gap: 0.25rem;
 }
 
-.archive-habit-count {
-    font-size: 0.8rem;
-    color: var(--text-dim);
-    font-variant-numeric: tabular-nums;
-    flex-shrink: 0;
-}
-
-/* Habits */
-.habits-toolbar {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 0.5rem;
-    padding: 0.75rem 1rem;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
-}
-
-
-.habits-actions {
-    display: flex;
-    gap: 0.35rem;
-}
-
-.habit-item {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    /* Controls inside are 44px tall and set the row height, so the vertical
-       padding is trimmed to keep rows the same size they were before. */
-    padding: 0.35rem 1rem;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
-    transition: opacity 0.2s;
-}
-
-/* Same reasoning as .todo-item.done — dim the name, not the whole row. */
-.habit-item.done .habit-name {
-    opacity: 0.6;
-}
-
-.habit-name {
-    flex: 1;
-    font-size: 0.95rem;
-    word-break: break-word;
-}
-.habit-name[data-action] { min-width:0; min-height:44px; padding:.45rem 0; border:0; background:none; color:var(--text); text-align:left; }
-
-.habit-check,
-.habit-check-form,
-.habit-del-form {
-    display: flex;
-    margin: 0;
-}
-
-.habit-check {
-    background: none;
-    border: none;
-    color: var(--text-dim);
-    cursor: pointer;
-    padding: 0;
-    width: 40px;
-    height: 44px;
-    flex-shrink: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    -webkit-tap-highlight-color: transparent;
-}
-
-.habit-check.checked {
-    color: var(--success);
-}
-
-.habit-streak {
-    font-size: 0.75rem;
-    color: rgba(255, 170, 68, 0.65);
-    font-weight: 500;
-    flex-shrink: 0;
-}
-
-/* Periodic goals (weekly / monthly / yearly) */
-.habit-section-header {
-    font-size: 0.7rem;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: var(--text-dim);
-    font-weight: 600;
-    padding: 0.85rem 1rem 0.35rem;
-}
-
-.habit-goal-body {
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 0.35rem;
-}
-
-.habit-goal .habit-name {
-    flex: none;
-}
-
-.habit-progress {
-    height: 3px;
-    background: var(--surface2);
-    border-radius: 3px;
-    overflow: hidden;
-}
-
-.habit-progress-fill {
-    height: 100%;
-    background: var(--accent);
-    border-radius: 3px;
-    transition: width 0.2s ease;
-}
-
-.habit-item.done .habit-progress-fill {
-    background: var(--success);
-}
-
-.habit-count {
-    font-size: 0.75rem;
-    color: var(--text-dim);
-    font-variant-numeric: tabular-nums;
-    flex-shrink: 0;
-}
-
-.habit-minus {
-    background: none;
-    border: none;
-    color: var(--text-dim);
-    cursor: pointer;
-    padding: 0;
-    width: 40px;
-    height: 44px;
-    flex-shrink: 0;
-    opacity: 0.7;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    -webkit-tap-highlight-color: transparent;
-}
-
-.habit-minus:hover, .habit-minus:active {
-    color: var(--text);
-    opacity: 1;
-}
-
-.custom-dialog-extra {
-    display: flex;
-    flex-direction: column;
-    gap: 0.6rem;
-}
-
-.chip-row {
-    display: flex;
-    gap: 0.4rem;
-    flex-wrap: wrap;
-}
-
-.chip {
-    background: var(--surface2);
-    border: 1px solid var(--border);
-    color: var(--text-dim);
-    border-radius: 999px;
-    padding: 0.4rem 0.8rem;
-    min-height: 40px;
-    font-family: inherit;
-    font-size: 0.82rem;
-    cursor: pointer;
-    -webkit-tap-highlight-color: transparent;
-    transition: background 0.15s, color 0.15s, border-color 0.15s;
-}
-
-.chip.active {
-    background: var(--accent-dim);
-    border-color: var(--accent);
-    color: var(--text);
-}
-
 /* Inactivity warning */
 .inactivity-warning {
     position: fixed;
@@ -1120,12 +911,10 @@ html {
         border-color: var(--text-dim);
     }
     .todo-item:hover,
-    .habit-item:hover,
     .archive-note-item:hover {
         background: rgba(255, 255, 255, 0.025);
     }
-    .check-btn:not(.checked):hover,
-    .habit-check:not(.checked):hover {
+    .check-btn:not(.checked):hover {
         color: var(--text);
     }
     .btn-restore:hover {
@@ -1317,7 +1106,7 @@ summary::-webkit-details-marker{display:none;}
 .today-heading h1{font-size:1.35rem;margin:0;}
 .today-heading p{margin:.15rem 0 0;color:var(--text-dim);font-size:.82rem;}
 .section-kind-icon.today-icon{color:#8a641e;background:#f6edda;}
-.today-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;margin:0 0 1rem;border:1px solid var(--border);border-radius:12px;overflow:hidden;background:var(--border);}
+.today-stats{display:grid;grid-template-columns:repeat(2,1fr);gap:1px;margin:0 0 1rem;border:1px solid var(--border);border-radius:12px;overflow:hidden;background:var(--border);}
 .today-stats>div{display:flex;flex-direction:column;gap:.1rem;padding:.7rem .75rem;background:var(--surface);}
 .today-stats strong{font-size:1.15rem;font-variant-numeric:tabular-nums;}.today-stats span{color:var(--text-dim);font-size:.7rem;}
 .today-capture{margin-bottom:1.35rem;border-bottom:1px solid var(--border);}
@@ -1335,7 +1124,6 @@ summary::-webkit-details-marker{display:none;}
 .today-suggestion{margin:.45rem 0;padding:.8rem;border:1px solid var(--border);border-radius:12px;background:var(--surface);}
 .today-suggestion>div:first-child{display:flex;flex-direction:column;gap:.15rem;}.today-suggestion small{color:var(--text-dim);font-size:.72rem;}
 .today-actions{display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.65rem;}.today-actions .btn{min-height:38px;padding:.4rem .7rem;}
-.today-goal .today-row-label small{display:inline;margin-left:.3rem;text-transform:capitalize;}
 .today-clear{margin:0 0 1.5rem;padding:.8rem .25rem;color:var(--text-dim);}
 .today-footer{margin-top:1.8rem;padding:1rem .25rem;border-top:1px solid var(--border);}
 .today-footer .icon{width:17px;height:17px;}
@@ -1402,7 +1190,7 @@ summary::-webkit-details-marker{display:none;}
 @media(max-width:374px){.topbar-stat{display:none;}.topbar-title{flex:1;}.view{padding-inline:.5rem;}.task-group{padding-inline:.4rem;}.todo-date{font-size:.7rem;}.task-label{font-size:.9rem;}}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;animation:none!important;transition:none!important;}}
 
-.btn,.btn-icon,.del-btn,.btn-restore,.habit-check,.search-result-item{min-height:44px;min-width:44px;}
+.btn,.btn-icon,.del-btn,.btn-restore,.search-result-item{min-height:44px;min-width:44px;}
 @media(min-width:1024px){.bottom-nav-btn{opacity:1;}.note-picker-search{min-height:44px;}}
 .review-history{display:flex;align-items:center;gap:.75rem;flex-wrap:wrap;color:var(--text-dim);font-size:.85rem;}
 .review-history select{min-height:44px;padding:.4rem;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);}
@@ -1444,11 +1232,9 @@ summary::-webkit-details-marker{display:none;}
 .header-action, .app-menu > summary { width: 44px; height: 44px; padding: 0; opacity: 1; }
 .header-action .icon, .app-menu > summary .icon { width: 19px; height: 19px; }
 .danger-icon { color: var(--danger); }
-.notes-actions .icon-button .icon, .habits-actions .icon-button .icon { width: 18px; height: 18px; }
+.notes-actions .icon-button .icon { width: 18px; height: 18px; }
 .note-picker-btn .icon { width: 15px; height: 15px; }
-.del-btn .icon, .btn-restore .icon, .habit-minus .icon { width: 17px; height: 17px; }
-.habit-check .icon { width: 20px; height: 20px; }
-.habit-check .icon-checked, .habit-check .icon-unchecked { line-height: 0; }
+.del-btn .icon, .btn-restore .icon { width: 17px; height: 17px; }
 .search-bar { border-radius: 0; border: 0; box-shadow: none; }
 .search-icon { display: grid; place-items: center; color: var(--text-dim); }
 .search-icon .icon { width: 18px; height: 18px; }
@@ -1567,6 +1353,9 @@ details[open] > summary > .disclosure-icon .icon { transform: rotate(90deg); }
 @keyframes item-enter { from { opacity:0; transform:translateY(4px); } to { opacity:1; transform:translateY(0); } }
 .todo-item .row-menu > summary .icon { width: 18px; height: 18px; }
 .todo-date { color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); padding: .18rem .42rem; border-radius: 6px; }
+.todo-date { display: inline-flex; align-items: center; gap: .25rem; }
+.todo-repeat { display: inline-flex; line-height: 0; }
+.todo-repeat .icon { width: 13px; height: 13px; }
 .todo-date.overdue { color: var(--danger); background: color-mix(in srgb, var(--danger) 9%, transparent); }
 .section-footer { padding-top: .2rem; }
 .section-footer button, .detail-actions button { border-radius: 8px; font-weight: 500; }
@@ -1597,7 +1386,7 @@ details[open] > summary > .disclosure-icon .icon { transform: rotate(90deg); }
     .workspace-subheading{padding-inline:.4rem;}
     .projects-group{margin-top:1.4rem;}
     #todo-items > .workspace-section { scroll-margin-top:calc(var(--safe-top) + 68px); }
-    .notes-toolbar, .habits-toolbar { padding-inline:.4rem; }
+    .notes-toolbar { padding-inline:.4rem; }
     .task-group { padding-inline: .15rem; }
     .project-group { margin-inline: .25rem; }
     .stage-group { margin-left: .7rem; }
@@ -1629,7 +1418,7 @@ details[open] > summary > .disclosure-icon .icon { transform: rotate(90deg); }
        navigation is not useful while editing and looked like a floating bar,
        so hide it until the field loses focus. */
     /* iOS standalone apps can lay out a page that does not scroll (e.g. an
-       empty Habits view) with a viewport shorter than the screen, which lifts
+       short Notes view) with a viewport shorter than the screen, which lifts
        a bottom-anchored bar off the bottom edge. The large viewport height is
        the full screen there, so anchor the bar from the top instead. */
     @media (display-mode: standalone) {
@@ -1654,7 +1443,6 @@ details[open] > summary > .disclosure-icon .icon { transform: rotate(90deg); }
     .detail-title-field input { min-height: 50px; padding-inline: .1rem; border: 0; border-bottom: 1px solid var(--border); border-radius: 0; background: transparent; font-size: 1.12rem; }
     .capture-form > input[name=text] { font-size: 16px; }
     .detail-properties { grid-template-columns: repeat(2,minmax(0,1fr)); }
-    .detail-properties label:first-child { grid-column: 1 / -1; }
     body.keyboard-open .detail-pane { bottom: .5rem; max-height: calc(100dvh - 1rem); }
     .note-conflict{position:sticky;bottom:0;}
     .bottom-nav-btn.active { font-weight: 600; }
@@ -1722,11 +1510,11 @@ details[open] > summary > .disclosure-icon .icon { transform: rotate(90deg); }
     }
     #todo-items > .workspace-section > summary .disclosure-icon { display:none; }
     #todo-items > .workspace-section > summary .section-title { font-size:1.35rem; font-weight:700; }
-    .notes-toolbar, .habits-toolbar { min-height:56px; padding:.35rem .25rem 1rem; border-bottom:0; }
+    .notes-toolbar { min-height:56px; padding:.35rem .25rem 1rem; border-bottom:0; }
     .notes-toolbar { background:transparent; }
     .notes-heading { display:flex; margin:0 0 1rem .15rem; }
     .note-current-title { display:block; flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text); font-size:1.35rem; font-weight:700; }
-    .notes-heading .feature-title, .habits-heading .feature-title { font-size:1.35rem; }
+    .notes-heading .feature-title { font-size:1.35rem; }
     #todo-items > .workspace-section > .task-group,
     #todo-items > .workspace-section > .inbox-group > .task-group { padding-inline:.25rem; }
     #todo-items > .workspace-section > .section-footer,

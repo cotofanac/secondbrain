@@ -49,13 +49,6 @@
             {{template "notes.html" .}}
         </div>
     </main>
-
-    <!-- Habits view -->
-    <main id="habits-view" class="view">
-        <div id="habits-content">
-            {{template "habit-list" .Habits}}
-        </div>
-    </main>
     </div><!-- #app -->
 
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
@@ -77,15 +70,6 @@
         <div class="custom-dialog-sheet">
             <p class="custom-dialog-label" id="custom-dialog-label"></p>
             <input type="text" class="custom-dialog-input" id="custom-dialog-input" autocomplete="off">
-            <div class="custom-dialog-extra" id="custom-dialog-extra" hidden>
-                <div class="chip-row" id="custom-dialog-period" role="group" aria-label="How often">
-                    <button type="button" class="chip active" data-period="day">Daily</button>
-                    <button type="button" class="chip" data-period="week">Weekly</button>
-                    <button type="button" class="chip" data-period="month">Monthly</button>
-                    <button type="button" class="chip" data-period="year">Yearly</button>
-                </div>
-                <input type="number" class="custom-dialog-input" id="custom-dialog-target" min="1" max="1000" value="1" inputmode="numeric" aria-label="Target" hidden>
-            </div>
             <div class="custom-dialog-actions">
                 <button class="btn" id="custom-dialog-cancel" type="button">Cancel</button>
                 <button class="btn btn-primary" id="custom-dialog-confirm" type="button">OK</button>
@@ -113,7 +97,7 @@
             </span>
             <span class="brand-name">Second Brain</span>
         </div>
-        <button class="bottom-nav-btn workspace-nav-btn active" data-mode="today" data-call="openToday">
+        <button class="bottom-nav-btn active" data-mode="today" data-call="openToday">
             {{template "icon-sun"}}
             <span>Today</span>
         </button>
@@ -132,13 +116,6 @@
         <button class="bottom-nav-btn" data-mode="notes" data-call="switchMode" data-args='["notes"]'>
             {{template "icon-notes"}}
             <span>Notes</span>
-        </button>
-        <button class="bottom-nav-btn" data-mode="habits" data-call="switchMode" data-args='["habits"]'>
-            <span class="nav-btn-icon-wrap">
-                {{template "icon-habits"}}
-                <span class="nav-badge" id="habits-badge" hidden></span>
-            </span>
-            <span>Habits</span>
         </button>
     </nav>
 

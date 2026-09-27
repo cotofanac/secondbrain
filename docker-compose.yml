@@ -9,13 +9,12 @@ services:
       - PASSCODE=${PASSCODE}
       - PORT=8080
       - DATA_DIR=/app/data
-      # Set TZ to your local zone (e.g. Europe/Bucharest) so dates, "today" for
-      # habits, and note timestamps match your wall clock. Defaults to Europe/Bucharest. The app calendar zone is editable from Today → Reminders & notifications.
+      # Set TZ to your local zone (e.g. Europe/Bucharest) so dates and note
+      # timestamps match your wall clock. Defaults to Europe/Bucharest. The app calendar zone is editable from Today → Reminders & notifications.
       - TZ=${TZ:-Europe/Bucharest}
-      # Initial push-reminder settings (24h HH:MM); edit them in the app afterward. Set either to
-      # "off" to disable that reminder. Requires HTTPS and, on iOS, installing
+      # Initial push-reminder time (24h HH:MM); edit it in the app afterward. Set it to
+      # "off" to disable the reminder. Requires HTTPS and, on iOS, installing
       # the app to the Home Screen; see the README "Reminders" section.
-      - HABIT_REMINDER_TIME=${HABIT_REMINDER_TIME:-20:00}
       - TASK_REMINDER_TIME=${TASK_REMINDER_TIME:-09:00}
       - PUSH_SUBJECT=${PUSH_SUBJECT:-secondbrain@example.com}
       # Behind a reverse proxy, list its address(es) so the login lockout can

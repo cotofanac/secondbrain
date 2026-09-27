@@ -5,12 +5,12 @@
 // data-args stand for the element, its value and its form. Only functions
 // listed here can be called.
 const CALLABLE = new Set([
-    'addHabit', 'chooseMobileUtility', 'chooseMobileWorkspace', 'closeDetail', 'closeSearch', 'createNote',
-    'archiveNote', 'disablePush', 'editHabit', 'enablePush', 'filterNotes', 'filterStageOptions', 'hideArchive',
-    'hideHabitsArchive', 'hideNotesArchive', 'leaveSecondaryView', 'openHabitsResult', 'openMobileWorkspaceSwitcher',
+    'chooseMobileUtility', 'chooseMobileWorkspace', 'closeDetail', 'closeSearch', 'createNote',
+    'archiveNote', 'disablePush', 'enablePush', 'filterNotes', 'filterStageOptions', 'hideArchive',
+    'hideNotesArchive', 'leaveSecondaryView', 'openMobileWorkspaceSwitcher',
     'openNoteResult', 'openProject', 'openProjectResult', 'openReview', 'openSearch', 'openSettings',
     'openStageResult', 'openTask', 'openTaskArchive', 'openToday', 'openTodayTask', 'openTodoResult', 'renameNote',
-    'selectNote', 'showHabitsArchive', 'showNotesArchive', 'structureAction', 'structureCreate', 'structureRename',
+    'selectNote', 'showNotesArchive', 'structureAction', 'structureCreate', 'structureRename',
     'switchMode', 'switchWorkspaceSection', 'testPush', 'toggleNotePicker'
 ]);
 function dispatchCall(e) {
@@ -24,8 +24,8 @@ function dispatchCall(e) {
 }
 ['click', 'change', 'input'].forEach(type => document.addEventListener(type, dispatchCall));
 
-// --- Mode switching (Tasks / Notes / Habits) ---
-const MODE_TITLES = { todos: 'Tasks', today: 'Today', notes: 'Notes', habits: 'Habits', settings: 'Reminders & notifications' };
+// --- Mode switching (Today / Tasks / Notes) ---
+const MODE_TITLES = { todos: 'Tasks', today: 'Today', notes: 'Notes', settings: 'Reminders & notifications' };
 const WORKSPACE_TITLES = { tasks: 'Tasks', groceries: 'Groceries', shopping: 'Buys' };
 let secondaryReturnDestination = { mode: 'todos', workspace: 'tasks' };
 function currentWorkspaceSection() {
@@ -165,33 +165,10 @@ function updateTopbarStat() {
         const section = document.getElementById('section-' + currentWorkspaceSection());
         const pending = section?.querySelectorAll('.todo-item:not(.done):not(.archived-item)').length || 0;
         if (pending > 0) count = pending + ' left';
-    } else if (activeMode === 'habits') {
-        // Only daily habits feed the "done/total" stat; periodic goals track
-        // their own per-period progress.
-        const daily = '#habits-content .habit-section[data-period="day"] .habit-item';
-        const total = document.querySelectorAll(daily).length;
-        const done = document.querySelectorAll(daily + '.done').length;
-        if (total > 0) count = done + '/' + total;
     }
 
     const text = count ? date + ' · ' + count : date;
     stat.textContent = document.body.dataset.offlineCopy ? 'Offline · ' + text : text;
-}
-
-function updateHabitsBadge() {
-    const badge = document.getElementById('habits-badge');
-    if (!badge) return;
-    // The nav dot reflects unfinished daily habits only, not periodic goals.
-    const daily = '#habits-content .habit-section[data-period="day"] .habit-item';
-    const items = document.querySelectorAll(daily);
-    if (items.length === 0) { badge.hidden = true; return; }
-    const undone = document.querySelectorAll(daily + ':not(.done)').length;
-    if (undone > 0) {
-        badge.textContent = '';
-        badge.hidden = false;
-    } else {
-        badge.hidden = true;
-    }
 }
 
 function setupMobileKeyboard() {
@@ -243,24 +220,18 @@ document.addEventListener('keydown', function(e) {
 
 document.body.addEventListener('htmx:afterSwap', function(e) {
     const id = e.detail.target?.id;
-    if (id === 'todo-items' || id === 'habits-content') updateTopbarStat();
-    if (id === 'habits-content') updateHabitsBadge();
-    const path = e.detail.requestConfig?.path;
-    if (path === '/todos/add' || path === '/habits/add') {
-        const selector = path === '/todos/add' ? '.todo-item[data-task-id]' : '.habit-item[data-habit-id]';
+    if (id === 'todo-items') updateTopbarStat();
+    if (e.detail.requestConfig?.path === '/todos/add') {
         const previous = e.detail.target?._itemIDsBeforeSwap || new Set();
-        e.detail.target?.querySelectorAll(selector).forEach(item => {
-            const itemID = item.dataset.taskId || item.dataset.habitId;
-            if (!previous.has(itemID)) item.classList.add('item-entering');
+        e.detail.target?.querySelectorAll('.todo-item[data-task-id]').forEach(item => {
+            if (!previous.has(item.dataset.taskId)) item.classList.add('item-entering');
         });
     }
 });
 
 document.body.addEventListener('htmx:beforeSwap', function(e) {
-    const path = e.detail.requestConfig?.path;
-    if (path !== '/todos/add' && path !== '/habits/add') return;
-    const selector = path === '/todos/add' ? '.todo-item[data-task-id]' : '.habit-item[data-habit-id]';
-    e.detail.target._itemIDsBeforeSwap = new Set([...e.detail.target.querySelectorAll(selector)].map(item => item.dataset.taskId || item.dataset.habitId));
+    if (e.detail.requestConfig?.path !== '/todos/add') return;
+    e.detail.target._itemIDsBeforeSwap = new Set([...e.detail.target.querySelectorAll('.todo-item[data-task-id]')].map(item => item.dataset.taskId));
 });
 
 // Route hx-confirm through the app's custom dialog instead of window.confirm,
@@ -275,7 +246,7 @@ document.body.addEventListener('htmx:confirm', function(e) {
 
 // Surface otherwise-silent HTMX failures (server error or no connection).
 // htmx never swaps a non-2xx response, so without this the specific reason a
-// request was rejected ("Habit already exists", "Cannot delete the last note")
+// request was rejected ("Cannot delete the last note")
 // would be discarded. 4xx bodies are our own http.Error text and are meant for
 // the user; 5xx bodies are not, so those keep the generic message.
 document.body.addEventListener('htmx:responseError', function(e) {
@@ -350,8 +321,7 @@ function hideToast() {
 document.body.addEventListener('sbUndo', function(e) {
     const d = e.detail || {};
     if (!d.id) return;
-    const isHabit = d.kind === 'habit';
-    showToast(isHabit ? 'Habit archived' : d.kind === 'project' ? 'Project archived' : d.kind === 'stage' ? 'Stage archived' : 'Task archived', {
+    showToast(d.kind === 'project' ? 'Project archived' : d.kind === 'stage' ? 'Stage archived' : 'Task archived', {
         label: 'Undo',
         onClick: function() { undoArchive(d.kind, d.id); }
     });
@@ -367,19 +337,11 @@ function undoArchive(kind, id) {
     // return=list asks the restore handler for the live list rather than the
     // archive view it would normally re-render.
     if (kind === 'project' || kind === 'stage') { structureAction(kind,id,'restore'); return; }
-    if (kind === 'habit') {
-        htmx.ajax('POST', '/habits/restore', {
-            target: '#habits-content',
-            swap: 'innerHTML',
-            values: { id: id, return: 'list' }
-        });
-    } else {
-        htmx.ajax('POST', '/todos/restore', {
-            target: '#todo-items',
-            swap: 'innerHTML',
-            values: { id: id, return: 'list' }
-        });
-    }
+    htmx.ajax('POST', '/todos/restore', {
+        target: '#todo-items',
+        swap: 'innerHTML',
+        values: { id: id, return: 'list' }
+    });
 }
 
 // /logout is POST-only, so submit a form rather than navigating (a GET).
@@ -399,105 +361,6 @@ async function showNotesArchive() {
 
 function hideNotesArchive() {
     htmx.ajax('GET', '/notes', '#notes-content');
-}
-
-// Habit creation dialog: name plus an optional period + target for goals.
-// Reuses the shared #custom-dialog sheet, unhiding the extra fields and
-// restoring their hidden state on cleanup so plain showPrompt() stays pristine.
-function showHabitDialog(initial = {}) {
-    return new Promise(resolve => {
-        const dialog = document.getElementById('custom-dialog');
-        const labelEl = document.getElementById('custom-dialog-label');
-        const input = document.getElementById('custom-dialog-input');
-        const extra = document.getElementById('custom-dialog-extra');
-        const periodGroup = document.getElementById('custom-dialog-period');
-        const chips = periodGroup.querySelectorAll('.chip');
-        const targetInput = document.getElementById('custom-dialog-target');
-        const confirmBtn = document.getElementById('custom-dialog-confirm');
-        const cancelBtn = document.getElementById('custom-dialog-cancel');
-
-        function selectPeriod(p) {
-            chips.forEach(c => c.classList.toggle('active', c.dataset.period === p));
-            targetInput.hidden = p === 'day'; // target only applies to periodic goals
-        }
-        function currentPeriod() {
-            const active = periodGroup.querySelector('.chip.active');
-            return active ? active.dataset.period : 'day';
-        }
-
-        labelEl.textContent = initial.id ? 'Edit habit' : 'New habit';
-        input.value = initial.name || '';
-        targetInput.value = initial.target || '1';
-        selectPeriod(initial.period || 'day');
-        extra.hidden = false;
-        openModal(dialog, input);
-        setTimeout(() => input.select(), 0);
-
-        function onChipClick(e) {
-            const chip = e.target.closest('.chip');
-            if (chip) selectPeriod(chip.dataset.period);
-        }
-        function submit() {
-            const name = input.value.trim();
-            if (!name) { cleanup(); resolve(null); return; }
-            const period = currentPeriod();
-            let target = 1;
-            if (period !== 'day') {
-                target = parseInt(targetInput.value, 10);
-                if (!Number.isFinite(target) || target < 1) target = 1;
-            }
-            cleanup();
-            resolve({ name, period, target: String(target) });
-        }
-        function dismiss() { cleanup(); resolve(null); }
-        function cleanup() {
-            closeModal(dialog);
-            extra.hidden = true;
-            selectPeriod('day');
-            confirmBtn.removeEventListener('click', submit);
-            cancelBtn.removeEventListener('click', dismiss);
-            input.removeEventListener('keydown', onKey);
-            periodGroup.removeEventListener('click', onChipClick);
-            dialog.removeEventListener('click', onBackdrop);
-        }
-        function onKey(e) {
-            if (e.key === 'Enter') { e.preventDefault(); submit(); }
-            if (e.key === 'Escape') dismiss();
-        }
-        function onBackdrop(e) { if (e.target === dialog) dismiss(); }
-
-        confirmBtn.addEventListener('click', submit);
-        cancelBtn.addEventListener('click', dismiss);
-        input.addEventListener('keydown', onKey);
-        periodGroup.addEventListener('click', onChipClick);
-        dialog.addEventListener('click', onBackdrop);
-    });
-}
-
-async function addHabit() {
-    const goal = await showHabitDialog();
-    if (!goal) return;
-    htmx.ajax('POST', '/habits/add', {
-        target: '#habits-content',
-        values: goal
-    });
-}
-
-async function editHabit(button) {
-    const item = button.closest('.habit-item');
-    if (!item) return;
-    const goal = await showHabitDialog({ id: item.dataset.habitId, name: item.dataset.habitName, period: item.dataset.habitPeriod, target: item.dataset.habitTarget });
-    if (!goal) return;
-    htmx.ajax('POST', '/habits/update', { target: '#habits-content', values: { id: item.dataset.habitId, ...goal } });
-}
-
-function showHabitsArchive() {
-    hideToast(); // an undo would render the live list back over the archive
-    htmx.ajax('GET', '/habits/archive', '#habits-content');
-}
-
-function hideHabitsArchive() {
-    htmx.ajax('GET', '/habits', '#habits-content');
 }
 
 // --- Inactivity auto-logout ---
@@ -583,7 +446,6 @@ function refreshCurrentView() {
         const editor=document.getElementById('note-editor');
         if(editor && !editor.dataset.dirty && !noteSavePending) { preserveScroll(); loadNote(editor.dataset.noteId); }
     }
-    if(mode==='habits') { preserveScroll(); htmx.ajax('GET','/habits','#habits-content'); }
     if(mode==='today') { preserveScroll(); htmx.ajax('GET','/today','#today-content'); }
     if(typeof preparePush==='function') preparePush();
 }
@@ -661,149 +523,6 @@ function hideInactivityWarning() {
     }
 }
 
-// --- Inline habit editing ---
-function startHabitRename(spanEl) {
-    const originalName = spanEl.textContent.trim();
-    const item = spanEl.closest('.habit-item');
-    if (!item) return null;
-    const id = item.querySelector('input[name="id"]').value;
-
-    const input = document.createElement('input');
-    input.type = 'text';
-    input.value = originalName;
-    input.className = 'todo-edit-input';
-    spanEl.replaceWith(input);
-    input.focus();
-    input.select();
-
-    let done = false, saving = false;
-    async function save() {
-        if (done || saving) return;
-        const newName = input.value.trim();
-        if (!newName || newName === originalName) { done = true; input.replaceWith(spanEl); spanEl.focus(); return; }
-        saving = true;
-        input.disabled = true;
-        try {
-            await htmx.ajax('POST', '/habits/rename', { target: '#habits-content', swap: 'innerHTML', values: { id, name: newName } });
-            done = true;
-        } catch (_) {
-            saving = false;
-            input.disabled = false;
-            input.setAttribute('aria-invalid', 'true');
-            input.focus();
-            showToast('Could not rename habit. Your edit is still here.');
-        }
-    }
-    function cancel() {
-        if (done) return;
-        done = true;
-        input.replaceWith(spanEl);
-    }
-    input.addEventListener('keydown', e => {
-        if (e.key === 'Enter') { e.preventDefault(); save(); }
-        if (e.key === 'Escape') cancel();
-    });
-    input.addEventListener('blur', save);
-    return input;
-}
-
-// Pointer users can edit directly; long press remains as a forgiving mobile
-// gesture for people already accustomed to it.
-const LONG_PRESS_MS = 500;
-const LONG_PRESS_SLOP_PX = 10;
-
-function editableLabel(target) {
-    if (!target || typeof target.closest !== 'function') return null;
-    const label = target.closest('.habit-name');
-    if (!label) return null;
-    const row = label.closest('.habit-item');
-    if (!row || row.classList.contains('archived-item')) return null;
-    return label;
-}
-
-function beginInlineEdit(label) {
-    return startHabitRename(label);
-}
-
-document.addEventListener('dblclick', function(e) {
-    const label = editableLabel(e.target);
-    if (label) beginInlineEdit(label);
-});
-document.addEventListener('click', function(e) {
-    const label = e.target.closest?.('[data-action="rename-habit"]');
-    if (label) beginInlineEdit(label);
-});
-
-(function() {
-    let timer = null;
-    let startX = 0, startY = 0;
-    let pendingInput = null;
-    let justFired = false;
-
-    function cancelPress() {
-        if (timer) { clearTimeout(timer); timer = null; }
-    }
-
-    document.addEventListener('pointerdown', function(e) {
-        // Mouse keeps dblclick; a 500ms hold with a mouse is not an edit intent.
-        if (e.pointerType === 'mouse' || !e.isPrimary) return;
-        // Reset before the label check: if a previous long press never produced
-        // the click we expected to swallow, a stale flag here would eat the
-        // user's next unrelated tap.
-        cancelPress();
-        justFired = false;
-        pendingInput = null;
-        const label = editableLabel(e.target);
-        if (!label) return;
-        startX = e.clientX;
-        startY = e.clientY;
-        timer = setTimeout(function() {
-            timer = null;
-            justFired = true;
-            // Swap now so the hold gives immediate visual feedback. focus() from
-            // a timer doesn't open the iOS keyboard (not a user gesture), so the
-            // input is re-focused on pointerup below, which is one.
-            pendingInput = beginInlineEdit(label);
-        }, LONG_PRESS_MS);
-    }, { passive: true });
-
-    document.addEventListener('pointermove', function(e) {
-        if (!timer) return;
-        if (Math.abs(e.clientX - startX) > LONG_PRESS_SLOP_PX ||
-            Math.abs(e.clientY - startY) > LONG_PRESS_SLOP_PX) cancelPress();
-    }, { passive: true });
-
-    document.addEventListener('pointerup', function() {
-        cancelPress();
-        if (pendingInput) {
-            pendingInput.focus();
-            pendingInput.select();
-            pendingInput = null;
-        }
-    }, { passive: true });
-
-    document.addEventListener('pointercancel', function() {
-        cancelPress();
-        pendingInput = null;
-    }, { passive: true });
-
-    window.addEventListener('scroll', cancelPress, { passive: true });
-
-    // Swallow the click synthesized at the end of a long press so it can't also
-    // trigger whatever now sits under the finger.
-    document.addEventListener('click', function(e) {
-        if (!justFired) return;
-        justFired = false;
-        e.preventDefault();
-        e.stopPropagation();
-    }, true);
-
-    // Suppress the iOS callout / context menu on labels we handle ourselves.
-    document.addEventListener('contextmenu', function(e) {
-        if (editableLabel(e.target)) e.preventDefault();
-    });
-})();
-
 // --- Global search ---
 function openSearch() {
     const overlay = document.getElementById('search-overlay');
@@ -859,7 +578,6 @@ function openNoteResult(id) {
 
 function openTodoResult(category,id) { closeSearch(); switchMode('todos'); openTask(id); }
 function openProjectResult(id) { closeSearch(); openProject(id); }
-function openHabitsResult() { closeSearch(); switchMode('habits'); }
 
 document.addEventListener('keydown', function(e) {
     if (e.key !== 'Escape') return;
@@ -881,7 +599,6 @@ document.addEventListener('DOMContentLoaded', function() {
     }
     setupInactivityLogout();
     updateTopbarStat();
-    updateHabitsBadge();
     setupMobileKeyboard();
 
 });

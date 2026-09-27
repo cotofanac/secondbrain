@@ -249,18 +249,6 @@ func TestWorkspaceTemplatesAndSearch(t *testing.T) {
 	}
 }
 
-func TestHabitTemplateExposesKeyboardRename(t *testing.T) {
-	setupWorkspaceDB(t)
-	execSQL(t, `INSERT INTO habits(id,name,period,target) VALUES(1,'Read','day',1)`)
-	w := httptest.NewRecorder()
-	handleHabits(w, httptest.NewRequest(http.MethodGet, "/habits", nil))
-	requireOK(t, w)
-	body := w.Body.String()
-	if !strings.Contains(body, `data-action="rename-habit"`) || !strings.Contains(body, `aria-label="Rename Read"`) {
-		t.Fatalf("habit rename is not keyboard accessible: %s", body)
-	}
-}
-
 func TestConcurrentNoteArchiveKeepsOneActive(t *testing.T) {
 	setupWorkspaceDB(t)
 	execSQL(t, `INSERT INTO notes(title,content) VALUES('Second','')`)
@@ -399,7 +387,6 @@ func TestTodaySeparatesAttentionUpcomingAndSuggestions(t *testing.T) {
 func TestWeeklyReviewsAreRetiredWithoutDeletingHistory(t *testing.T) {
 	setupWorkspaceDB(t)
 	setSetting("task_enabled", "false")
-	setSetting("habit_enabled", "false")
 	setSetting("review_enabled", "true")
 	setSetting("review_enabled_at", "2026-08-01T00:00:00Z")
 	now := time.Date(2026, 9, 14, 9, 0, 0, 0, appLocation())
@@ -472,7 +459,7 @@ func TestDisabledExpiredDeliveryAndSettings(t *testing.T) {
 	if before.Timezone != "Europe/Bucharest" {
 		t.Fatal("invalid save altered timezone")
 	}
-	good := formRequest(t, handleSaveSettings, "/settings/save", url.Values{"timezone": {"Europe/London"}, "task_time": {"10:00"}, "habit_time": {"21:00"}, "task_enabled": {"on"}})
+	good := formRequest(t, handleSaveSettings, "/settings/save", url.Values{"timezone": {"Europe/London"}, "task_time": {"10:00"}, "task_enabled": {"on"}})
 	requireOK(t, good)
 	if appLocation().String() != "Europe/London" {
 		t.Fatal("shared calendar timezone was not updated")
@@ -578,14 +565,12 @@ func TestConcurrentLoginAttemptsRespectLockout(t *testing.T) {
 func TestPermanentDeleteOnlyRemovesArchivedRows(t *testing.T) {
 	setupWorkspaceDB(t)
 	execSQL(t, `INSERT INTO todos(id,category,text) VALUES(900,'todo','Active task')`)
-	execSQL(t, `INSERT INTO habits(id,name) VALUES(900,'Active habit')`)
 	var noteID int
 	db.QueryRow(`SELECT id FROM notes WHERE archived=0`).Scan(&noteID)
 	id := url.Values{"id": {"900"}}
 	formRequest(t, handlePermanentDeleteTodo, "/todos/permanent-delete", id)
-	formRequest(t, handlePermanentDeleteHabit, "/habits/permanent-delete", id)
 	formRequest(t, handlePermanentDeleteNote, "/notes/permanent-delete", url.Values{"id": {strconv.Itoa(noteID)}})
-	for _, q := range []string{`SELECT count(*) FROM todos WHERE id=900`, `SELECT count(*) FROM habits WHERE id=900`, `SELECT count(*) FROM notes WHERE id=` + strconv.Itoa(noteID)} {
+	for _, q := range []string{`SELECT count(*) FROM todos WHERE id=900`, `SELECT count(*) FROM notes WHERE id=` + strconv.Itoa(noteID)} {
 		var n int
 		db.QueryRow(q).Scan(&n)
 		if n != 1 {
@@ -598,23 +583,6 @@ func TestPermanentDeleteOnlyRemovesArchivedRows(t *testing.T) {
 	db.QueryRow(`SELECT count(*) FROM todos WHERE id=900`).Scan(&n)
 	if n != 0 {
 		t.Fatal("archived task was not deleted")
-	}
-}
-
-func TestIncrementHabitRequiresActiveGoal(t *testing.T) {
-	setupWorkspaceDB(t)
-	execSQL(t, `INSERT INTO habits(id,name,period,target) VALUES(1,'Walk','day',1),(2,'Read','week',3),(3,'Old','week',2)`)
-	execSQL(t, `UPDATE habits SET archived=1 WHERE id=3`)
-	for id, want := range map[string]int{"1": 400, "3": 404, "99": 404} {
-		if w := formRequest(t, handleIncrementHabit, "/habits/increment", url.Values{"id": {id}}); w.Code != want {
-			t.Errorf("increment habit %s = %d, want %d", id, w.Code, want)
-		}
-	}
-	requireOK(t, formRequest(t, handleIncrementHabit, "/habits/increment", url.Values{"id": {"2"}}))
-	var logs int
-	db.QueryRow(`SELECT COALESCE(SUM(count),0) FROM habit_logs`).Scan(&logs)
-	if logs != 1 {
-		t.Fatalf("habit log count = %d, want 1", logs)
 	}
 }
 

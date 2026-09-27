@@ -351,7 +351,8 @@ function routeLocation() {
     if (q.get('task')) openTask(Number(q.get('task')));
     else if (q.get('project')) openProject(Number(q.get('project')));
     else if (q.get('view') === 'review') openReview(q.get('review'));
-    else if (q.get('view') === 'today') openToday();
+    // Habits were folded into Today; keep old links working.
+    else if (q.get('view') === 'today' || q.get('view') === 'habits') openToday();
     else if (q.get('view') === 'settings') openSettings();
     else if (q.get('note')) openNoteResult(Number(q.get('note')));
     else if (q.get('stage')) openStageResult(Number(q.get('stage')));

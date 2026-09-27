@@ -68,5 +68,26 @@ func migrateWorkspace(conn *sql.DB, now time.Time) error {
 			return err
 		}
 	}
+
+	if err = tx.QueryRow(`SELECT count(*) FROM schema_migrations WHERE version=3`).Scan(&count); err != nil {
+		return err
+	}
+	if count == 0 {
+		// Repeating tasks: completing one creates the next occurrence, which
+		// remembers the row it came from so reopening can take it back.
+		for _, statement := range []string{
+			`ALTER TABLE todos ADD COLUMN repeat TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE todos ADD COLUMN repeated_from INTEGER`,
+			`CREATE INDEX idx_todos_repeated_from ON todos(repeated_from)`,
+		} {
+			if _, err = tx.Exec(statement); err != nil {
+				return fmt.Errorf("repeating task migration: %w", err)
+			}
+		}
+		if _, err = tx.Exec(`INSERT INTO schema_migrations VALUES(3,?)`, now.UTC().Format(time.RFC3339)); err != nil {
+			return err
+		}
+	}
+
 	return tx.Commit()
 }

@@ -23,10 +23,9 @@ type reminderTime struct {
 }
 
 var (
-	// Defaults are used when the env var is unset. Overridden in
-	// configurePushReminders from HABIT_REMINDER_TIME / TASK_REMINDER_TIME.
-	habitReminder = reminderTime{hour: 20, min: 0, enabled: true}
-	taskReminder  = reminderTime{hour: 9, min: 0, enabled: true}
+	// Default used when the env var is unset. Overridden in
+	// configurePushReminders from TASK_REMINDER_TIME.
+	taskReminder = reminderTime{hour: 9, min: 0, enabled: true}
 
 	vapidPublicKey  string
 	vapidPrivateKey string
@@ -99,16 +98,13 @@ func parseReminderTime(raw string, def reminderTime) (reminderTime, error) {
 // configurePushReminders reads the reminder-time env vars. Call from main().
 func configurePushReminders() {
 	var err error
-	if habitReminder, err = parseReminderTime(os.Getenv("HABIT_REMINDER_TIME"), habitReminder); err != nil {
-		log.Fatalf("HABIT_REMINDER_TIME: %v", err)
-	}
 	if taskReminder, err = parseReminderTime(os.Getenv("TASK_REMINDER_TIME"), taskReminder); err != nil {
 		log.Fatalf("TASK_REMINDER_TIME: %v", err)
 	}
 	if sub := normalizePushSubject(os.Getenv("PUSH_SUBJECT")); sub != "" {
 		pushSubject = sub
 	}
-	log.Printf("Reminders: habits %s, tasks %s", reminderDesc(habitReminder), reminderDesc(taskReminder))
+	log.Printf("Reminders: tasks %s", reminderDesc(taskReminder))
 }
 
 // normalizePushSubject accepts the conventional VAPID spelling (mailto:...) as

@@ -6,6 +6,7 @@
  {{if eq .Task.Category "todo"}}
  <div class="detail-properties">
   <label>Due date<input type="date" name="due_date" value="{{.Task.DueDate}}"></label>
+  <label>Repeat<select name="repeat">{{$r := .Task.Repeat}}<option value="" {{if eq $r ""}}selected{{end}}>Never</option><option value="daily" {{if eq $r "daily"}}selected{{end}}>Daily</option><option value="weekly" {{if eq $r "weekly"}}selected{{end}}>Weekly</option><option value="monthly" {{if eq $r "monthly"}}selected{{end}}>Monthly</option><option value="yearly" {{if eq $r "yearly"}}selected{{end}}>Yearly</option></select></label>
   <label>Project<select name="project_id" data-call="filterStageOptions" data-args='["$form"]' data-event="change"><option value="0">No project</option>{{range .Projects}}<option value="{{.ID}}" {{if eq .ID $.Task.ProjectID}}selected{{end}}>{{.Name}}</option>{{end}}</select></label>
   <label>Stage<select name="stage_id"><option value="0">No stage</option>{{range .Projects}}{{$pid:=.ID}}{{range .Stages}}{{if not .Archived}}<option data-project="{{$pid}}" value="{{.ID}}" {{if eq .ID $.Task.StageID}}selected{{end}}>{{.Name}}</option>{{end}}{{end}}{{end}}</select></label>
  </div>

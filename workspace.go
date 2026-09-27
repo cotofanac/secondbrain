@@ -116,13 +116,13 @@ func loadWorkspace() (Workspace, error) {
 		return group
 	}
 	// Dated tasks first, soonest (so overdue) on top; undated tasks newest first.
-	rows, err = db.Query(`SELECT id,category,text,due_date,done,COALESCE(project_id,0),COALESCE(stage_id,0),revision FROM todos WHERE archived=0 ORDER BY done,due_date='',due_date,position,created_at DESC,id DESC`)
+	rows, err = db.Query(`SELECT id,category,text,due_date,done,COALESCE(project_id,0),COALESCE(stage_id,0),revision,repeat FROM todos WHERE archived=0 ORDER BY done,due_date='',due_date,position,created_at DESC,id DESC`)
 	if err != nil {
 		return w, err
 	}
 	for rows.Next() {
 		var t Todo
-		if err = rows.Scan(&t.ID, &t.Category, &t.Text, &t.DueDate, &t.Done, &t.ProjectID, &t.StageID, &t.Revision); err != nil {
+		if err = rows.Scan(&t.ID, &t.Category, &t.Text, &t.DueDate, &t.Done, &t.ProjectID, &t.StageID, &t.Revision, &t.Repeat); err != nil {
 			rows.Close()
 			return w, err
 		}
@@ -288,7 +288,7 @@ func handleWorkspaceProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rows.Close()
-	rows, err = db.Query(`SELECT id,category,text,due_date,done,COALESCE(stage_id,0),revision FROM todos WHERE project_id=? AND archived=0 ORDER BY done,due_date='',due_date,position,created_at DESC,id DESC`, id)
+	rows, err = db.Query(`SELECT id,category,text,due_date,done,COALESCE(stage_id,0),revision,repeat FROM todos WHERE project_id=? AND archived=0 ORDER BY done,due_date='',due_date,position,created_at DESC,id DESC`, id)
 	if err != nil {
 		http.Error(w, "Could not load project", 500)
 		return
@@ -296,7 +296,7 @@ func handleWorkspaceProject(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 	for rows.Next() {
 		var t Todo
-		if err = rows.Scan(&t.ID, &t.Category, &t.Text, &t.DueDate, &t.Done, &t.StageID, &t.Revision); err != nil {
+		if err = rows.Scan(&t.ID, &t.Category, &t.Text, &t.DueDate, &t.Done, &t.StageID, &t.Revision, &t.Repeat); err != nil {
 			http.Error(w, "Could not load project", 500)
 			return
 		}
@@ -534,7 +534,7 @@ func loadTaskChoices() ([]Project, error) {
 
 func getTask(id int) (Todo, error) {
 	var t Todo
-	err := db.QueryRow(`SELECT id,category,text,due_date,done,COALESCE(project_id,0),COALESCE(stage_id,0),revision FROM todos t WHERE t.id=? AND `+activeTaskSQL, id).Scan(&t.ID, &t.Category, &t.Text, &t.DueDate, &t.Done, &t.ProjectID, &t.StageID, &t.Revision)
+	err := db.QueryRow(`SELECT id,category,text,due_date,done,COALESCE(project_id,0),COALESCE(stage_id,0),revision,repeat FROM todos t WHERE t.id=? AND `+activeTaskSQL, id).Scan(&t.ID, &t.Category, &t.Text, &t.DueDate, &t.Done, &t.ProjectID, &t.StageID, &t.Revision, &t.Repeat)
 	return t, err
 }
 func handleTaskDetail(w http.ResponseWriter, r *http.Request) {
@@ -566,6 +566,11 @@ func handleTaskSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	due := r.FormValue("due_date")
+	repeat := r.FormValue("repeat")
+	if !validRepeat(repeat) {
+		http.Error(w, "Invalid repeat", 400)
+		return
+	}
 	if name == "" || len(name) > 500 {
 		http.Error(w, "Enter task text (up to 500 characters)", 400)
 		return
@@ -591,13 +596,13 @@ func handleTaskSave(w http.ResponseWriter, r *http.Request) {
 	if category == "todo" {
 		p, s, err = validMembership(tx, r.FormValue("project_id"), r.FormValue("stage_id"))
 	} else {
-		due = ""
+		due, repeat = "", ""
 	}
 	if err != nil {
 		http.Error(w, err.Error(), 400)
 		return
 	}
-	res, err := tx.Exec(`UPDATE todos SET text=?,due_date=?,project_id=NULLIF(?,0),stage_id=NULLIF(?,0),revision=revision+1 WHERE id=? AND revision=?`, name, due, p, s, id, revision)
+	res, err := tx.Exec(`UPDATE todos SET text=?,due_date=?,repeat=?,project_id=NULLIF(?,0),stage_id=NULLIF(?,0),revision=revision+1 WHERE id=? AND revision=?`, name, due, repeat, p, s, id, revision)
 	if err == nil {
 		if n, countErr := res.RowsAffected(); countErr != nil {
 			err = countErr

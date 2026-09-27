@@ -7,7 +7,6 @@
  <div class="today-stats" aria-label="Today's progress">
   <div><strong>{{.CompletedToday}}</strong><span>completed</span></div>
   <div><strong>{{.DueLeft}}</strong><span>need attention</span></div>
-  <div><strong>{{.DailyDone}}/{{.DailyTotal}}</strong><span>daily habits</span></div>
  </div>
 
  <form class="capture-form today-capture" hx-post="/todos/add" hx-target="#today-content">
@@ -23,26 +22,6 @@
   {{range .Due}}{{template "today-task" .}}{{end}}
  </section>
  {{else}}<p class="today-clear">Nothing pressing today.</p>{{end}}
-
- <section class="today-section">
-  <h2>Daily habits <span>{{.DailyDone}} of {{.DailyTotal}}</span></h2>
-  {{range .DailyHabits}}
-  <div class="today-row {{if .Done}}done{{end}}">
-   <form hx-post="/habits/toggle" hx-target="#today-content"><input type="hidden" name="id" value="{{.ID}}"><button type="submit" class="check-btn {{if .Done}}checked{{end}}" aria-label="{{if .Done}}Uncheck{{else}}Complete{{end}} {{.Name}}"><span class="task-checkmark" aria-hidden="true"></span></button></form>
-   <span class="today-row-label">{{.Name}}</span>{{if .StreakLabel}}<span class="habit-streak">{{.StreakLabel}}</span>{{end}}
-  </div>
-  {{else}}<p class="quiet-empty">No daily habits yet.</p>{{end}}
- </section>
-
- {{if .PeriodicHabits}}<section class="today-section">
-  <h2>Goals <span>this period</span></h2>
-  {{range .PeriodicHabits}}
-  <div class="today-row today-goal {{if .Done}}done{{end}}">
-   <form hx-post="/habits/increment" hx-target="#today-content"><input type="hidden" name="id" value="{{.ID}}"><button type="submit" class="check-btn {{if .Done}}checked{{end}}" aria-label="Add progress to {{.Name}}"><span class="task-checkmark" aria-hidden="true"></span></button></form>
-   <span class="today-row-label">{{.Name}} <small>{{.Period}}</small></span><span class="habit-count">{{.Progress}}/{{.Target}}</span>
-  </div>
-  {{end}}
- </section>{{end}}
 
  {{if .Suggestions}}<section class="today-section today-suggestions">
   <h2>What next <span>unscheduled ideas</span></h2>
@@ -67,7 +46,7 @@
 <div class="today-row">
  <form hx-post="/todos/toggle" hx-target="#today-content"><input type="hidden" name="id" value="{{.ID}}"><button type="submit" class="check-btn" aria-label="Complete {{.Text}}"><span class="task-checkmark" aria-hidden="true"></span></button></form>
  <button type="button" class="today-row-label" data-call="openTodayTask" data-args='[{{.ID}}]'>{{.Text}}{{if .Project}}<small>{{.Project}}{{if .Stage}} · {{.Stage}}{{end}}</small>{{end}}</button>
- <div class="today-row-end">{{if .Date}}<span class="todo-date {{if lt .Date .Today}}overdue{{end}}">{{formatDate .Date}}</span>{{end}}
+ <div class="today-row-end">{{if or .Date .Repeat}}<span class="todo-date {{if and .Date (lt .Date .Today)}}overdue{{end}}">{{if .Repeat}}{{template "repeat-badge" .Repeat}}{{end}}{{formatDate .Date}}</span>{{end}}
   <details class="row-menu today-row-menu"><summary class="icon-button" aria-label="Task actions">{{template "icon-more"}}</summary><div class="menu-panel">
    <form hx-post="/today/reschedule" hx-target="#today-content"><input type="hidden" name="id" value="{{.ID}}"><input type="hidden" name="revision" value="{{.Revision}}"><button name="due_date" value="{{.Today}}">Do today</button><button name="due_date" value="{{.Tomorrow}}">Do tomorrow</button></form>
    <button type="button" data-call="openTodayTask" data-args='[{{.ID}}]'>Edit details</button>

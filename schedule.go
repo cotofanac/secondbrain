@@ -24,12 +24,12 @@ func appLocation() *time.Location {
 func appNow() time.Time { return time.Now().In(appLocation()) }
 
 type ScheduleSettings struct {
-	TaskEnabled, HabitEnabled     bool
-	TaskTime, HabitTime, Timezone string
+	TaskEnabled        bool
+	TaskTime, Timezone string
 }
 
 func initScheduleSettings() {
-	defaults := map[string]string{"task_enabled": strconv.FormatBool(taskReminder.enabled), "habit_enabled": strconv.FormatBool(habitReminder.enabled), "review_enabled": "false", "task_time": fmt.Sprintf("%02d:%02d", taskReminder.hour, taskReminder.min), "habit_time": fmt.Sprintf("%02d:%02d", habitReminder.hour, habitReminder.min), "timezone": "Europe/Bucharest", "queued_task": getSetting("task_reminder_sent"), "queued_habit": getSetting("habit_reminder_sent")}
+	defaults := map[string]string{"task_enabled": strconv.FormatBool(taskReminder.enabled), "review_enabled": "false", "task_time": fmt.Sprintf("%02d:%02d", taskReminder.hour, taskReminder.min), "timezone": "Europe/Bucharest", "queued_task": getSetting("task_reminder_sent")}
 	for k, v := range defaults {
 		if _, err := db.Exec(`INSERT OR IGNORE INTO settings(key,value) VALUES(?,?)`, k, v); err != nil {
 			log.Fatalf("Initialize schedules: %v", err)
@@ -53,7 +53,7 @@ func initScheduleSettings() {
 func loadSchedule() (ScheduleSettings, error) {
 	var s ScheduleSettings
 	values := map[string]string{}
-	rows, err := db.Query(`SELECT key,value FROM settings WHERE key IN ('task_enabled','habit_enabled','task_time','habit_time','timezone')`)
+	rows, err := db.Query(`SELECT key,value FROM settings WHERE key IN ('task_enabled','task_time','timezone')`)
 	if err != nil {
 		return s, err
 	}
@@ -69,9 +69,7 @@ func loadSchedule() (ScheduleSettings, error) {
 		return s, err
 	}
 	s.TaskEnabled = values["task_enabled"] == "true"
-	s.HabitEnabled = values["habit_enabled"] == "true"
 	s.TaskTime = values["task_time"]
-	s.HabitTime = values["habit_time"]
 	s.Timezone = values["timezone"]
 	return s, nil
 }
@@ -87,16 +85,14 @@ func registerScheduleRoutes() {
 type TodayItem struct {
 	ID, Revision                int
 	Text, Date, Today, Tomorrow string
-	Project, Stage              string
+	Project, Stage, Repeat      string
 }
 
 type TodayView struct {
-	Date, ISODate               string
-	Overdue, Due, Upcoming      []TodayItem
-	Suggestions                 []TodayItem
-	DailyHabits, PeriodicHabits []Habit
-	CompletedToday, DueLeft     int
-	DailyDone, DailyTotal       int
+	Date, ISODate           string
+	Overdue, Due, Upcoming  []TodayItem
+	Suggestions             []TodayItem
+	CompletedToday, DueLeft int
 }
 
 func scanTodayItems(query string, args ...any) ([]TodayItem, error) {
@@ -108,7 +104,7 @@ func scanTodayItems(query string, args ...any) ([]TodayItem, error) {
 	var items []TodayItem
 	for rows.Next() {
 		var item TodayItem
-		if err = rows.Scan(&item.ID, &item.Text, &item.Date, &item.Revision, &item.Project, &item.Stage); err != nil {
+		if err = rows.Scan(&item.ID, &item.Text, &item.Date, &item.Revision, &item.Project, &item.Stage, &item.Repeat); err != nil {
 			return nil, err
 		}
 		items = append(items, item)
@@ -121,7 +117,7 @@ func loadToday(now time.Time) (TodayView, error) {
 	tomorrow := now.AddDate(0, 0, 1).Format("2006-01-02")
 	limit := now.AddDate(0, 0, 8).Format("2006-01-02")
 	view := TodayView{Date: now.Format("Monday, 2 January"), ISODate: today}
-	base := `SELECT t.id,t.text,t.due_date,t.revision,COALESCE(p.name,''),COALESCE(s.name,'')
+	base := `SELECT t.id,t.text,t.due_date,t.revision,COALESCE(p.name,''),COALESCE(s.name,''),t.repeat
 		FROM todos t LEFT JOIN projects p ON p.id=t.project_id LEFT JOIN stages s ON s.id=t.stage_id
 		WHERE t.category='todo' AND t.done=0 AND ` + activeTaskSQL
 	var err error
@@ -159,17 +155,6 @@ func loadToday(now time.Time) (TodayView, error) {
 		return view, err
 	}
 	view.DueLeft = len(view.Overdue) + len(view.Due)
-	for _, habit := range loadHabitsAt(now) {
-		if habit.Period == "day" {
-			view.DailyHabits = append(view.DailyHabits, habit)
-			view.DailyTotal++
-			if habit.Done {
-				view.DailyDone++
-			}
-		} else {
-			view.PeriodicHabits = append(view.PeriodicHabits, habit)
-		}
-	}
 	return view, nil
 }
 
@@ -237,16 +222,13 @@ func handleSaveSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	vals := map[string]string{"timezone": loc.String()}
-	for _, kind := range []string{"task", "habit"} {
-		raw := r.FormValue(kind + "_time")
-		rt, e := parseReminderTime(raw, reminderTime{})
-		if e != nil || !rt.enabled {
-			http.Error(w, "Enter a valid time for each reminder", 400)
-			return
-		}
-		vals[kind+"_time"] = fmt.Sprintf("%02d:%02d", rt.hour, rt.min)
-		vals[kind+"_enabled"] = strconv.FormatBool(r.FormValue(kind+"_enabled") == "on")
+	rt, err := parseReminderTime(r.FormValue("task_time"), reminderTime{})
+	if err != nil || !rt.enabled {
+		http.Error(w, "Enter a valid reminder time", 400)
+		return
 	}
+	vals["task_time"] = fmt.Sprintf("%02d:%02d", rt.hour, rt.min)
+	vals["task_enabled"] = strconv.FormatBool(r.FormValue("task_enabled") == "on")
 	tx, err := db.Begin()
 	if err != nil {
 		http.Error(w, "DB error", 500)
@@ -375,49 +357,23 @@ func runScheduleTick(now time.Time) error {
 	now = now.In(loc)
 	today := now.Format("2006-01-02")
 	expires := time.Date(now.Year(), now.Month(), now.Day()+1, 0, 0, 0, 0, loc)
-	for _, kind := range []string{"task", "habit"} {
-		enabled, clock := settings.TaskEnabled, settings.TaskTime
-		if kind == "habit" {
-			enabled, clock = settings.HabitEnabled, settings.HabitTime
-		}
-		rt, e := parseReminderTime(clock, reminderTime{})
-		if e != nil {
-			return e
-		}
-		rt.enabled = enabled
-		if !shouldSendReminder(rt, now, "") {
-			continue
-		}
-		key := kind + ":" + today
-		if getSetting("queued_"+kind) == today {
-			continue
-		}
-		var payload pushPayload
-		if kind == "task" {
-			tasks, e := dueTodayTasks(now)
-			if e != nil {
-				return e
-			}
-			if len(tasks) == 0 {
-				continue
-			}
-			payload = pushPayload{Title: "Tasks due", Body: taskReminderBody(tasks), Tag: "tasks", URL: "/?view=today"}
-		} else {
-			left := 0
-			for _, h := range loadHabitsAt(now) {
-				if h.Period == "day" && !h.Done {
-					left++
-				}
-			}
-			if left == 0 {
-				continue
-			}
-			payload = pushPayload{Title: "Habits", Body: fmt.Sprintf("%d habits left today", left), Tag: "habits", URL: "/?view=today"}
-		}
-		if err = queueNotification(key, payload, now, expires); err != nil {
+	rt, err := parseReminderTime(settings.TaskTime, reminderTime{})
+	if err != nil {
+		return err
+	}
+	rt.enabled = settings.TaskEnabled
+	if shouldSendReminder(rt, now, "") && getSetting("queued_task") != today {
+		tasks, err := dueTodayTasks(now)
+		if err != nil {
 			return err
 		}
-		setSetting("queued_"+kind, today)
+		if len(tasks) > 0 {
+			payload := pushPayload{Title: "Tasks due", Body: taskReminderBody(tasks), Tag: "tasks", URL: "/?view=today"}
+			if err = queueNotification("task:"+today, payload, now, expires); err != nil {
+				return err
+			}
+			setSetting("queued_task", today)
+		}
 	}
 	return processDeliveries(now, settings)
 }
@@ -446,7 +402,8 @@ func processDeliveries(now time.Time, settings ScheduleSettings) error {
 		return err
 	}
 	for _, d := range ds {
-		enabled := strings.HasPrefix(d.Key, "task:") && settings.TaskEnabled || strings.HasPrefix(d.Key, "habit:") && settings.HabitEnabled
+		// Only task reminders remain; anything else still queued is skipped.
+		enabled := strings.HasPrefix(d.Key, "task:") && settings.TaskEnabled
 		expiry, _ := time.Parse(time.RFC3339, d.Expires)
 		if !enabled || !now.Before(expiry) {
 			_, err = db.Exec(`UPDATE push_deliveries SET status='skipped',result='Disabled or expired' WHERE endpoint=? AND event_key=?`, d.Endpoint, d.Key)

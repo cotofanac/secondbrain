@@ -1,7 +1,7 @@
 {
   "name": "SecondBrain",
   "short_name": "SecondBrain",
-  "description": "A quiet place for tasks, projects, notes and habits",
+  "description": "A quiet place for tasks, projects, notes and lists",
   "start_url": "/?view=today",
   "launch_handler": {
     "client_mode": "navigate-existing"

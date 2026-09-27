@@ -20,7 +20,8 @@
 {{define "icon-logout"}}<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M10 5H6.5A2.5 2.5 0 0 0 4 7.5v9A2.5 2.5 0 0 0 6.5 19H10M14 8l4 4-4 4M8 12h10"/></svg>{{end}}
 {{define "icon-tasks"}}<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="m8 12 2.5 2.5L16.5 8"/></svg>{{end}}
 {{define "icon-notes"}}<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4.5h9.5a2.5 2.5 0 0 1 2.5 2.5v12.5H8.5A2.5 2.5 0 0 1 6 17V4.5Z"/><path d="M9 9h6M9 13h5"/></svg>{{end}}
-{{define "icon-habits"}}<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20a8 8 0 1 0-8-8"/><path d="m4 12 3 3 6-7"/></svg>{{end}}
+{{define "icon-repeat"}}<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M17 3.5 20 6.5l-3 3"/><path d="M4 11.5v-1a4 4 0 0 1 4-4h12"/><path d="m7 20.5-3-3 3-3"/><path d="M20 12.5v1a4 4 0 0 1-4 4H4"/></svg>{{end}}
+{{define "repeat-badge"}}<span class="todo-repeat" role="img" aria-label="Repeats {{.}}" title="Repeats {{.}}">{{template "icon-repeat"}}</span>{{end}}
 {{define "icon-inbox"}}<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 5.5h15v13h-15z"/><path d="M4.5 14h4l1.5 2h4l1.5-2h4"/></svg>{{end}}
 {{define "icon-folder"}}<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 7.5h6l2-2h9v13h-17z"/></svg>{{end}}
 {{define "icon-cart"}}<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h2l2 10h9l2-7H7"/><circle cx="9" cy="19" r="1"/><circle cx="17" cy="19" r="1"/></svg>{{end}}

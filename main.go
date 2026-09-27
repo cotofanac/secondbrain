@@ -38,7 +38,7 @@ var (
 	templates                *template.Template
 	passcode                 string
 	inactivityTimeoutMinutes = 45
-	// validNameRe guards note titles and habit names. It is deliberately
+	// validNameRe guards note titles and project and stage names. It is deliberately
 	// permissive: anything except C0/C7F control characters is allowed, so
 	// punctuation, accents and emoji all pass. It is not an XSS defence —
 	// html/template escapes every value by context at render time — it only
@@ -66,6 +66,18 @@ func computeAssetVersion() string {
 }
 
 const sessionDuration = 72 * time.Hour
+
+// formatDueDate shows a stored YYYY-MM-DD date as "Jan 2".
+func formatDueDate(s string) string {
+	if s == "" {
+		return ""
+	}
+	t, err := time.Parse("2006-01-02", s)
+	if err != nil {
+		return s
+	}
+	return t.Format("Jan 2")
+}
 
 // parseDBTime parses a timestamp string as returned by go-sqlite3. Directly
 // selected DATETIME columns come back as RFC3339 ("2006-01-02T15:04:05Z"),
@@ -240,16 +252,7 @@ func main() {
 	initScheduleSettings()
 
 	funcMap := template.FuncMap{
-		"formatDate": func(s string) string {
-			if s == "" {
-				return ""
-			}
-			t, err := time.Parse("2006-01-02", s)
-			if err != nil {
-				return s
-			}
-			return t.Format("Jan 2")
-		},
+		"formatDate": formatDueDate,
 		"formatUpdated": func(s string) string {
 			// Stored timestamps are UTC; display them in the server's local zone
 			// (set via TZ) so the wall clock is right.
@@ -353,19 +356,6 @@ func main() {
 	http.HandleFunc("/notes/restore", authMiddleware(handleRestoreNote))
 	http.HandleFunc("/notes/permanent-delete", authMiddleware(handlePermanentDeleteNote))
 
-	// Habits API
-	http.HandleFunc("/habits", authMiddleware(handleHabits))
-	http.HandleFunc("/habits/add", authMiddleware(handleAddHabit))
-	http.HandleFunc("/habits/update", authMiddleware(handleUpdateHabit))
-	http.HandleFunc("/habits/rename", authMiddleware(handleRenameHabit))
-	http.HandleFunc("/habits/toggle", authMiddleware(handleToggleHabit))
-	http.HandleFunc("/habits/increment", authMiddleware(handleIncrementHabit))
-	http.HandleFunc("/habits/decrement", authMiddleware(handleDecrementHabit))
-	http.HandleFunc("/habits/delete", authMiddleware(handleDeleteHabit))
-	http.HandleFunc("/habits/archive", authMiddleware(handleArchiveHabits))
-	http.HandleFunc("/habits/restore", authMiddleware(handleRestoreHabit))
-	http.HandleFunc("/habits/permanent-delete", authMiddleware(handlePermanentDeleteHabit))
-
 	// Push notifications
 	http.HandleFunc("/push/public-key", authMiddleware(handlePushPublicKey))
 	http.HandleFunc("/push/subscribe", authMiddleware(handlePushSubscribe))
@@ -449,22 +439,6 @@ func initDB() {
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 			archived INTEGER DEFAULT 0
 		)`,
-		`CREATE TABLE IF NOT EXISTS habits (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			name TEXT NOT NULL UNIQUE,
-			period TEXT NOT NULL DEFAULT 'day' CHECK(period IN ('day','week','month','year')),
-			target INTEGER NOT NULL DEFAULT 1,
-			archived INTEGER DEFAULT 0,
-			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-		)`,
-		`CREATE TABLE IF NOT EXISTS habit_logs (
-			habit_id INTEGER NOT NULL,
-			date TEXT NOT NULL,
-			count INTEGER NOT NULL DEFAULT 1,
-			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-			PRIMARY KEY (habit_id, date),
-			FOREIGN KEY (habit_id) REFERENCES habits(id) ON DELETE CASCADE
-		)`,
 		`CREATE TABLE IF NOT EXISTS sessions (
 			token TEXT PRIMARY KEY,
 			expires_at TEXT NOT NULL
@@ -500,17 +474,8 @@ func initDB() {
 	db.Exec("UPDATE sessions SET last_seen = datetime('now') WHERE last_seen = ''")
 	db.Exec("DELETE FROM sessions WHERE expires_at <= datetime('now')")
 	db.Exec("ALTER TABLE todos ADD COLUMN archived_at DATETIME DEFAULT NULL")
-	// Foreign keys were historically off, so habit deletes may have left
-	// orphaned logs behind; clean them up once at startup.
-	db.Exec("DELETE FROM habit_logs WHERE habit_id NOT IN (SELECT id FROM habits)")
-	// Periodic goals: a habit gains a period + target, and a log row can
-	// represent several completions on one day via count. These ALTERs fail
-	// silently once applied (house migration pattern). Existing habits become
-	// daily/target=1 and existing log rows read as count=1, so daily behavior
-	// and history are unchanged.
-	db.Exec("ALTER TABLE habits ADD COLUMN period TEXT NOT NULL DEFAULT 'day'")
-	db.Exec("ALTER TABLE habits ADD COLUMN target INTEGER NOT NULL DEFAULT 1")
-	db.Exec("ALTER TABLE habit_logs ADD COLUMN count INTEGER NOT NULL DEFAULT 1")
+	// Habits were removed in favour of repeating tasks. Existing habits and
+	// habit_logs tables are left untouched so no history is lost.
 	db.Exec("CREATE INDEX IF NOT EXISTS idx_todos_category_archived ON todos(category, archived)")
 
 	// Seed a default note if none exist
@@ -584,8 +549,6 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 		db.QueryRow("SELECT content, updated_at, revision FROM notes WHERE id = ?", currentNote.ID).Scan(&currentNote.Content, &currentNote.UpdatedAt, &currentNote.Revision)
 	}
 
-	habits := loadHabits()
-
 	workspace, err := loadWorkspace()
 	if err != nil {
 		http.Error(w, "Could not load workspace", 500)
@@ -600,7 +563,6 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 	data := struct {
 		Notes                    []Note
 		CurrentNote              Note
-		Habits                   HabitsView
 		InactivityTimeoutSeconds int
 		Timezone                 string
 		Workspace                Workspace
@@ -613,7 +575,6 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 		Today:                    today,
 		Notes:                    notesList,
 		CurrentNote:              currentNote,
-		Habits:                   groupHabits(habits),
 		InactivityTimeoutSeconds: inactivityTimeoutMinutes * 60,
 		GrocerySuggestions:       loadSuggestions("groceries"),
 		ShoppingSuggestions:      loadSuggestions("shopping"),
@@ -638,12 +599,13 @@ func nameConflictMessage(table, column, value, noun string) string {
 	return "A " + noun + " with this name already exists"
 }
 
-// hxTrigger asks htmx to dispatch a named client event once the response is
-// swapped in, carrying detail as JSON. encoding/json escapes to ASCII-safe
-// output, which matters because this rides in an HTTP header.
+// hxTrigger asks htmx to dispatch a named client event when the response
+// arrives, carrying detail as JSON. The JSON rides in an HTTP header, which
+// browsers decode as Latin-1, so keep message text ASCII.
 //
-// Two events are in use: "sbUndo" ({kind, id}) offers to reverse a one-tap
-// archive, and "sbNotice" ({message}) shows a plain confirmation.
+// Events in use: "sbUndo" ({kind, id}) offers to reverse a one-tap archive,
+// "sbNotice" ({message}) shows a plain confirmation, and "sbWorkspaceChanged"
+// ({message?}) refreshes the task lists after a change made elsewhere.
 func hxTrigger(w http.ResponseWriter, name string, detail any) {
 	payload, err := json.Marshal(map[string]any{name: detail})
 	if err != nil {
