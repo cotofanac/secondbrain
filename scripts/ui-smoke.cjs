@@ -2,6 +2,8 @@
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const assert = require('node:assert/strict');
 const base = process.env.TEST_BASE_URL || 'http://127.0.0.1:18080';
+// Review screenshots go to the system temp folder unless SCREENSHOT_DIR is set.
+const shot = name => require('node:path').join(process.env.SCREENSHOT_DIR || require('node:os').tmpdir(), name);
 (async () => {
  const browser = await chromium.launch({headless:true,executablePath:process.env.TEST_BROWSER});
  const context = await browser.newContext({viewport:{width:1280,height:900}});
@@ -68,12 +70,12 @@ const base = process.env.TEST_BASE_URL || 'http://127.0.0.1:18080';
  await page.getByRole('button',{name:'Project details',exact:true}).click();
  await page.getByRole('button',{name:'Link note',exact:true}).click();
  await page.getByRole('button',{name:'Quick Notes',exact:true}).waitFor();
- await page.screenshot({path:'/private/tmp/secondbrain-desktop.png',fullPage:true});
+ await page.screenshot({path:shot('secondbrain-desktop.png'),fullPage:true});
  await page.getByRole('button',{name:'Close details',exact:true}).click();
  for (const width of [320,375,390,430,1024,1440]) {
   await page.setViewportSize({width,height:900});
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth && document.getElementById('app').getBoundingClientRect().right<=innerWidth),true,'horizontal overflow '+width);
-  if(width===390)await page.screenshot({path:'/private/tmp/secondbrain-iphone.png',fullPage:true});
+  if(width===390)await page.screenshot({path:shot('secondbrain-iphone.png'),fullPage:true});
  }
  await page.setViewportSize({width:390,height:844});
  const mobileNavGeometry=async()=>page.evaluate(()=>{
@@ -154,7 +156,7 @@ const base = process.env.TEST_BASE_URL || 'http://127.0.0.1:18080';
  const manifest=await page.evaluate(()=>fetch('/static/manifest.json').then(response=>response.json()));
  assert.equal(manifest.start_url,'/?view=today','PWA does not launch into Today');
  assert.equal(manifest.launch_handler?.client_mode,'navigate-existing','desktop PWA can reopen on its stale view');
- await page.emulateMedia({colorScheme:'dark'});await page.screenshot({path:'/private/tmp/secondbrain-today-dark.png',fullPage:true});
+ await page.emulateMedia({colorScheme:'dark'});await page.screenshot({path:shot('secondbrain-today-dark.png'),fullPage:true});
  // The last page loaded online stays readable offline, marked read-only,
  // and logging out removes it from the device.
  await page.goto(base+'/?view=todos');await page.evaluate(()=>navigator.serviceWorker.ready);
