@@ -117,38 +117,20 @@ func TestTaskReminderBody(t *testing.T) {
 	}
 }
 
-// setupTestDB points the global db at a fresh in-memory SQLite instance with the
-// todos table, for exercising query helpers. MaxOpenConns(1) keeps every query
-// on the one connection that owns the :memory: database.
+// setupTestDB points the global db at a fresh in-memory database in the
+// current format. MaxOpenConns(1) keeps every query on the one connection
+// that owns the :memory: database.
 func setupTestDB(t *testing.T) {
 	t.Helper()
-	testDB, err := sql.Open("sqlite3", ":memory:")
+	testDB, err := sql.Open("sqlite3", ":memory:?_foreign_keys=on")
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
 	testDB.SetMaxOpenConns(1)
-	if _, err := testDB.Exec(`CREATE TABLE todos (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		category TEXT NOT NULL,
-		text TEXT NOT NULL,
-		due_date TEXT DEFAULT '',
-		done INTEGER DEFAULT 0,
-		position INTEGER DEFAULT 0,
-		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-		archived INTEGER DEFAULT 0,
-		archived_at DATETIME DEFAULT NULL
-	)`); err != nil {
-		t.Fatalf("create table: %v", err)
-	}
-	db = testDB
-	for _, statement := range []string{`CREATE TABLE IF NOT EXISTS notes(id INTEGER PRIMARY KEY,title TEXT,archived INTEGER DEFAULT 0)`, `CREATE TABLE IF NOT EXISTS push_subscriptions(endpoint TEXT PRIMARY KEY,p256dh TEXT,auth TEXT)`} {
-		if _, err := testDB.Exec(statement); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := migrateWorkspace(testDB, time.Now()); err != nil {
+	if err := migrate(testDB, time.Now()); err != nil {
 		t.Fatal(err)
 	}
+	db = testDB
 	t.Cleanup(func() { testDB.Close() })
 }
 
@@ -159,8 +141,8 @@ func TestDueTodayTasks(t *testing.T) {
 	// text, due_date, done, archived, category
 	insert := func(text, due string, done, archived int, category string) {
 		if _, err := db.Exec(
-			"INSERT INTO todos (category, text, due_date, done, archived, position) VALUES (?, ?, ?, ?, ?, ?)",
-			category, text, due, done, archived, 0,
+			"INSERT INTO todos (category, text, due_date, done, archived) VALUES (?, ?, ?, ?, ?)",
+			category, text, due, done, archived,
 		); err != nil {
 			t.Fatalf("insert %q: %v", text, err)
 		}
@@ -194,24 +176,7 @@ func TestDueTodayTasks(t *testing.T) {
 // holding just the notes table, for exercising the save handler.
 func setupTestNotesDB(t *testing.T) {
 	t.Helper()
-	testDB, err := sql.Open("sqlite3", ":memory:")
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	testDB.SetMaxOpenConns(1)
-	if _, err := testDB.Exec(`CREATE TABLE notes (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		title TEXT NOT NULL UNIQUE,
-		content TEXT DEFAULT '',
-		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-		archived INTEGER DEFAULT 0,
-		revision INTEGER NOT NULL DEFAULT 1
-	)`); err != nil {
-		t.Fatalf("create table: %v", err)
-	}
-	db = testDB
-	t.Cleanup(func() { testDB.Close() })
+	setupTestDB(t)
 }
 
 func saveNoteRequest(t *testing.T, id, content, revision string) *httptest.ResponseRecorder {
@@ -240,7 +205,7 @@ func noteField(t *testing.T, id int, col string) string {
 func TestSaveNoteOptimisticConcurrency(t *testing.T) {
 	setupTestNotesDB(t)
 	if _, err := db.Exec(
-		"INSERT INTO notes (id, title, content, updated_at) VALUES (1, 'n', 'original', '2026-07-01 10:00:00')",
+		"INSERT INTO notes (id, title, content, updated_at) VALUES (1, 'n', 'original', '2026-07-01T10:00:00Z')",
 	); err != nil {
 		t.Fatalf("seed: %v", err)
 	}

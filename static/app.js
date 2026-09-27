@@ -8,7 +8,7 @@ const CALLABLE = new Set([
     'chooseMobileUtility', 'chooseMobileWorkspace', 'closeDetail', 'closeSearch', 'createNote',
     'archiveNote', 'disablePush', 'enablePush', 'filterNotes', 'filterStageOptions', 'hideArchive',
     'hideNotesArchive', 'leaveSecondaryView', 'openMobileWorkspaceSwitcher',
-    'openNoteResult', 'openProject', 'openProjectResult', 'openReview', 'openSearch', 'openSettings',
+    'openNoteResult', 'openProject', 'openProjectResult', 'openSearch', 'openSettings',
     'openStageResult', 'openTask', 'openTaskArchive', 'openToday', 'openTodayTask', 'openTodoResult', 'renameNote',
     'selectNote', 'showNotesArchive', 'structureAction', 'structureCreate', 'structureRename',
     'switchMode', 'switchWorkspaceSection', 'testPush', 'toggleNotePicker'

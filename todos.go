@@ -167,8 +167,9 @@ func handleToggleTodo(w http.ResponseWriter, r *http.Request) {
 	}
 
 	now := appNow()
-	if _, err = tx.Exec(`UPDATE todos SET completed_at=CASE WHEN done=0 THEN ? ELSE NULL END,
- archive_after=CASE WHEN done=0 THEN ? ELSE NULL END, done=1-done WHERE id=?`, now.UTC().Format(time.RFC3339), now.UTC().AddDate(0, 0, 7).Format(time.RFC3339), id); err != nil {
+	// Only tasks record completion and tidy away; list items are just unchecked later.
+	if _, err = tx.Exec(`UPDATE todos SET completed_at=CASE WHEN done=0 AND category='todo' THEN ? END,
+ archive_after=CASE WHEN done=0 AND category='todo' THEN ? END, done=1-done WHERE id=?`, dbTime(now), dbTime(now.AddDate(0, 0, 7)), id); err != nil {
 		http.Error(w, "DB error", http.StatusInternalServerError)
 		return
 	}
@@ -221,7 +222,7 @@ func handleDeleteTodo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, err := db.Exec("UPDATE todos SET archived = 1, archived_at = CURRENT_TIMESTAMP WHERE id = ?", id); err != nil {
+	if _, err := db.Exec("UPDATE todos SET archived = 1, archived_at = ? WHERE id = ?", dbTime(time.Now()), id); err != nil {
 		http.Error(w, "DB error", http.StatusInternalServerError)
 		return
 	}
@@ -304,7 +305,7 @@ func handleRestoreTodo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, err := db.Exec("UPDATE todos SET archived = 0, archive_after=CASE WHEN done=1 THEN ? ELSE NULL END WHERE id = ?", appNow().UTC().AddDate(0, 0, 7).Format(time.RFC3339), id); err != nil {
+	if _, err := db.Exec("UPDATE todos SET archived = 0, archive_after=CASE WHEN done=1 AND category='todo' THEN ? END WHERE id = ?", dbTime(appNow().AddDate(0, 0, 7)), id); err != nil {
 		http.Error(w, "DB error", http.StatusInternalServerError)
 		return
 	}
@@ -351,8 +352,8 @@ func handlePermanentDeleteTodo(w http.ResponseWriter, r *http.Request) {
 
 // Completed tasks tidy away seven days after completion; unfinished work stays.
 func archiveStaleTodos(now time.Time) (int64, error) {
-	res, err := db.Exec(`UPDATE todos SET archived=1, archived_at=CURRENT_TIMESTAMP
- WHERE category='todo' AND archived=0 AND done=1 AND archive_after IS NOT NULL AND archive_after<=?`, now.UTC().Format(time.RFC3339))
+	res, err := db.Exec(`UPDATE todos SET archived=1, archived_at=?
+ WHERE category='todo' AND archived=0 AND done=1 AND archive_after IS NOT NULL AND archive_after<=?`, dbTime(now), dbTime(now))
 	if err != nil {
 		return 0, err
 	}

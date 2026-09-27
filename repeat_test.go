@@ -113,23 +113,20 @@ func TestMigrationDropsHabitData(t *testing.T) {
 	}
 	defer conn.Close()
 	conn.SetMaxOpenConns(1)
+	upgradeLegacyTables(conn)
 	for _, q := range []string{
-		`CREATE TABLE todos(id INTEGER PRIMARY KEY,category TEXT,text TEXT,done INTEGER,archived INTEGER,due_date TEXT)`,
-		`CREATE TABLE notes(id INTEGER PRIMARY KEY)`,
-		`CREATE TABLE push_subscriptions(endpoint TEXT PRIMARY KEY)`,
-		`CREATE TABLE settings(key TEXT PRIMARY KEY,value TEXT NOT NULL)`,
 		`CREATE TABLE habits(id INTEGER PRIMARY KEY,name TEXT)`,
 		`CREATE TABLE habit_logs(habit_id INTEGER NOT NULL REFERENCES habits(id) ON DELETE CASCADE,date TEXT NOT NULL)`,
 		`INSERT INTO habits VALUES(1,'Run')`, `INSERT INTO habit_logs VALUES(1,'2026-09-01')`,
 		`INSERT INTO settings VALUES('habit_time','20:00'),('task_time','09:00')`,
-		`INSERT INTO todos VALUES(1,'todo','Keep me',0,0,'')`,
+		`INSERT INTO todos(id,category,text) VALUES(1,'todo','Keep me')`,
 	} {
 		if _, err = conn.Exec(q); err != nil {
 			t.Fatal(err)
 		}
 	}
 	for i := 0; i < 2; i++ {
-		if err = migrateWorkspace(conn, date("2026-09-27")); err != nil {
+		if err = migrate(conn, date("2026-09-27")); err != nil {
 			t.Fatal(err)
 		}
 	}

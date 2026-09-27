@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type Note struct {
@@ -86,8 +87,8 @@ func handleSaveNote(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	res, err := db.Exec(
-		"UPDATE notes SET content = ?, updated_at = CURRENT_TIMESTAMP, revision = revision + 1 WHERE id = ? AND revision = ?",
-		content, id, revision,
+		"UPDATE notes SET content = ?, updated_at = ?, revision = revision + 1 WHERE id = ? AND revision = ?",
+		content, dbTime(time.Now()), id, revision,
 	)
 	if err != nil {
 		http.Error(w, "DB error", http.StatusInternalServerError)

@@ -1,3 +1,16 @@
+# Database upgrade notes
+
+## Migration 5: clean database format (2026-09)
+
+On first startup this version rebuilds every table in its final shape and copies the rows across. It first writes `secondbrain-before-v5.db` to the backup folder (`BACKUP_DIR`, default `backups/` next to the database) and runs the rebuild in one transaction that checks row counts, timestamps and references before committing.
+
+- All timestamps become UTC RFC3339 text (`2026-09-27T19:00:00Z`); SQLite's `2026-09-27 19:00:00` format is no longer used.
+- Flags, due dates and note content become `NOT NULL`; `repeat` values and all references are enforced.
+- Weekly reviews (`weekly_reviews`, `/review`) and `todos.position` are removed, with the retired review and reminder settings.
+- Grocery and Buys items no longer carry task completion or cleanup stamps.
+
+Older images cannot run on the rebuilt database. To roll back, restore `secondbrain-before-v5.db` along with the older image. A database older than migration 4 is upgraded through migrations 1-4 first, in the same startup.
+
 # Workspace update: database and rollout notes
 
 ## Database changes

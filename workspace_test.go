@@ -62,16 +62,16 @@ func TestMigrationPreservesLegacyData(t *testing.T) {
 	}
 	defer conn.Close()
 	conn.SetMaxOpenConns(1)
-	for _, q := range []string{`CREATE TABLE todos(id INTEGER PRIMARY KEY,category TEXT,text TEXT,done INTEGER,archived INTEGER,due_date TEXT)`, `CREATE TABLE notes(id INTEGER PRIMARY KEY)`, `CREATE TABLE push_subscriptions(endpoint TEXT PRIMARY KEY)`, `INSERT INTO todos VALUES(1,'todo','old open',0,0,'2020-01-01'),(2,'todo','old complete',1,0,''),(3,'todo','archived',0,1,'')`} {
-		if _, err = conn.Exec(q); err != nil {
-			t.Fatal(err)
-		}
-	}
-	now := date("2026-09-13")
-	if err = migrateWorkspace(conn, now); err != nil {
+	// A database from before the numbered migrations.
+	upgradeLegacyTables(conn)
+	if _, err = conn.Exec(`INSERT INTO todos(id,category,text,done,archived,due_date) VALUES(1,'todo','old open',0,0,'2020-01-01'),(2,'todo','old complete',1,0,''),(3,'todo','archived',0,1,'')`); err != nil {
 		t.Fatal(err)
 	}
-	if err = migrateWorkspace(conn, now.AddDate(0, 0, 1)); err != nil {
+	now := date("2026-09-13")
+	if err = migrate(conn, now); err != nil {
+		t.Fatal(err)
+	}
+	if err = migrate(conn, now.AddDate(0, 0, 1)); err != nil {
 		t.Fatal(err)
 	}
 	var count int
@@ -97,16 +97,16 @@ func TestMigrationPreservesLegacyData(t *testing.T) {
 	if err = conn.QueryRow(`SELECT revision FROM todos WHERE id=1`).Scan(&todoRevision); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = conn.Exec(`INSERT INTO notes(id) VALUES(1)`); err != nil {
+	if _, err = conn.Exec(`INSERT INTO notes(id,title) VALUES(1,'n')`); err != nil {
 		t.Fatal(err)
 	}
 	if err = conn.QueryRow(`SELECT revision FROM notes WHERE id=1`).Scan(&noteRevision); err != nil {
 		t.Fatal(err)
 	}
-	if err = conn.QueryRow(`SELECT count(*) FROM schema_migrations WHERE version IN (1,2)`).Scan(&migrationCount); err != nil {
+	if err = conn.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&migrationCount); err != nil {
 		t.Fatal(err)
 	}
-	if todoRevision != 1 || noteRevision != 1 || migrationCount != 2 {
+	if todoRevision != 1 || noteRevision != 1 || migrationCount != schemaVersion {
 		t.Fatalf("revision migration not repeatable: todo=%d note=%d migrations=%d", todoRevision, noteRevision, migrationCount)
 	}
 }
@@ -232,7 +232,7 @@ func TestWorkspaceTemplatesAndSearch(t *testing.T) {
 	for _, c := range []struct {
 		path string
 		h    http.HandlerFunc
-	}{{"/", handleIndex}, {"/workspace", handleWorkspace}, {"/task/detail?id=1", handleTaskDetail}, {"/projects/detail?id=1", handleProjectDetail}, {"/settings", handleSettings}, {"/review", handleReview}, {"/search?q=Car", handleSearch}} {
+	}{{"/", handleIndex}, {"/workspace", handleWorkspace}, {"/task/detail?id=1", handleTaskDetail}, {"/projects/detail?id=1", handleProjectDetail}, {"/settings", handleSettings}, {"/search?q=Car", handleSearch}} {
 		w := httptest.NewRecorder()
 		c.h(w, httptest.NewRequest("GET", c.path, nil))
 		requireOK(t, w)
@@ -349,14 +349,14 @@ func TestTodaySeparatesAttentionUpcomingAndSuggestions(t *testing.T) {
 	setupWorkspaceDB(t)
 	now := time.Date(2026, 9, 17, 10, 0, 0, 0, appLocation())
 	execSQL(t, `INSERT INTO projects(id,name,position) VALUES(1,'Car',1)`)
-	execSQL(t, `INSERT INTO todos(category,text,due_date,done,project_id,position,completed_at) VALUES
-		('todo','Late','2026-09-16',0,NULL,0,NULL),
-		('todo','Due','2026-09-17',0,NULL,0,NULL),
-		('todo','Soon','2026-09-20',0,NULL,0,NULL),
-		('todo','Project next','',0,1,0,NULL),
-		('todo','Project later','',0,1,1,NULL),
-		('todo','Standalone','',0,NULL,0,NULL),
-		('todo','Finished','',1,NULL,0,?)`, now.Add(-time.Hour).UTC().Format(time.RFC3339))
+	execSQL(t, `INSERT INTO todos(category,text,due_date,done,project_id,completed_at) VALUES
+		('todo','Late','2026-09-16',0,NULL,NULL),
+		('todo','Due','2026-09-17',0,NULL,NULL),
+		('todo','Soon','2026-09-20',0,NULL,NULL),
+		('todo','Project next','',0,1,NULL),
+		('todo','Project later','',0,1,NULL),
+		('todo','Standalone','',0,NULL,NULL),
+		('todo','Finished','',1,NULL,?)`, now.Add(-time.Hour).UTC().Format(time.RFC3339))
 	view, err := loadToday(now)
 	if err != nil {
 		t.Fatal(err)
@@ -381,27 +381,6 @@ func TestTodaySeparatesAttentionUpcomingAndSuggestions(t *testing.T) {
 	requireOK(t, w)
 	if body := w.Body.String(); !strings.Contains(body, "What next") || !strings.Contains(body, `value="2026-09-17"`) {
 		t.Fatalf("Today actions missing from rendered view: %s", body)
-	}
-}
-
-func TestWeeklyReviewsAreRetiredWithoutDeletingHistory(t *testing.T) {
-	setupWorkspaceDB(t)
-	setSetting("task_enabled", "false")
-	setSetting("review_enabled", "true")
-	setSetting("review_enabled_at", "2026-08-01T00:00:00Z")
-	now := time.Date(2026, 9, 14, 9, 0, 0, 0, appLocation())
-	execSQL(t, `INSERT INTO weekly_reviews(period_end,content,created_at) VALUES(?,?,?)`, now.UTC().Format(time.RFC3339), `{"Start":"legacy"}`, now.UTC().Format(time.RFC3339))
-	if err := runScheduleTick(now); err != nil {
-		t.Fatal(err)
-	}
-	var n int
-	db.QueryRow(`SELECT count(*) FROM weekly_reviews`).Scan(&n)
-	if n != 1 {
-		t.Fatalf("historical reviews changed: %d", n)
-	}
-	db.QueryRow(`SELECT count(*) FROM push_deliveries WHERE event_key LIKE 'review:%'`).Scan(&n)
-	if n != 0 {
-		t.Fatalf("weekly delivery was queued: %d", n)
 	}
 }
 
@@ -473,7 +452,7 @@ func TestArchivedTaskDeepLinkAndLoginReturn(t *testing.T) {
 	if _, err := getTask(1); err == nil {
 		t.Fatal("archived project task available for editing")
 	}
-	request := httptest.NewRequest("GET", "/?view=review&review=12", nil)
+	request := httptest.NewRequest("GET", "/?view=notes&note=12", nil)
 	w := httptest.NewRecorder()
 	authMiddleware(handleIndex)(w, request)
 	var returnCookie *http.Cookie
@@ -493,7 +472,7 @@ func TestArchivedTaskDeepLinkAndLoginReturn(t *testing.T) {
 	request.AddCookie(returnCookie)
 	w = httptest.NewRecorder()
 	handleLogin(w, request)
-	if w.Header().Get("Location") != "/?view=review&review=12" {
+	if w.Header().Get("Location") != "/?view=notes&note=12" {
 		t.Fatalf("wrong login destination: %s", w.Header().Get("Location"))
 	}
 }

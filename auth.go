@@ -26,14 +26,12 @@ func generateToken() string {
 }
 
 func createSession() (string, error) {
-	if _, err := db.Exec("DELETE FROM sessions WHERE expires_at <= datetime('now')"); err != nil {
+	now := time.Now()
+	if _, err := db.Exec("DELETE FROM sessions WHERE expires_at <= ?", dbTime(now)); err != nil {
 		return "", err
 	}
 	token := generateToken()
-	// Store in SQLite's datetime format so string comparison against
-	// datetime('now') is correct (see the migration note in initDB).
-	expiry := appNow().UTC().Add(sessionDuration).Format("2006-01-02 15:04:05")
-	if _, err := db.Exec("INSERT INTO sessions (token, expires_at, last_seen) VALUES (?, ?, datetime('now'))", token, expiry); err != nil {
+	if _, err := db.Exec("INSERT INTO sessions (token, expires_at, last_seen) VALUES (?, ?, ?)", token, dbTime(now.Add(sessionDuration)), dbTime(now)); err != nil {
 		return "", err
 	}
 	return token, nil
@@ -45,8 +43,8 @@ func validSession(token string) bool {
 	}
 	var lastSeen string
 	err := db.QueryRow(
-		"SELECT last_seen FROM sessions WHERE token = ? AND expires_at > datetime('now')",
-		token,
+		"SELECT last_seen FROM sessions WHERE token = ? AND expires_at > ?",
+		token, dbTime(time.Now()),
 	).Scan(&lastSeen)
 	if err != nil {
 		return false
@@ -54,12 +52,10 @@ func validSession(token string) bool {
 	// Server-side idle expiry: a session unused for longer than twice the
 	// client inactivity window is dead, even if the token/cookie persists.
 	// The 2x margin lets the client-side warning fire first under normal use.
-	if lastSeen != "" {
-		if seen, perr := time.Parse("2006-01-02 15:04:05", lastSeen); perr == nil {
-			idleLimit := 2 * time.Duration(inactivityTimeoutMinutes) * time.Minute
-			if time.Since(seen) > idleLimit {
-				return false
-			}
+	if seen, ok := parseDBTime(lastSeen); ok {
+		idleLimit := 2 * time.Duration(inactivityTimeoutMinutes) * time.Minute
+		if time.Since(seen) > idleLimit {
+			return false
 		}
 	}
 	touchSession(token, lastSeen)
@@ -69,12 +65,10 @@ func validSession(token string) bool {
 // touchSession refreshes last_seen, but at most once a minute to bound writes
 // on a single-connection SQLite database.
 func touchSession(token, lastSeen string) {
-	if lastSeen != "" {
-		if seen, err := time.Parse("2006-01-02 15:04:05", lastSeen); err == nil && time.Since(seen) < time.Minute {
-			return
-		}
+	if seen, ok := parseDBTime(lastSeen); ok && time.Since(seen) < time.Minute {
+		return
 	}
-	db.Exec("UPDATE sessions SET last_seen = datetime('now') WHERE token = ?", token)
+	db.Exec("UPDATE sessions SET last_seen = ? WHERE token = ?", dbTime(time.Now()), token)
 }
 
 func getSessionToken(r *http.Request) string {

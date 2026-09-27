@@ -79,17 +79,10 @@ func formatDueDate(s string) string {
 	return t.Format("Jan 2")
 }
 
-// parseDBTime parses a timestamp string as returned by go-sqlite3. Directly
-// selected DATETIME columns come back as RFC3339 ("2006-01-02T15:04:05Z"),
-// while values wrapped in an expression such as a COALESCE around archived_at
-// come back in SQLite's plain "2006-01-02 15:04:05" form. Both represent UTC.
+// parseDBTime parses a stored UTC RFC3339 timestamp.
 func parseDBTime(s string) (time.Time, bool) {
-	for _, layout := range []string{time.RFC3339, "2006-01-02 15:04:05"} {
-		if t, err := time.ParseInLocation(layout, s, time.UTC); err == nil {
-			return t.UTC(), true
-		}
-	}
-	return time.Time{}, false
+	t, err := time.Parse(time.RFC3339, s)
+	return t.UTC(), err == nil
 }
 
 func renderTemplate(w http.ResponseWriter, r *http.Request, name string, data any) {
@@ -244,9 +237,10 @@ func main() {
 	configurePushReminders()
 	configureTrustedProxies()
 
+	// Backups are configured first: migrating an old database saves a copy.
+	configureBackups(dataDirectory())
 	initDB()
 	defer db.Close()
-	configureBackups(dataDirectory())
 
 	initPush()
 	initScheduleSettings()
@@ -420,61 +414,9 @@ func initDB() {
 	// access and eliminates "database is locked" errors at this scale.
 	db.SetMaxOpenConns(1)
 
-	schema := []string{
-		`CREATE TABLE IF NOT EXISTS todos (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			category TEXT NOT NULL CHECK(category IN ('groceries','todo','shopping')),
-			text TEXT NOT NULL,
-			due_date TEXT DEFAULT '',
-			done INTEGER DEFAULT 0,
-			position INTEGER DEFAULT 0,
-			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-			archived INTEGER DEFAULT 0
-		)`,
-		`CREATE TABLE IF NOT EXISTS notes (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			title TEXT NOT NULL UNIQUE,
-			content TEXT DEFAULT '',
-			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-			archived INTEGER DEFAULT 0
-		)`,
-		`CREATE TABLE IF NOT EXISTS sessions (
-			token TEXT PRIMARY KEY,
-			expires_at TEXT NOT NULL
-		)`,
-		// Web Push subscriptions, one row per installed device/browser. The
-		// endpoint is the push service URL and is unique per subscription.
-		`CREATE TABLE IF NOT EXISTS push_subscriptions (
-			endpoint TEXT PRIMARY KEY,
-			p256dh TEXT NOT NULL,
-			auth TEXT NOT NULL,
-			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-		)`,
-		// Generic key/value store: holds the generated VAPID key pair and the
-		// per-reminder "last sent" date markers used to send at most once a day.
-		`CREATE TABLE IF NOT EXISTS settings (
-			key TEXT PRIMARY KEY,
-			value TEXT NOT NULL
-		)`,
+	if err := migrate(db, appNow()); err != nil {
+		log.Fatalf("Database migration failed: %v", err)
 	}
-	for _, stmt := range schema {
-		if _, err := db.Exec(stmt); err != nil {
-			log.Fatal(err)
-		}
-	}
-
-	// Older sessions stored expires_at as RFC3339 ("...T...Z"), which sorts
-	// wrong against SQLite's datetime('now') ("... ...") in string comparisons
-	// and let tokens live up to ~24h past expiry. Normalize to the SQLite format.
-	db.Exec("UPDATE sessions SET expires_at = replace(replace(expires_at, 'T', ' '), 'Z', '') WHERE expires_at LIKE '%T%'")
-	// Server-side idle expiry: track when each session was last used so a stolen
-	// token can't outlive the inactivity window even with JS disabled.
-	db.Exec("ALTER TABLE sessions ADD COLUMN last_seen TEXT NOT NULL DEFAULT ''")
-	db.Exec("UPDATE sessions SET last_seen = datetime('now') WHERE last_seen = ''")
-	db.Exec("DELETE FROM sessions WHERE expires_at <= datetime('now')")
-	db.Exec("ALTER TABLE todos ADD COLUMN archived_at DATETIME DEFAULT NULL")
-	db.Exec("CREATE INDEX IF NOT EXISTS idx_todos_category_archived ON todos(category, archived)")
 
 	// Seed a default note if none exist
 	var count int
@@ -482,9 +424,6 @@ func initDB() {
 	if count == 0 {
 		db.Exec("INSERT INTO notes (title, content) VALUES (?, ?)", "Quick Notes", "")
 		log.Printf("Database initialized with default note")
-	}
-	if err := migrateWorkspace(db, appNow()); err != nil {
-		log.Fatalf("Database migration failed: %v", err)
 	}
 	log.Printf("Database ready")
 }

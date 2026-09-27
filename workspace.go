@@ -116,7 +116,7 @@ func loadWorkspace() (Workspace, error) {
 		return group
 	}
 	// Dated tasks first, soonest (so overdue) on top; undated tasks newest first.
-	rows, err = db.Query(`SELECT id,category,text,due_date,done,COALESCE(project_id,0),COALESCE(stage_id,0),revision,repeat FROM todos WHERE archived=0 ORDER BY done,due_date='',due_date,position,created_at DESC,id DESC`)
+	rows, err = db.Query(`SELECT id,category,text,due_date,done,COALESCE(project_id,0),COALESCE(stage_id,0),revision,repeat FROM todos WHERE archived=0 ORDER BY done,due_date='',due_date,created_at DESC,id DESC`)
 	if err != nil {
 		return w, err
 	}
@@ -288,7 +288,7 @@ func handleWorkspaceProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rows.Close()
-	rows, err = db.Query(`SELECT id,category,text,due_date,done,COALESCE(stage_id,0),revision,repeat FROM todos WHERE project_id=? AND archived=0 ORDER BY done,due_date='',due_date,position,created_at DESC,id DESC`, id)
+	rows, err = db.Query(`SELECT id,category,text,due_date,done,COALESCE(stage_id,0),revision,repeat FROM todos WHERE project_id=? AND archived=0 ORDER BY done,due_date='',due_date,created_at DESC,id DESC`, id)
 	if err != nil {
 		http.Error(w, "Could not load project", 500)
 		return

@@ -172,9 +172,10 @@ func handlePushTest(w http.ResponseWriter, r *http.Request) {
 	if result.Accepted {
 		status = "accepted"
 	}
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	sent := time.Now()
+	// The key keeps nanoseconds so two tests in one second stay distinct.
 	// An expired subscription may have been deleted by the transport.
-	_, err := db.Exec(`INSERT INTO push_deliveries(endpoint,event_key,payload,next_attempt,expires_at,attempts,status,result) SELECT endpoint,?,'{}',?,?,1,?,? FROM push_subscriptions WHERE endpoint=?`, "test:"+now, now, now, status, result.Message, endpoint)
+	_, err := db.Exec(`INSERT INTO push_deliveries(endpoint,event_key,payload,next_attempt,expires_at,attempts,status,result) SELECT endpoint,?,'{}',?,?,1,?,? FROM push_subscriptions WHERE endpoint=?`, "test:"+sent.UTC().Format(time.RFC3339Nano), dbTime(sent), dbTime(sent), status, result.Message, endpoint)
 	if err != nil {
 		writeJSONError(w, 500, "Test sent, but its status could not be saved")
 		return

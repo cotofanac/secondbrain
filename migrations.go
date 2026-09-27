@@ -6,8 +6,9 @@ import (
 	"time"
 )
 
-// Migrations only add schema, with one deliberate exception: version 4 drops
-// the retired habit tables. Run against a backed-up database before rollout.
+// migrateWorkspace holds migrations 1-4, which upgrade a pre-2026-09 database
+// to the shape the rebuild in migration 5 (schema.go) starts from. They only
+// add schema, except version 4, which drops the retired habit tables.
 func migrateWorkspace(conn *sql.DB, now time.Time) error {
 	tx, err := conn.Begin()
 	if err != nil {

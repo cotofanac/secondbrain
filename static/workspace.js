@@ -337,22 +337,12 @@ function openToday() {
     setDestination({ view: 'today' });
     htmx.ajax('GET', '/today', '#today-content');
 }
-function openReview(id) {
-    if (!id) {
-        openToday();
-        return;
-    }
-    switchMode('today');
-    setDestination({ view: 'review', review: id });
-    htmx.ajax('GET', '/review?id=' + id, '#today-content');
-}
 function routeLocation() {
     const q = new URLSearchParams(location.search);
     if (q.get('task')) openTask(Number(q.get('task')));
     else if (q.get('project')) openProject(Number(q.get('project')));
-    else if (q.get('view') === 'review') openReview(q.get('review'));
-    // Habits were folded into Today; keep old links working.
-    else if (q.get('view') === 'today' || q.get('view') === 'habits') openToday();
+    // Habits and weekly reviews were retired; keep old links working.
+    else if (['today', 'habits', 'review'].includes(q.get('view'))) openToday();
     else if (q.get('view') === 'settings') openSettings();
     else if (q.get('note')) openNoteResult(Number(q.get('note')));
     else if (q.get('stage')) openStageResult(Number(q.get('stage')));

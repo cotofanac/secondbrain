@@ -289,7 +289,7 @@ func dueTodayTasks(now time.Time) ([]string, error) {
 		SELECT text FROM todos t
 		WHERE category = 'todo' AND `+activeTaskSQL+` AND done = 0
 		  AND due_date != '' AND due_date <= ?
-		ORDER BY due_date ASC, position ASC`, now.Format("2006-01-02"))
+		ORDER BY due_date ASC, id ASC`, now.Format("2006-01-02"))
 	if err != nil {
 		return nil, err
 	}

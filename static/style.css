@@ -1088,19 +1088,16 @@ summary::-webkit-details-marker{display:none;}
 .detail-save-status{min-height:1.2em;margin:0;color:var(--text-dim);font-size:.8rem;}
 .detail-form input[type=checkbox]{width:20px;min-height:20px;accent-color:var(--accent);}
 .detail-form .toggle-label{flex-direction:row;align-items:center;min-height:44px;color:var(--text);}
-.detail-pane h3,.settings-card h2,.review-card h2{font-size:1rem;margin:1.3rem 0 .6rem;}
+.detail-pane h3,.settings-card h2{font-size:1rem;margin:1.3rem 0 .6rem;}
 .muted{color:var(--text-dim);font-size:.85rem;}
 #settings-content{max-width:760px;margin:0 auto;}
 #today-content{max-width:760px;margin:0 auto;}
-.settings-card,.review-card{padding:1.1rem;margin-bottom:1rem;background:var(--surface);border:1px solid var(--border);border-radius:14px;}
-.settings-card p,.review-card p{margin:.6rem 0;}
+.settings-card{padding:1.1rem;margin-bottom:1rem;background:var(--surface);border:1px solid var(--border);border-radius:14px;}
+.settings-card p{margin:.6rem 0;}
 .secondary-settings > summary{min-height:44px;display:flex;align-items:center;cursor:pointer;font-weight:600;list-style:none;}
 .secondary-settings > summary::after{content:'›';margin-left:auto;color:var(--text-dim);font-size:1.25rem;transition:transform .15s ease;}
 .secondary-settings[open] > summary::after{transform:rotate(90deg);}
 .settings-card .btn{min-height:44px;}
-.review-card ul{padding-left:1.2rem;}
-.review-card li{margin:.4rem 0;}
-.review-card a{color:var(--accent);}
 .today-page{max-width:680px;margin:0 auto;}
 .today-heading{display:flex;align-items:center;gap:.75rem;margin:.15rem 0 1.25rem;}
 .today-heading h1{font-size:1.35rem;margin:0;}
@@ -1192,8 +1189,6 @@ summary::-webkit-details-marker{display:none;}
 
 .btn,.btn-icon,.del-btn,.btn-restore,.search-result-item{min-height:44px;min-width:44px;}
 @media(min-width:1024px){.bottom-nav-btn{opacity:1;}.note-picker-search{min-height:44px;}}
-.review-history{display:flex;align-items:center;gap:.75rem;flex-wrap:wrap;color:var(--text-dim);font-size:.85rem;}
-.review-history select{min-height:44px;padding:.4rem;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);}
 
 /* Refined icon language and quieter, Things-inspired hierarchy. */
 .icon {
@@ -1246,8 +1241,7 @@ summary::-webkit-details-marker{display:none;}
 .menu-panel .action-with-icon span { white-space: nowrap; }
 
 .workspace-section,
-.settings-card,
-.review-card {
+.settings-card {
     border-color: color-mix(in srgb, var(--border) 72%, transparent);
     box-shadow: 0 1px 2px #00000008;
 }
@@ -1446,10 +1440,8 @@ details[open] > summary > .disclosure-icon .icon { transform: rotate(90deg); }
     body.keyboard-open .detail-pane { bottom: .5rem; max-height: calc(100dvh - 1rem); }
     .note-conflict{position:sticky;bottom:0;}
     .bottom-nav-btn.active { font-weight: 600; }
-    body[data-mode="settings"] .topbar-title,
-    body[data-mode="review"] .topbar-title { flex:1; }
-    body[data-mode="settings"] .topbar-stat,
-    body[data-mode="review"] .topbar-stat { display:none; }
+    body[data-mode="settings"] .topbar-title { flex:1; }
+    body[data-mode="settings"] .topbar-stat { display:none; }
 }
 
 @media (min-width: 1024px) {

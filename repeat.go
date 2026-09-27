@@ -58,16 +58,15 @@ func addMonthsClamped(t time.Time, months int) time.Time {
 func repeatAfterToggle(tx *sql.Tx, id int, completing bool, today string) (next string, repeats bool, err error) {
 	var category, text, due, rule string
 	var project, stage sql.NullInt64
-	var position int
-	err = tx.QueryRow(`SELECT category,text,COALESCE(due_date,''),repeat,project_id,stage_id,COALESCE(position,0) FROM todos WHERE id=?`, id).
-		Scan(&category, &text, &due, &rule, &project, &stage, &position)
+	err = tx.QueryRow(`SELECT category,text,due_date,repeat,project_id,stage_id FROM todos WHERE id=?`, id).
+		Scan(&category, &text, &due, &rule, &project, &stage)
 	if err != nil || category != "todo" || rule == "" {
 		return "", false, err
 	}
 	if completing {
 		next = nextDueDate(due, rule, today)
-		_, err = tx.Exec(`INSERT INTO todos(category,text,due_date,project_id,stage_id,position,repeat,repeated_from) VALUES('todo',?,?,?,?,?,?,?)`,
-			text, next, project, stage, position, rule, id)
+		_, err = tx.Exec(`INSERT INTO todos(category,text,due_date,project_id,stage_id,repeat,repeated_from) VALUES('todo',?,?,?,?,?,?)`,
+			text, next, project, stage, rule, id)
 		return next, true, err
 	}
 	res, err := tx.Exec(`DELETE FROM todos WHERE repeated_from=? AND done=0 AND archived=0 AND revision=1`, id)
