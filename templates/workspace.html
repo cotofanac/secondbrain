@@ -6,13 +6,13 @@
  <form hx-post="/todos/toggle" hx-target="closest .task-group" hx-swap="outerHTML swap:140ms"><input type="hidden" name="id" value="{{.ID}}"><input type="hidden" name="response" value="task-group"><button class="check-btn {{if .Done}}checked{{end}}" aria-label="{{if .Done}}Reopen{{else}}Complete{{end}} {{.Text}}"><span class="task-checkmark" aria-hidden="true"></span></button></form>
  <button type="button" class="task-label" data-edit-label data-call="openTask" data-args='[{{.ID}}]'>{{.Text}}</button>
  {{if or .DueDate .Repeat}}<span class="todo-date {{if and (not .Done) (isOverdue .DueDate)}}overdue{{end}}">{{if .Repeat}}{{template "repeat-badge" .Repeat}}{{end}}{{formatDate .DueDate}}</span>{{end}}
- <details class="row-menu"><summary class="icon-button" aria-label="Task actions">{{template "icon-more"}}</summary><div class="menu-panel"><form hx-post="/todos/delete" hx-target="#todo-items"><input type="hidden" name="id" value="{{.ID}}"><button class="action-with-icon">{{template "icon-archive"}}<span>Archive</span></button></form></div></details>
+ <details class="row-menu"><summary class="icon-button" aria-label="Task actions">{{template "icon-more"}}</summary><div class="menu-panel"><form hx-post="/todos/delete" hx-target="closest .task-group" hx-swap="outerHTML"><input type="hidden" name="id" value="{{.ID}}"><input type="hidden" name="response" value="task-group"><button class="action-with-icon">{{template "icon-archive"}}<span>Archive</span></button></form></div></details>
 </div>
 {{end}}
 {{define "task-group"}}
 <div class="task-group" data-group="{{.Key}}" data-category="{{.Category}}">
- <form class="capture-form" id="capture-{{.Key}}" hx-post="/todos/add" hx-target="#todo-items">
-  <input type="hidden" name="category" value="{{.Category}}"><input type="hidden" name="list" value="{{.List}}">
+ <form class="capture-form" id="capture-{{.Key}}" hx-post="/todos/add" hx-target="closest .task-group" hx-swap="outerHTML">
+  <input type="hidden" name="category" value="{{.Category}}"><input type="hidden" name="response" value="task-group"><input type="hidden" name="list" value="{{.List}}">
   <input type="text" name="text" aria-label="{{if eq .Category "todo"}}Add task{{else}}Add item{{end}}" placeholder="{{if eq .Category "todo"}}Add a task…{{else}}Add an item…{{end}}" maxlength="500" autocomplete="off" enterkeyhint="done" {{if eq .Category "groceries"}}list="grocery-suggestions"{{else if eq .Category "shopping"}}list="shopping-suggestions"{{end}} required>
   {{if eq .Category "todo"}}{{template "date-chip" ""}}{{end}}
   <button type="submit" class="add-circle" aria-label="Add">{{template "icon-plus"}}</button>
@@ -21,9 +21,13 @@
  {{if .Done}}<details class="completed-group" data-persist="done-{{.Key}}"><summary>Completed <span>{{len .Done}}</span></summary>{{range .Done}}{{template "task-row" .}}{{end}}</details>{{end}}
 </div>
 {{end}}
+{{/* A project's progress ring and done/total count, in its summary. */}}
+{{define "project-stats"}}<span class="project-progress" style="--progress:{{if .Group.Total}}{{.Group.Completed}}{{else}}0{{end}};--total:{{if .Group.Total}}{{.Group.Total}}{{else}}1{{end}}" aria-label="{{.Group.Completed}} of {{.Group.Total}} complete"></span><span class="section-count">{{.Group.Completed}}/{{.Group.Total}}</span>{{end}}
+{{/* One list after a change inside it, and its header count out-of-band. */}}
+{{define "task-group-response"}}{{template "task-group" .Group}}{{with .Project}}<span class="project-stats" id="project-stats-{{.ID}}" hx-swap-oob="true">{{template "project-stats" .}}</span>{{else}}<span class="section-count" id="count-{{.Group.Key}}" hx-swap-oob="true">{{len .Group.Tasks}}</span>{{end}}{{end}}
 {{define "list-section"}}
 <details class="workspace-section" id="section-{{.Key}}" data-persist="{{.Key}}" {{if eq .Key "tasks"}}open{{end}}>
- <summary><span class="disclosure-icon">{{template "icon-chevron"}}</span><span class="section-kind-icon">{{if eq .Category "groceries"}}{{template "icon-cart"}}{{else if eq .Category "shopping"}}{{template "icon-bag"}}{{else}}{{template "icon-inbox"}}{{end}}</span><span class="section-title">{{.Name}}</span><span class="section-count">{{len .Tasks}}</span></summary>
+ <summary><span class="disclosure-icon">{{template "icon-chevron"}}</span><span class="section-kind-icon">{{if eq .Category "groceries"}}{{template "icon-cart"}}{{else if eq .Category "shopping"}}{{template "icon-bag"}}{{else}}{{template "icon-inbox"}}{{end}}</span><span class="section-title">{{.Name}}</span><span class="section-count" id="count-{{.Key}}">{{len .Tasks}}</span></summary>
  {{template "task-group" .}}
  <div class="section-footer"><button class="action-with-icon" data-call="openArchive" data-args='["{{.Category}}"]'>{{template "icon-archive"}}<span>Archived</span></button>{{if ne .Category "todo"}}<button class="action-with-icon" hx-post="/todos/clear-checked" hx-target="#todo-items" hx-vals='{"category":"{{.Category}}"}'>{{template "icon-reset"}}<span>Uncheck all</span></button>{{end}}</div>
 </details>
@@ -54,7 +58,7 @@
 <details class="workspace-section unified-tasks" id="section-tasks" data-persist="tasks" open>
  <summary><span class="disclosure-icon">{{template "icon-chevron"}}</span><span class="section-kind-icon">{{template "icon-tasks"}}</span><span class="section-title">Tasks</span></summary>
  <section class="inbox-group" aria-labelledby="inbox-heading">
-  <div class="workspace-subheading"><span class="section-kind-icon">{{template "icon-inbox"}}</span><h2 id="inbox-heading">Inbox</h2><span class="section-count">{{len .Tasks.Tasks}}</span></div>
+  <div class="workspace-subheading"><span class="section-kind-icon">{{template "icon-inbox"}}</span><h2 id="inbox-heading">Inbox</h2><span class="section-count" id="count-{{.Tasks.Key}}">{{len .Tasks.Tasks}}</span></div>
   {{template "task-group" .Tasks}}
   <div class="section-footer"><button class="action-with-icon" data-call="openArchive" data-args='["todo"]'>{{template "icon-archive"}}<span>Archived</span></button></div>
  </section>
@@ -63,7 +67,7 @@
   <div class="section-footer projects-actions"><button class="action-with-icon" data-call="structureCreate" data-args='["project",0]'>{{template "icon-plus"}}<span>New project</span></button>{{if .ArchivedProjects}}<button class="action-with-icon" data-call="openArchive" data-args='["projects"]'>{{template "icon-archive"}}<span>Archived</span></button>{{end}}</div>
  {{range .Projects}}
  <details class="project-group" id="project-{{.ID}}" data-persist="project-{{.ID}}">
-  <summary><span class="disclosure-icon">{{template "icon-chevron"}}</span><span class="project-name">{{.Name}}</span><span class="project-progress" style="--progress:{{if .Group.Total}}{{.Group.Completed}}{{else}}0{{end}};--total:{{if .Group.Total}}{{.Group.Total}}{{else}}1{{end}}" aria-label="{{.Group.Completed}} of {{.Group.Total}} complete"></span><span class="section-count">{{.Group.Completed}}/{{.Group.Total}}</span></summary>
+  <summary><span class="disclosure-icon">{{template "icon-chevron"}}</span><span class="project-name">{{.Name}}</span><span class="project-stats" id="project-stats-{{.ID}}">{{template "project-stats" .}}</span></summary>
   <div id="project-body-{{.ID}}" data-lazy-project="{{.ID}}"></div>
  </details>
  {{else}}<p class="quiet-empty">A goal can start with one small task.</p>{{end}}

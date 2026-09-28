@@ -52,6 +52,9 @@ const shot = name => require('node:path').join(process.env.SCREENSHOT_DIR || req
  await page.locator('#custom-dialog-input').fill('Driving licence');await page.locator('#custom-dialog-confirm').click();
  await page.locator('.heading-row h3').filter({hasText:'Driving licence'}).waitFor();
  const capture=page.locator('.heading-group .capture-form');await capture.locator('[name=text]').fill('Book lessons');await capture.locator('button.add-circle').click();
+ // A project body is reloaded after an add; its capture row must come back empty.
+ await page.locator('[data-project-page]').getByRole('button',{name:'Book lessons',exact:true}).waitFor();
+ assert.equal(await capture.locator('[name=text]').inputValue(),'','project capture kept the added text');
  // Tapping a task opens it in place; edits save as you type.
  await openTaskEditor('Book lessons');
  const detailTitle=page.locator('#task-editor [name=text]');

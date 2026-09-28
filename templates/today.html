@@ -9,7 +9,7 @@
   <div><strong>{{.DueLeft}}</strong><span>need attention</span></div>
  </div>
 
- <form class="capture-form today-capture" hx-post="/todos/add" hx-target="#today-content">
+ <form class="capture-form today-capture" id="capture-today" hx-post="/todos/add" hx-target="#today-content">
   <input type="hidden" name="category" value="todo"><input type="hidden" name="due_date" value="{{.ISODate}}">
   <input type="text" name="text" aria-label="Add a task for today" placeholder="Add a task for today…" maxlength="500" autocomplete="off" enterkeyhint="done" required>
   <button type="submit" class="add-circle" aria-label="Add">{{template "icon-plus"}}</button>

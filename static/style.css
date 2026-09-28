@@ -1269,6 +1269,8 @@ details[open] > summary > .disclosure-icon .icon { transform: rotate(90deg); }
 }
 .project-progress::after { content: ''; position: absolute; inset: 3px; border-radius: 50%; background: var(--surface); }
 .project-progress + .section-count { margin-left: 0; }
+/* A wrapper only so the pair can be swapped in after a change; it lays out as its children. */
+.project-stats { display: contents; }
 .capture-form { padding-block: .15rem .5rem; gap: .25rem; }
 .capture-form > input[name=text] {
     min-height: 48px;

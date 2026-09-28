@@ -67,6 +67,7 @@ func handleAddTodo(w http.ResponseWriter, r *http.Request) {
 	// the SELECT and the INSERT and create the duplicate this branch exists to
 	// prevent. todos has no UNIQUE constraint to catch that afterwards.
 	var action string
+	var project, heading int
 	if category == "groceries" || category == "shopping" {
 		tx, err := db.Begin()
 		if err != nil {
@@ -115,7 +116,7 @@ func handleAddTodo(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		defer tx.Rollback()
-		project, heading, err := parseList(tx, r.FormValue("list"))
+		project, heading, err = parseList(tx, r.FormValue("list"))
 		if err != nil {
 			http.Error(w, err.Error(), 400)
 			return
@@ -136,6 +137,10 @@ func handleAddTodo(w http.ResponseWriter, r *http.Request) {
 	r.URL.RawQuery = "category=" + category
 	if r.Header.Get("HX-Target") == "today-content" {
 		handleToday(w, r)
+		return
+	}
+	if r.FormValue("response") == "task-group" {
+		handleTaskGroup(w, r, category, project, heading)
 		return
 	}
 	handleTodos(w, r)
@@ -216,7 +221,8 @@ func handleDeleteTodo(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var category string
-	err := db.QueryRow("SELECT category FROM todos WHERE id = ?", id).Scan(&category)
+	var projectID, headingID int
+	err := db.QueryRow("SELECT category,COALESCE(project_id,0),COALESCE(heading_id,0) FROM todos WHERE id = ?", id).Scan(&category, &projectID, &headingID)
 	if err != nil {
 		http.Error(w, "Not found", http.StatusNotFound)
 		return
@@ -232,6 +238,10 @@ func handleDeleteTodo(w http.ResponseWriter, r *http.Request) {
 	// so offer the reversal rather than making the user go find the archive.
 	hxTrigger(w, "sbUndo", map[string]any{"kind": "todo", "id": id})
 
+	if r.FormValue("response") == "task-group" {
+		handleTaskGroup(w, r, category, projectID, headingID)
+		return
+	}
 	r.URL.RawQuery = "category=" + category
 	handleTodos(w, r)
 }

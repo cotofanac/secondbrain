@@ -604,6 +604,59 @@ func TestProjectBodyMatchesWorkspace(t *testing.T) {
 	}
 }
 
+// A change inside one list answers with that list only, plus its header count
+// out-of-band, so open projects elsewhere on the page are left alone.
+func TestChangesInsideAListReturnOnlyThatList(t *testing.T) {
+	setupWorkspaceDB(t)
+	execSQL(t, `INSERT INTO projects(id,name) VALUES(1,'Car'),(2,'House')`)
+	execSQL(t, `INSERT INTO headings(id,project_id,name) VALUES(1,1,'Licence')`)
+	execSQL(t, `INSERT INTO todos(id,category,text,project_id,heading_id,done) VALUES(1,'todo','Theory test',1,1,1),(2,'todo','Paint the fence',2,NULL,0),(3,'todo','Call the bank',NULL,NULL,0)`)
+	groupOnly := func(w *httptest.ResponseRecorder, key string) string {
+		t.Helper()
+		requireOK(t, w)
+		page := w.Body.String()
+		if n := strings.Count(page, `class="task-group"`); n != 1 || !strings.Contains(page, `data-group="`+key+`"`) {
+			t.Fatalf("want only the %s list, got %d lists: %s", key, n, page)
+		}
+		if strings.Contains(page, "Paint the fence") || strings.Contains(page, `id="section-tasks"`) {
+			t.Fatalf("response carries other lists: %s", page)
+		}
+		return page
+	}
+
+	page := groupOnly(formRequest(t, handleAddTodo, "/todos/add", url.Values{"category": {"todo"}, "text": {"Book lessons"}, "list": {"heading:1"}, "response": {"task-group"}}), "heading-1")
+	if !strings.Contains(page, "Book lessons") || !strings.Contains(page, `id="project-stats-1" hx-swap-oob="true"`) || !strings.Contains(page, ">1/2</span>") {
+		t.Fatalf("heading add lacks the task or the project's 1/2 progress: %s", page)
+	}
+
+	page = groupOnly(formRequest(t, handleAddTodo, "/todos/add", url.Values{"category": {"todo"}, "text": {"Renew passport"}, "response": {"task-group"}}), "tasks")
+	if !strings.Contains(page, `<span class="section-count" id="count-tasks" hx-swap-oob="true">2</span>`) {
+		t.Fatalf("inbox add lacks the inbox count: %s", page)
+	}
+
+	page = groupOnly(formRequest(t, handleDeleteTodo, "/todos/delete", url.Values{"id": {"3"}, "response": {"task-group"}}), "tasks")
+	if strings.Contains(page, "Call the bank") || !strings.Contains(page, `id="count-tasks" hx-swap-oob="true">1</span>`) {
+		t.Fatalf("inbox archive still shows the task or the old count: %s", page)
+	}
+	if w := formRequest(t, handleDeleteTodo, "/todos/delete", url.Values{"id": {"1"}}); !strings.Contains(w.Body.String(), `id="section-tasks"`) {
+		t.Fatal("an archive without response=task-group no longer returns the workspace")
+	}
+
+	page = groupOnly(formRequest(t, handleAddTodo, "/todos/add", url.Values{"category": {"groceries"}, "text": {"Milk"}, "response": {"task-group"}}), "groceries")
+	if !strings.Contains(page, `id="count-groceries" hx-swap-oob="true">1</span>`) {
+		t.Fatalf("grocery add lacks the list count: %s", page)
+	}
+
+	// The full workspace carries the ids the out-of-band counts replace.
+	w := httptest.NewRecorder()
+	handleWorkspace(w, httptest.NewRequest("GET", "/workspace", nil))
+	for _, id := range []string{`id="project-stats-1"`, `id="project-stats-2"`, `id="count-tasks"`, `id="count-groceries"`, `id="count-shopping"`} {
+		if !strings.Contains(w.Body.String(), id) {
+			t.Fatalf("workspace lacks %s", id)
+		}
+	}
+}
+
 func TestDailyBackupWritesOncePerDayAndPrunes(t *testing.T) {
 	setupWorkspaceDB(t)
 	previousDir, previousKeep := backupDir, backupKeep

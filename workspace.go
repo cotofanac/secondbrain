@@ -190,38 +190,47 @@ func handleWorkspace(w http.ResponseWriter, r *http.Request) {
 	renderTemplate(w, r, "workspace.html", data)
 }
 
+// taskGroupView is one list re-rendered after a change inside it, with the
+// count its header shows: the project's progress, or the list's open items.
+type taskGroupView struct {
+	Group   TaskGroup
+	Project *Project
+}
+
+// handleTaskGroup answers a change made inside one list (an add, a check-off,
+// an archive) with just that list, so open projects elsewhere on the page are
+// not reloaded. The header count is swapped in out-of-band.
 func handleTaskGroup(w http.ResponseWriter, r *http.Request, category string, projectID, headingID int) {
 	data, err := loadWorkspace()
 	if err != nil {
 		http.Error(w, "Could not load tasks", http.StatusInternalServerError)
 		return
 	}
-	group := &data.Tasks
+	view := taskGroupView{Group: data.Tasks}
 	if category == "groceries" {
-		group = &data.Groceries
+		view.Group = data.Groceries
 	} else if category == "shopping" {
-		group = &data.Buys
+		view.Group = data.Buys
 	} else if projectID != 0 {
-		group = nil
 		for i := range data.Projects {
 			p := &data.Projects[i]
 			if p.ID != projectID {
 				continue
 			}
-			group = &p.Group
+			view.Project, view.Group = p, p.Group
 			for j := range p.Headings {
 				if p.Headings[j].ID == headingID {
-					group = &p.Headings[j].Group
+					view.Group = p.Headings[j].Group
 				}
 			}
 			break
 		}
+		if view.Project == nil {
+			http.Error(w, "Task group unavailable", http.StatusNotFound)
+			return
+		}
 	}
-	if group == nil {
-		http.Error(w, "Task group unavailable", http.StatusNotFound)
-		return
-	}
-	renderTemplate(w, r, "task-group", *group)
+	renderTemplate(w, r, "task-group-response", view)
 }
 
 var errBadList = errors.New("Choose an active project")

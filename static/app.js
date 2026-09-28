@@ -225,7 +225,9 @@ document.body.addEventListener('htmx:afterSwap', function(e) {
     if (id === 'todo-items') updateTopbarStat();
     if (e.detail.requestConfig?.path === '/todos/add') {
         const previous = e.detail.target?._itemIDsBeforeSwap || new Set();
-        e.detail.target?.querySelectorAll('.todo-item[data-task-id]').forEach(item => {
+        // A list swapped by outerHTML is replaced; the event fires on the new one.
+        const swapped = e.detail.target?.isConnected ? e.detail.target : e.target;
+        swapped?.querySelectorAll?.('.todo-item[data-task-id]').forEach(item => {
             if (!previous.has(item.dataset.taskId)) item.classList.add('item-entering');
         });
     }

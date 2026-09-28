@@ -1,6 +1,9 @@
 // State is limited to presentation and unsaved drafts; task truth stays on the server.
 let pendingFocus = null;
 let workspaceState = null;
+let workspaceRestore = null;
+let groupFocus = null;
+let todayFocus = null;
 let noteViewState = null;
 let captureRequestID = 0;
 let restoringHistory = false;
@@ -68,7 +71,7 @@ function loadProjectBody(details) {
     return target._loadPromise;
 }
 function loadOpenProjects(root = document) {
-    root.querySelectorAll?.('.project-group[open]').forEach(loadProjectBody);
+    return Promise.all([...(root.querySelectorAll?.('.project-group[open]') || [])].map(loadProjectBody));
 }
 document.addEventListener(
     'toggle',
@@ -103,17 +106,46 @@ function restoreCaptureDrafts(root = document) {
     });
     syncDateChips(root);
 }
+// Open projects reload their bodies after the list, so the old scroll offset
+// alone lands elsewhere; remember where things sat on screen instead. The
+// first that still exists afterwards wins: what was in use, its project (an
+// archived row is gone), then the first row or project that was in view.
+const ANCHOR_SELECTOR = '.capture-form[id], .todo-item[id], .project-group[id]';
+function scrollAnchors(focused) {
+    const anchors = [];
+    const add = el => {
+        if (el?.id && el.getClientRects().length)
+            anchors.push({ id: el.id, top: el.getBoundingClientRect().top });
+    };
+    const inUse = focused?.closest?.('#todo-items') ? focused.closest(ANCHOR_SELECTOR) : null;
+    add(inUse);
+    add(inUse?.parentElement?.closest('.project-group'));
+    add(
+        [...document.querySelectorAll('#todo-items :is(' + ANCHOR_SELECTOR + ')')].find(
+            el => el.getClientRects().length && el.getBoundingClientRect().top >= 0
+        )
+    );
+    return anchors;
+}
 function rememberWorkspace() {
     const forms = {};
     document.querySelectorAll('#todo-items .capture-form').forEach(f => {
         forms[f.id] = Object.fromEntries(new FormData(f));
     });
+    // A refresh landing while the last one still waits for project bodies
+    // would measure a half-built list; keep the last one's places and focus.
+    if (workspaceRestore) {
+        workspaceState = { ...workspaceRestore, forms };
+        return;
+    }
     const el = document.activeElement;
     // The task editor keeps its own focus across swaps (see keepTaskEditor).
     const row = el?.closest('#task-editor') ? null : el?.closest('.todo-item');
     workspaceState = {
         forms,
         scroll: window.scrollY,
+        height: document.getElementById('todo-items')?.offsetHeight || 0,
+        anchors: scrollAnchors(el),
         focus: el?.closest('.capture-form')?.id,
         name: el?.name,
         start: el?.selectionStart,
@@ -127,9 +159,10 @@ function rememberWorkspace() {
     };
 }
 function restoreWorkspace() {
+    processNow(document.getElementById('todo-items'));
     restoreSections();
     applyProjectPage();
-    loadOpenProjects();
+    const loading = loadOpenProjects();
     restoreCaptureDrafts();
     if (workspaceState) {
         const s = workspaceState;
@@ -143,22 +176,56 @@ function restoreWorkspace() {
                 syncDateChips(form);
             }
         }
-        const form = document.getElementById(s.focus);
-        const el = form?.elements.namedItem(s.name);
-        if (el) {
-            el.focus({ preventScroll: true });
-            if (typeof s.start === 'number') el.setSelectionRange?.(s.start, s.end);
+        // Rows in open projects come back only once their bodies load, so
+        // focus is put back now and again after that.
+        const refocus = () => {
+            if (s.focus) {
+                const el = document.getElementById(s.focus)?.elements.namedItem(s.name);
+                if (!el || el === document.activeElement) return;
+                el.focus({ preventScroll: true });
+                if (typeof s.start === 'number') el.setSelectionRange?.(s.start, s.end);
+            } else if (s.rowId) {
+                const row = document.getElementById('task-' + s.rowId);
+                const control =
+                    s.rowControl === 'check'
+                        ? row?.querySelector('.check-btn')
+                        : row?.querySelector('.task-label');
+                if (!control || control === document.activeElement) return;
+                expandAncestors(row);
+                control.focus({ preventScroll: true });
+            }
+        };
+        refocus();
+        // The list may be refreshed from Today (after editing a task there);
+        // its scroll offset is not the hidden list's to change.
+        if (document.body.dataset.mode === 'todos') {
+            // Hold the old height while project bodies load so the offset is
+            // not clamped, then put the anchor back where it was on screen.
+            const list = document.getElementById('todo-items');
+            if (list) list.style.minHeight = s.height + 'px';
+            workspaceRestore = s;
+            requestAnimationFrame(() => {
+                if (workspaceRestore !== s) return;
+                window.scrollTo(0, s.scroll);
+                // A stalled project load must not hold the list's height forever.
+                Promise.race([loading, new Promise(done => setTimeout(done, 5000))]).then(() => {
+                    // A newer refresh took over and will finish the job.
+                    if (workspaceRestore !== s) return;
+                    workspaceRestore = null;
+                    if (list) list.style.minHeight = '';
+                    for (const a of s.anchors) {
+                        const el = document.getElementById(a.id);
+                        if (!el?.getClientRects().length) continue;
+                        window.scrollBy(0, el.getBoundingClientRect().top - a.top);
+                        break;
+                    }
+                    refocus();
+                });
+            });
+        } else {
+            workspaceRestore = null;
+            document.getElementById('todo-items')?.style.removeProperty('min-height');
         }
-        if (s.rowId) {
-            const row = document.getElementById('task-' + s.rowId);
-            if (row) expandAncestors(row);
-            const control =
-                s.rowControl === 'check'
-                    ? row?.querySelector('.check-btn')
-                    : row?.querySelector('.task-label');
-            control?.focus({ preventScroll: true });
-        }
-        requestAnimationFrame(() => window.scrollTo(0, s.scroll));
         workspaceState = null;
     }
     if (pendingFocus) {
@@ -766,16 +833,19 @@ function routeLocation() {
     else switchMode('today');
 }
 document.body.addEventListener('htmx:beforeSwap', e => {
-    if (e.detail.target.id === 'todo-items') {
-        rememberWorkspace();
-        const form = e.detail.requestConfig?.elt;
-        if (e.detail.xhr.status < 300 && form?.classList.contains('capture-form')) {
-            const values = workspaceState.forms[form.id];
-            if (values && values.text === e.detail.requestConfig.parameters.text) {
-                values.text = '';
-                values.due_date = '';
-            }
-        }
+    if (e.detail.target.id === 'todo-items') rememberWorkspace();
+    if (e.detail.target.id === 'today-content') {
+        const el = document.activeElement;
+        todayFocus = el?.closest('#capture-today') ? { start: el.selectionStart, end: el.selectionEnd } : null;
+    }
+    // A list replaced after a change inside it takes its capture row with it;
+    // remember whether that row was being typed in.
+    if (e.detail.target.classList?.contains('task-group')) {
+        const el = document.activeElement;
+        const form = e.detail.target.contains(el) ? el.closest('.capture-form') : null;
+        groupFocus = form
+            ? { form: form.id, name: el.name, start: el.selectionStart, end: el.selectionEnd }
+            : null;
     }
     // A background response must never overwrite a note being edited now.
     if (e.detail.target.id === 'notes-content') {
@@ -798,12 +868,7 @@ document.body.addEventListener('htmx:beforeRequest', e => {
     const form = e.detail.elt;
     if (form?.getAttribute('hx-post') === '/todos/toggle') {
         const row = form.closest('.todo-item, .today-row');
-        if (row) {
-            form._toggleDelta = row.classList.contains('done') ? -1 : 1;
-            form._toggleProject = row.closest('.project-group');
-            form._toggleSection = row.closest('.workspace-section');
-            if (form._toggleDelta > 0) row.classList.add('is-completing');
-        }
+        if (row && !row.classList.contains('done')) row.classList.add('is-completing');
     }
     if (!form?.classList.contains('capture-form')) return;
     const input = form.elements.text;
@@ -833,6 +898,9 @@ document.body.addEventListener('htmx:beforeRequest', e => {
         due.value = '';
         syncDateChips(form);
     }
+    // Drop the draft now: the swap detaches this form, so its own afterRequest
+    // never reaches body, and the new list would restore the text.
+    saveCaptureDraft(form);
     input.focus({ preventScroll: true });
 });
 function restoreFailedCapture(e) {
@@ -858,10 +926,6 @@ function restoreFailedCompletion(e) {
 }
 document.body.addEventListener('htmx:responseError', restoreFailedCompletion);
 document.body.addEventListener('htmx:sendError', restoreFailedCompletion);
-document.body.addEventListener('htmx:afterRequest', e => {
-    const form = e.detail.elt;
-    if (form?.classList.contains('capture-form') && e.detail.successful) removeLocal(captureDraftKey(form));
-});
 document.addEventListener('keydown', e => {
     const input = e.target.closest?.('.capture-form input[name="text"]');
     if (!input || e.key !== 'Enter' || e.isComposing) return;
@@ -869,37 +933,37 @@ document.addEventListener('keydown', e => {
     input.form.requestSubmit();
 });
 document.body.addEventListener('htmx:beforeSwap', keepTaskEditor);
+// htmx wires up swapped-in forms when it settles, a moment after the swap. A
+// capture row that is focused at once could be submitted in between (a quick
+// second Enter, or taps queued on a busy phone) and would then post natively,
+// navigating away; wire it up now.
+function processNow(root) {
+    if (root?.isConnected) htmx.process(root);
+}
+// A list re-rendered after an add, check-off or archive inside it. Its header
+// count arrives out-of-band with it.
+function restoreTaskGroup(group) {
+    processNow(group);
+    restoreSections(group);
+    restoreCaptureDrafts(group);
+    const focus = groupFocus;
+    groupFocus = null;
+    const el = focus && document.getElementById(focus.form)?.elements.namedItem(focus.name);
+    if (el && group.contains(el)) {
+        el.focus({ preventScroll: true });
+        if (typeof focus.start === 'number') el.setSelectionRange?.(focus.start, focus.end);
+    }
+    updateTopbarStat();
+}
 document.body.addEventListener('htmx:afterSwap', e => {
     const id = e.detail.target.id;
     if (id === 'todo-items') restoreWorkspace();
     // After the list has reopened its sections and started loading projects.
     restoreTaskEditor();
-    const toggleForm = e.detail.requestConfig?.elt;
-    if (toggleForm?.getAttribute('hx-post') === '/todos/toggle') {
-        const bump = (container, selector, ratio = false) => {
-            const el = container?.querySelector(selector);
-            if (!el) return;
-            if (ratio) {
-                const parts = el.textContent.split('/').map(Number);
-                if (parts.length === 2 && !parts.some(Number.isNaN)) {
-                    parts[0] += toggleForm._toggleDelta;
-                    el.textContent = parts.join('/');
-                    container.querySelector('.project-progress')?.style.setProperty('--progress', parts[0]);
-                }
-            } else {
-                const value = Number(el.textContent);
-                if (!Number.isNaN(value)) el.textContent = String(value - toggleForm._toggleDelta);
-            }
-        };
-        bump(toggleForm._toggleProject, ':scope > summary .section-count', true);
-        if (toggleForm._toggleSection?.id === 'section-tasks' && !toggleForm._toggleProject)
-            bump(toggleForm._toggleSection, '.inbox-group > .workspace-subheading .section-count');
-        else if (!toggleForm._toggleProject)
-            bump(toggleForm._toggleSection, ':scope > summary .section-count');
-        restoreSections();
-        restoreCaptureDrafts(e.detail.target);
-    }
+    // An outerHTML swap fires on the new list; detail.target is the old one.
+    if (e.target.classList?.contains('task-group')) restoreTaskGroup(e.target);
     if (e.detail.target.matches?.('[data-lazy-project]')) {
+        processNow(e.detail.target);
         e.detail.target.dataset.loaded = '1';
         restoreSections(e.detail.target);
         restoreCaptureDrafts(e.detail.target);
@@ -926,6 +990,22 @@ document.body.addEventListener('htmx:afterSwap', e => {
     }
     // The notifications line lives in the Today footer.
     if (id === 'today-content') renderPush();
+    // Today's capture row is re-rendered by an add; keep typing in the new one,
+    // as the Tasks capture rows do, so the phone keyboard stays up.
+    // Today is re-rendered whenever it opens or changes, capture row included:
+    // keep what was being typed there (it is saved as a draft on input), and
+    // keep typing after an add so the phone keyboard stays up.
+    if (id === 'today-content') {
+        const form = document.getElementById('capture-today');
+        processNow(form);
+        if (form) restoreCaptureDrafts(form.parentElement);
+        const added = e.detail.requestConfig?.elt?.id === 'capture-today';
+        if (form && (added || todayFocus)) {
+            form.elements.text.focus({ preventScroll: true });
+            if (typeof todayFocus?.start === 'number') form.elements.text.setSelectionRange(todayFocus.start, todayFocus.end);
+        }
+        todayFocus = null;
+    }
 });
 document.body.addEventListener('sbWorkspaceChanged', e => {
     refreshWorkspace();
