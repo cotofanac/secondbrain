@@ -323,6 +323,19 @@ function hideToast() {
 // into a reversal the user can take without hunting through the archive view.
 document.body.addEventListener('sbUndo', function(e) {
     const d = e.detail || {};
+    if (d.kind === 'dates' && d.items?.length) {
+        showToast(d.items.length === 1 ? 'Moved 1 task to today' : `Moved ${d.items.length} tasks to today`, {
+            label: 'Undo',
+            onClick: function() {
+                htmx.ajax('POST', '/today/move-overdue/undo', {
+                    target: '#today-content',
+                    swap: 'innerHTML',
+                    values: { items: JSON.stringify(d.items) }
+                });
+            }
+        });
+        return;
+    }
     if (!d.id) return;
     showToast(d.kind === 'project' ? 'Project archived' : 'Task archived', {
         label: 'Undo',
@@ -619,6 +632,8 @@ document.addEventListener('DOMContentLoaded', function() {
     if (document.body.dataset.offlineCopy) {
         // Served by the service worker from the last page loaded online.
         showToast('Offline. Showing the last copy saved on this device; changes will not save.');
+        // "Today" and "Tomorrow" were worded when the copy was saved; word them for now.
+        document.querySelectorAll('time[datetime]').forEach(t => { if (t.dateTime) t.textContent = relativeDate(t.dateTime); });
         window.addEventListener('online', () => showToast('Back online', { label: 'Reload', onClick: () => location.reload() }), { once: true });
     }
     setupInactivityLogout();

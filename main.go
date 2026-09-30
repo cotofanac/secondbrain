@@ -67,8 +67,15 @@ func computeAssetVersion() string {
 
 const sessionDuration = 72 * time.Hour
 
-// formatDueDate shows a stored YYYY-MM-DD date as "Jan 2".
+// formatDueDate shows a stored YYYY-MM-DD date relative to today in the
+// calendar zone. static/workspace.js relativeDate words date chips the same way.
 func formatDueDate(s string) string {
+	return relativeDate(s, appNow())
+}
+
+// relativeDate words a date the way people say it: "Today", "Tomorrow",
+// "Fri", "in 9 days", "3 days ago", and "Oct 12" further out.
+func relativeDate(s string, now time.Time) string {
 	if s == "" {
 		return ""
 	}
@@ -76,7 +83,25 @@ func formatDueDate(s string) string {
 	if err != nil {
 		return s
 	}
-	return t.Format("Jan 2")
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	days := int(t.Sub(today).Hours() / 24)
+	switch {
+	case days == 0:
+		return "Today"
+	case days == 1:
+		return "Tomorrow"
+	case days == -1:
+		return "Yesterday"
+	case days >= 2 && days <= 6:
+		return t.Format("Mon")
+	case days >= 7 && days <= 13:
+		return fmt.Sprintf("in %d days", days)
+	case days <= -2 && days >= -13:
+		return fmt.Sprintf("%d days ago", -days)
+	case t.Year() == now.Year():
+		return t.Format("Jan 2")
+	}
+	return t.Format("Jan 2, 2006")
 }
 
 // parseDBTime parses a stored UTC RFC3339 timestamp.
@@ -534,11 +559,18 @@ func nameConflictMessage(table, column, value, noun string) string {
 // arrives, carrying detail as JSON. The JSON rides in an HTTP header, which
 // browsers decode as Latin-1, so keep message text ASCII.
 //
-// Events in use: "sbUndo" ({kind, id}) offers to reverse a one-tap archive,
+// Events in use: "sbUndo" ({kind, id}, or {kind: "dates", items}) offers to
+// reverse a one-tap archive or "Move all to today",
 // "sbNotice" ({message}) shows a plain confirmation, and "sbWorkspaceChanged"
 // ({message?}) refreshes the task lists after a change made elsewhere.
+// Calling it again on the same response adds to the events already set.
 func hxTrigger(w http.ResponseWriter, name string, detail any) {
-	payload, err := json.Marshal(map[string]any{name: detail})
+	events := map[string]any{}
+	if raw := w.Header().Get("HX-Trigger"); raw != "" {
+		_ = json.Unmarshal([]byte(raw), &events)
+	}
+	events[name] = detail
+	payload, err := json.Marshal(events)
 	if err != nil {
 		log.Printf("hxTrigger %s: %v", name, err)
 		return

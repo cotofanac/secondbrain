@@ -18,6 +18,8 @@
     --accent: #7a9ef5;
     --accent-dim: #3d5a9a;
     --danger: #ff6b6b;
+    /* Dates that have passed: noticeable, not alarming. Red stays for deleting. */
+    --attention: #e5b566;
     --success: #6bff9b;
     --radius: 10px;
     --safe-top: env(safe-area-inset-top, 0px);
@@ -414,7 +416,7 @@ html, body {
 }
 
 .todo-date.overdue {
-    color: var(--danger);
+    color: var(--attention);
 }
 
 .archived-ago {
@@ -1005,8 +1007,8 @@ select:focus-visible {
 }
 
 /* Calm workspace: shared controls, with native light/dark appearance. */
-:root { color-scheme:light dark; --bg:#f7f8fa; --surface:#ffffff; --surface2:#eef0f3; --border:#dce0e5; --text:#222930; --text-dim:#606975; --accent:#355f9a; --accent-dim:#e4ecf7; --danger:#b43640; --success:#287548; }
-@media(prefers-color-scheme:dark){:root{--bg:#111315;--surface:#191c20;--surface2:#24282e;--border:#343b43;--text:#e4e8ee;--text-dim:#a8b0ba;--accent:#98b8e8;--accent-dim:#283d58;--danger:#ff8b91;--success:#8dccab;}}
+:root { color-scheme:light dark; --bg:#f7f8fa; --surface:#ffffff; --surface2:#eef0f3; --border:#dce0e5; --text:#222930; --text-dim:#606975; --accent:#355f9a; --accent-dim:#e4ecf7; --danger:#b43640; --attention:#8a5a12; --success:#287548; }
+@media(prefers-color-scheme:dark){:root{--bg:#111315;--surface:#191c20;--surface2:#24282e;--border:#343b43;--text:#e4e8ee;--text-dim:#a8b0ba;--accent:#98b8e8;--accent-dim:#283d58;--danger:#ff8b91;--attention:#e5b566;--success:#8dccab;}}
 [hidden]{display:none!important;}
 body{background:var(--bg);}
 button,input,select,textarea{font:inherit;}
@@ -1091,7 +1093,6 @@ summary::-webkit-details-marker{display:none;}
 .heading-group .capture-form:not(:focus-within):has(input[name=text]:placeholder-shown) :is(.chip-date,.add-circle){visibility:hidden;}
 .task-save-status{margin:0 0 0 auto;color:var(--text-dim);font-size:.78rem;}
 .task-editor-bar .text-action{min-height:40px;padding:.3rem .6rem;}
-.today-suggestion.editing{background:var(--surface2);}
 .completed-group{padding:0 .5rem .5rem;color:var(--text-dim);}
 .completed-group>summary{display:flex;gap:.5rem;align-items:center;min-height:44px;cursor:pointer;font-size:.85rem;}
 .quiet-empty{padding:.6rem .5rem .9rem;font-size:.85rem;color:var(--text-dim);}
@@ -1117,9 +1118,11 @@ summary::-webkit-details-marker{display:none;}
 .today-row-end{display:flex;align-items:center;gap:.1rem;}
 .today-row-menu{position:relative;}.today-row-menu>summary{min-width:40px;min-height:44px;display:grid;place-items:center;color:var(--text-dim);cursor:pointer;list-style:none;}
 .today-row-menu .menu-panel{right:0;top:100%;}.today-row-menu .menu-panel form{display:block;}
-.today-suggestion{margin:.45rem 0;padding:.8rem;border:1px solid var(--border);border-radius:12px;background:var(--surface);}
-.today-suggestion>div:first-child{display:flex;flex-direction:column;gap:.15rem;}.today-suggestion small{color:var(--text-dim);font-size:.72rem;}
-.today-actions{display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.65rem;}.today-actions .btn{min-height:38px;padding:.4rem .7rem;}
+.today-suggestion .text-action{padding:0 .5rem;font-size:.82rem;white-space:nowrap;}
+.today-move{margin-left:auto;}.today-move .text-action{min-height:36px;font-size:.78rem;}
+.today-upcoming>summary{list-style:none;cursor:pointer;}.today-upcoming>summary::-webkit-details-marker{display:none;}
+.today-upcoming>summary h2 .icon-chevron{width:15px;height:15px;margin-left:auto;color:var(--text-dim);transition:transform 160ms ease;}
+.today-upcoming[open]>summary h2 .icon-chevron{transform:rotate(90deg);}
 .today-clear{margin:0 0 1.5rem;padding:.8rem .25rem;color:var(--text-dim);}
 .today-footer{margin-top:1.8rem;padding:1rem .25rem;border-top:1px solid var(--border);}
 .today-footer .icon{width:17px;height:17px;}
@@ -1337,7 +1340,7 @@ details[open] > summary > .disclosure-icon .icon { transform: rotate(90deg); }
 .todo-date { display: inline-flex; align-items: center; gap: .25rem; }
 .todo-repeat { display: inline-flex; line-height: 0; }
 .todo-repeat .icon { width: 13px; height: 13px; }
-.todo-date.overdue { color: var(--danger); background: color-mix(in srgb, var(--danger) 9%, transparent); }
+.todo-date.overdue { color: var(--attention); background: color-mix(in srgb, var(--attention) 12%, transparent); }
 .section-footer { padding-top: .2rem; }
 .section-footer button { border-radius: 8px; font-weight: 500; }
 .section-footer button:hover { background: var(--surface2); }
@@ -1508,10 +1511,10 @@ details[open] > summary > .disclosure-icon .icon { transform: rotate(90deg); }
     text-align: center;
     font-variant-numeric: tabular-nums;
 }
-#nav-count-today.has-overdue { background: var(--danger); }
+#nav-count-today.has-overdue { background: var(--attention); }
 .mobile-workspace-sheet button { grid-template-columns: 24px 1fr auto 20px; }
 .sheet-count { color: var(--text-dim); font-size: .82rem; font-variant-numeric: tabular-nums; }
-.sheet-count.has-overdue { color: var(--danger); font-weight: 600; }
+.sheet-count.has-overdue { color: var(--attention); font-weight: 600; }
 .mobile-sheet-secondary { margin-top: .35rem; padding-top: .35rem; border-top: 1px solid var(--border); }
 
 .archive-header { border-bottom: 0; padding-inline: .25rem; }
@@ -1548,7 +1551,7 @@ details[open] > summary > .disclosure-icon .icon { transform: rotate(90deg); }
         line-height: 1;
     }
     .bottom-nav .nav-count:not(#nav-count-today):empty, #nav-count-today:empty { display: none; }
-    .nav-overdue { min-width: 18px; padding: 2px 5px; border-radius: 9px; background: var(--danger); color: #fff; font-size: .7rem; font-weight: 700; text-align: center; }
+    .nav-overdue { min-width: 18px; padding: 2px 5px; border-radius: 9px; background: var(--attention); color: var(--surface); font-size: .7rem; font-weight: 700; text-align: center; }
     #nav-count-today.has-overdue { background: none; }
     .sidebar-heading { display: block; margin: .9rem .8rem .2rem; color: var(--text-dim); font-size: .72rem; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
     .sidebar-projects { display: grid; grid-template-columns: minmax(0, 1fr); gap: .1rem; margin-bottom: .6rem; }

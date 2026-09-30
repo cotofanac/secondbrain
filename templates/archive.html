@@ -33,7 +33,7 @@
 <div class="todo-item archived-item">
  <span class="todo-text">{{.Text}}</span>
  {{$ago := todoArchivedAgo .ArchivedAt}}{{if $ago}}<span class="archived-ago">{{$ago}}</span>{{end}}
- {{if .DueDate}}<span class="todo-date">{{formatDate .DueDate}}</span>{{end}}
+ {{if .DueDate}}<span class="todo-date"><time datetime="{{.DueDate}}">{{formatDate .DueDate}}</time></span>{{end}}
  <form hx-post="/todos/restore" hx-target="#todo-items" hx-swap="innerHTML" class="todo-action">
   <input type="hidden" name="id" value="{{.ID}}">
   <button type="submit" class="btn-restore" title="Restore" aria-label="Restore {{.Text}}">{{template "icon-restore"}}</button>

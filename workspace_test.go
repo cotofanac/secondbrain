@@ -961,3 +961,73 @@ func TestArchivingAHeadingArchivesItsTasks(t *testing.T) {
 		t.Fatalf("restored task in project %d under heading %v", project, heading)
 	}
 }
+
+func TestRelativeDate(t *testing.T) {
+	now := time.Date(2026, 9, 30, 23, 30, 0, 0, time.UTC) // a Wednesday
+	for _, c := range []struct{ in, want string }{
+		{"", ""},
+		{"2026-09-30", "Today"},
+		{"2026-10-01", "Tomorrow"},
+		{"2026-09-29", "Yesterday"},
+		{"2026-10-02", "Fri"},
+		{"2026-10-06", "Tue"},
+		{"2026-10-07", "in 7 days"},
+		{"2026-10-13", "in 13 days"},
+		{"2026-10-14", "Oct 14"},
+		{"2026-09-27", "3 days ago"},
+		{"2026-09-17", "13 days ago"},
+		{"2026-09-16", "Sep 16"},
+		{"2027-01-05", "Jan 5, 2027"},
+		{"not a date", "not a date"},
+	} {
+		if got := relativeDate(c.in, now); got != c.want {
+			t.Errorf("relativeDate(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+func TestTodayMoveOverdueAndUndo(t *testing.T) {
+	setupWorkspaceDB(t)
+	now := appNow()
+	today := now.Format("2006-01-02")
+	day := func(n int) string { return now.AddDate(0, 0, n).Format("2006-01-02") }
+	execSQL(t, `INSERT INTO projects(id,name,archived) VALUES(1,'Old',1)`)
+	execSQL(t, `INSERT INTO todos(id,category,text,due_date,done,project_id) VALUES
+		(1,'todo','Late',?,0,NULL),
+		(2,'todo','Later',?,0,NULL),
+		(3,'todo','Hidden',?,0,1),
+		(4,'todo','Done',?,1,NULL),
+		(5,'todo','Soon',?,0,NULL)`, day(-3), day(-10), day(-2), day(-2), day(2))
+	execSQL(t, `INSERT INTO todos(id,category,text,due_date,repeat) VALUES(6,'todo','Rent',?,'monthly')`, day(-4))
+	rec := postForm(t, handleTodayMoveOverdue, "/today/move-overdue", url.Values{})
+	requireOK(t, rec)
+	due := func(id int) string {
+		var d string
+		db.QueryRow(`SELECT due_date FROM todos WHERE id=?`, id).Scan(&d)
+		return d
+	}
+	if due(1) != today || due(2) != today {
+		t.Fatalf("overdue tasks not moved: %s %s", due(1), due(2))
+	}
+	if due(3) != day(-2) || due(4) != day(-2) || due(5) != day(2) || due(6) != day(-4) {
+		t.Fatal("moved a task under an archived project, a finished, future or repeating one")
+	}
+	detail := triggerDetail(t, rec, "sbUndo")
+	items, _ := json.Marshal(detail["items"])
+	if detail["kind"] != "dates" || !strings.Contains(rec.Header().Get("HX-Trigger"), "sbWorkspaceChanged") {
+		t.Fatalf("trigger = %s", rec.Header().Get("HX-Trigger"))
+	}
+	// Task 2 is edited after the move; undo leaves it alone.
+	execSQL(t, `UPDATE todos SET text='Later, edited',revision=revision+1 WHERE id=2`)
+	rec = postForm(t, handleTodayUndoMove, "/today/move-overdue/undo", url.Values{"items": {string(items)}})
+	requireOK(t, rec)
+	if due(1) != day(-3) {
+		t.Fatalf("undo did not restore the date: %s", due(1))
+	}
+	if due(2) != today {
+		t.Fatal("undo overwrote a task edited since the move")
+	}
+	if msg := triggerDetail(t, rec, "sbWorkspaceChanged")["message"]; msg == nil {
+		t.Fatal("undo did not say a task was skipped")
+	}
+}

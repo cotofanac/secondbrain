@@ -518,15 +518,29 @@ function markSetChips(form) {
     });
     syncDateChips(form);
 }
-// A date chip shows its date in the list rows' wording ("Sep 30"), or "Date".
+// Words a YYYY-MM-DD date like the list rows do (relativeDate in main.go):
+// "Today", "Tomorrow", "Fri", "in 9 days", "3 days ago", "Oct 12".
+function relativeDate(value) {
+    const [y, m, d] = value.split('-').map(Number);
+    const [ty, tm, td] = todayISO().split('-').map(Number);
+    const days = Math.round((Date.UTC(y, m - 1, d) - Date.UTC(ty, tm - 1, td)) / 86400000);
+    const date = new Date(Date.UTC(y, m - 1, d));
+    const format = options => date.toLocaleDateString('en-US', { timeZone: 'UTC', ...options });
+    if (days === 0) return 'Today';
+    if (days === 1) return 'Tomorrow';
+    if (days === -1) return 'Yesterday';
+    if (days >= 2 && days <= 6) return format({ weekday: 'short' });
+    if (days >= 7 && days <= 13) return `in ${days} days`;
+    if (days <= -2 && days >= -13) return `${-days} days ago`;
+    if (y === ty) return format({ month: 'short', day: 'numeric' });
+    return format({ month: 'short', day: 'numeric', year: 'numeric' });
+}
+// A date chip shows its date in the list rows' wording ("Tomorrow"), or "Date".
 function syncDateChips(root = document) {
     root.querySelectorAll?.('.chip-date').forEach(chip => {
         const value = chip.querySelector('input').value;
-        const [y, m, d] = value.split('-').map(Number);
         chip.classList.toggle('is-set', !!value);
-        chip.querySelector('.chip-text').textContent = value
-            ? new Date(y, m - 1, d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-            : 'Date';
+        chip.querySelector('.chip-text').textContent = value ? relativeDate(value) : 'Date';
         chip.querySelector('.chip-clear').hidden = !value;
     });
 }
@@ -958,6 +972,7 @@ function restoreTaskGroup(group) {
 document.body.addEventListener('htmx:afterSwap', e => {
     const id = e.detail.target.id;
     if (id === 'todo-items') restoreWorkspace();
+    if (id === 'today-content') restoreSections(e.detail.target);
     // After the list has reopened its sections and started loading projects.
     restoreTaskEditor();
     // An outerHTML swap fires on the new list; detail.target is the old one.

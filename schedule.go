@@ -46,6 +46,8 @@ func configureCalendar() {
 func registerScheduleRoutes() {
 	http.HandleFunc("/today", authMiddleware(handleToday))
 	http.HandleFunc("/today/reschedule", authMiddleware(handleTodayReschedule))
+	http.HandleFunc("/today/move-overdue", authMiddleware(handleTodayMoveOverdue))
+	http.HandleFunc("/today/move-overdue/undo", authMiddleware(handleTodayUndoMove))
 	http.HandleFunc("/push/status", authMiddleware(handlePushStatus))
 }
 
@@ -60,6 +62,8 @@ type TodayView struct {
 	Overdue, Due, Upcoming  []TodayItem
 	Suggestions             []TodayItem
 	CompletedToday, DueLeft int
+	// Movable counts overdue tasks "Move all to today" would move.
+	Movable int
 	// Reminder is the daily reminder time ("09:00"), empty when it is off.
 	Reminder string
 }
@@ -123,6 +127,11 @@ func loadToday(now time.Time) (TodayView, error) {
 		return view, err
 	}
 	view.DueLeft = len(view.Overdue) + len(view.Due)
+	for _, item := range view.Overdue {
+		if item.Repeat == "" {
+			view.Movable++
+		}
+	}
 	if taskReminder.enabled {
 		view.Reminder = reminderDesc(taskReminder)
 	}
@@ -168,6 +177,110 @@ func handleTodayReschedule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	hxTrigger(w, "sbWorkspaceChanged", map[string]any{"message": "Task scheduled"})
+	handleToday(w, r)
+}
+
+// movedDate is one task moved by "Move all to today": enough to put it back
+// if it has not been edited since.
+type movedDate struct {
+	ID       int    `json:"id"`
+	Revision int    `json:"revision"`
+	Due      string `json:"due"`
+}
+
+// handleTodayMoveOverdue gives every overdue task today's date in one step,
+// so a pile of missed dates becomes today's list instead of a backlog.
+// Repeating tasks keep their date: the next occurrence is counted from it,
+// so moving one would shift its whole schedule ("rent on the 1st").
+func handleTodayMoveOverdue(w http.ResponseWriter, r *http.Request) {
+	if !requirePost(w, r) {
+		return
+	}
+	today := appNow().Format("2006-01-02")
+	tx, err := db.Begin()
+	if err != nil {
+		http.Error(w, "Could not move tasks", 500)
+		return
+	}
+	defer tx.Rollback()
+	rows, err := tx.Query(`SELECT t.id,t.revision,t.due_date FROM todos t
+		WHERE t.category='todo' AND t.done=0 AND t.repeat='' AND t.due_date!='' AND t.due_date<? AND `+activeTaskSQL, today)
+	if err != nil {
+		http.Error(w, "Could not move tasks", 500)
+		return
+	}
+	var moved []movedDate
+	for rows.Next() {
+		var m movedDate
+		if err = rows.Scan(&m.ID, &m.Revision, &m.Due); err != nil {
+			rows.Close()
+			http.Error(w, "Could not move tasks", 500)
+			return
+		}
+		m.Revision++
+		moved = append(moved, m)
+	}
+	rows.Close()
+	for _, m := range moved {
+		if _, err = tx.Exec(`UPDATE todos SET due_date=?,revision=revision+1 WHERE id=?`, today, m.ID); err != nil {
+			http.Error(w, "Could not move tasks", 500)
+			return
+		}
+	}
+	if err = tx.Commit(); err != nil {
+		http.Error(w, "Could not move tasks", 500)
+		return
+	}
+	if len(moved) > 0 {
+		hxTrigger(w, "sbWorkspaceChanged", map[string]any{})
+		hxTrigger(w, "sbUndo", map[string]any{"kind": "dates", "items": moved})
+	}
+	handleToday(w, r)
+}
+
+// handleTodayUndoMove puts back the dates "Move all to today" replaced,
+// skipping any task edited since.
+func handleTodayUndoMove(w http.ResponseWriter, r *http.Request) {
+	if !requirePost(w, r) {
+		return
+	}
+	var items []movedDate
+	if err := json.Unmarshal([]byte(r.FormValue("items")), &items); err != nil || len(items) == 0 {
+		http.Error(w, "Nothing to undo", 400)
+		return
+	}
+	for _, m := range items {
+		if _, err := time.Parse("2006-01-02", m.Due); err != nil {
+			http.Error(w, "Invalid date", 400)
+			return
+		}
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		http.Error(w, "Could not undo", 500)
+		return
+	}
+	defer tx.Rollback()
+	skipped := 0
+	for _, m := range items {
+		result, err := tx.Exec(`UPDATE todos SET due_date=?,revision=revision+1 WHERE id=? AND revision=? AND category='todo' AND done=0`, m.Due, m.ID, m.Revision)
+		if err != nil {
+			http.Error(w, "Could not undo", 500)
+			return
+		}
+		if n, _ := result.RowsAffected(); n == 0 {
+			skipped++
+		}
+	}
+	if err = tx.Commit(); err != nil {
+		http.Error(w, "Could not undo", 500)
+		return
+	}
+	detail := map[string]any{}
+	if skipped > 0 {
+		detail["message"] = "Tasks changed since were left as they are"
+	}
+	hxTrigger(w, "sbWorkspaceChanged", detail)
 	handleToday(w, r)
 }
 func queueNotification(event string, payload pushPayload, now, expires time.Time) error {

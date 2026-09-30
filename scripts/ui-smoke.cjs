@@ -29,8 +29,8 @@ const shot = name => require('node:path').join(process.env.SCREENSHOT_DIR || req
  assert.equal(await page.locator('#capture-tasks [name=text]').inputValue(),'');
  // The capture date is one chip: picking shows the date, × clears it.
  const captureDate=page.locator('#capture-tasks .chip-date');
- await captureDate.locator('input').fill('2026-10-02');await captureDate.locator('input').dispatchEvent('change');
- assert.equal(await captureDate.locator('.chip-text').textContent(),'Oct 2');
+ await captureDate.locator('input').fill('2030-03-14');await captureDate.locator('input').dispatchEvent('change');
+ assert.equal(await captureDate.locator('.chip-text').textContent(),'Mar 14, 2030');
  await captureDate.locator('.chip-clear').click();
  assert.equal(await captureDate.locator('input').inputValue(),'');assert.equal(await captureDate.locator('.chip-clear').isHidden(),true);
  // The sidebar counts open inbox tasks and lists projects, which open as pages.
