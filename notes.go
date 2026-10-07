@@ -36,14 +36,21 @@ func handleNotes(w http.ResponseWriter, r *http.Request) {
 	var currentNote Note
 	if noteIDStr != "" {
 		noteID, _ := strconv.Atoi(noteIDStr)
-		db.QueryRow("SELECT id, title, content, updated_at, revision FROM notes WHERE id = ? AND archived = 0", noteID).Scan(
+		err = db.QueryRow("SELECT id, title, content, updated_at, revision FROM notes WHERE id = ? AND archived = 0", noteID).Scan(
 			&currentNote.ID, &currentNote.Title, &currentNote.Content, &currentNote.UpdatedAt, &currentNote.Revision,
 		)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			writeDomainError(w, err, "Could not load note")
+			return
+		}
 	}
 	if currentNote.ID == 0 {
 		currentNote.ID = notesList[0].ID
 		currentNote.Title = notesList[0].Title
-		db.QueryRow("SELECT content, updated_at, revision FROM notes WHERE id = ?", currentNote.ID).Scan(&currentNote.Content, &currentNote.UpdatedAt, &currentNote.Revision)
+		if err = db.QueryRow("SELECT content, updated_at, revision FROM notes WHERE id = ?", currentNote.ID).Scan(&currentNote.Content, &currentNote.UpdatedAt, &currentNote.Revision); err != nil {
+			writeDomainError(w, err, "Could not load note")
+			return
+		}
 	}
 
 	data := struct {
@@ -55,6 +62,7 @@ func handleNotes(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleSaveNote(w http.ResponseWriter, r *http.Request) {
+	mutationEffects(w, "notes")
 	if r.Method != "POST" {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -78,7 +86,7 @@ func handleSaveNote(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	res, err := db.Exec(
-		"UPDATE notes SET content = ?, updated_at = ?, revision = revision + 1 WHERE id = ? AND revision = ?",
+		"UPDATE notes SET content = ?, updated_at = ?, revision = revision + 1 WHERE id = ? AND revision = ? AND archived=0",
 		content, dbTime(time.Now()), id, revision,
 	)
 	if err != nil {
@@ -103,6 +111,7 @@ func handleSaveNote(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleCreateNote(w http.ResponseWriter, r *http.Request) {
+	mutationEffects(w, "notes")
 	if r.Method != "POST" {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -150,7 +159,7 @@ func handleCreateNote(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "DB error", http.StatusInternalServerError)
 		return
 	case archived == 1:
-		if _, uerr := tx.Exec("UPDATE notes SET archived = 0 WHERE id = ?", existingID); uerr != nil {
+		if _, uerr := tx.Exec("UPDATE notes SET archived = 0,revision=revision+1 WHERE id = ? AND archived=1", existingID); uerr != nil {
 			http.Error(w, "DB error", http.StatusInternalServerError)
 			return
 		}
@@ -178,6 +187,7 @@ func handleCreateNote(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleDeleteNote(w http.ResponseWriter, r *http.Request) {
+	mutationEffects(w, "notes")
 	if r.Method != "POST" {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -208,7 +218,17 @@ func handleDeleteNote(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	res, err := tx.Exec("UPDATE notes SET archived = 1 WHERE id = ? AND archived = 0", id)
+	var revision int
+	if err = tx.QueryRow(`SELECT revision FROM notes WHERE id=? AND archived=0`, id).Scan(&revision); err != nil {
+		writeDomainError(w, err, "Could not archive note")
+		return
+	}
+	token, err := recordUndo(tx, undoOperation{Changes: []undoChange{{Table: "notes", ID: id, Revision: revision + 1, Values: map[string]any{"archived": 0}}}})
+	if err != nil {
+		writeDomainError(w, err, "Could not archive note")
+		return
+	}
+	res, err := tx.Exec("UPDATE notes SET archived = 1,revision=revision+1 WHERE id = ? AND archived = 0", id)
 	if err != nil {
 		http.Error(w, "DB error", http.StatusInternalServerError)
 		return
@@ -221,6 +241,7 @@ func handleDeleteNote(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "DB error", http.StatusInternalServerError)
 		return
 	}
+	hxTrigger(w, "sbUndo", map[string]any{"kind": "note", "id": id, "token": token, "message": "Note archived"})
 	log.Printf("Note archived: id=%d", id)
 
 	r.URL.RawQuery = ""
@@ -228,6 +249,7 @@ func handleDeleteNote(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleRenameNote(w http.ResponseWriter, r *http.Request) {
+	mutationEffects(w, "notes")
 	if r.Method != "POST" {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -250,13 +272,22 @@ func handleRenameNote(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, err = db.Exec("UPDATE notes SET title = ? WHERE id = ?", title, id)
+	result, err := db.Exec("UPDATE notes SET title = ?,revision=revision+1 WHERE id = ? AND archived=0", title, id)
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE") {
 			http.Error(w, nameConflictMessage("notes", "title", title, "note"), http.StatusConflict)
 			return
 		}
 		http.Error(w, "DB error", http.StatusInternalServerError)
+		return
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		writeDomainError(w, err, "Could not rename note")
+		return
+	}
+	if changed == 0 {
+		writeDomainError(w, errMissing, "Could not rename note")
 		return
 	}
 	log.Printf("Note renamed: id=%d", id)
@@ -266,6 +297,7 @@ func handleRenameNote(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleRestoreNote(w http.ResponseWriter, r *http.Request) {
+	mutationEffects(w, "notes")
 	if !requirePost(w, r) {
 		return
 	}
@@ -275,7 +307,7 @@ func handleRestoreNote(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, err := db.Exec("UPDATE notes SET archived = 0 WHERE id = ?", id); err != nil {
+	if _, err := db.Exec("UPDATE notes SET archived = 0,revision=revision+1 WHERE id = ? AND archived=1", id); err != nil {
 		http.Error(w, "DB error", http.StatusInternalServerError)
 		return
 	}
@@ -285,6 +317,7 @@ func handleRestoreNote(w http.ResponseWriter, r *http.Request) {
 }
 
 func handlePermanentDeleteNote(w http.ResponseWriter, r *http.Request) {
+	mutationEffects(w, "notes")
 	if !requirePost(w, r) {
 		return
 	}

@@ -22,14 +22,14 @@
     </header>
 
     <!-- Search overlay -->
-    <div id="search-overlay" class="search-overlay" aria-hidden="true" inert>
+    <div id="search-overlay" class="search-overlay" role="dialog" aria-label="Search" hidden aria-hidden="true" inert>
         <div class="search-bar">
             <span class="search-icon">{{template "icon-search"}}</span>
             <input type="text" id="search-input" class="search-input"
                    placeholder="Search tasks, projects and notes…"
                    hx-get="/search" hx-trigger="input changed delay:200ms"
                    hx-target="#search-results" hx-swap="innerHTML"
-                   name="q" autocomplete="off">
+                   name="q" aria-label="Search tasks, projects and notes" autocomplete="off">
             <button type="button" class="btn-icon search-close" data-call="closeSearch" aria-label="Close search">
                 {{template "icon-close"}}
             </button>
@@ -137,7 +137,9 @@
 
     <script src="/static/htmx.min.js?v={{assetVersion}}"></script>
     <script src="/static/app.js?v={{assetVersion}}"></script>
+    <script src="/static/drafts.js?v={{assetVersion}}" defer></script>
     <script src="/static/notes.js?v={{assetVersion}}"></script>
+    <script src="/static/calendar.js?v={{assetVersion}}" defer></script>
     <script src="/static/workspace.js?v={{assetVersion}}"></script>
     <script src="/static/push.js?v={{assetVersion}}"></script>
 </body>

@@ -43,7 +43,7 @@
     </div>
 </div>
 <p class="note-meta">{{if .CurrentNote.UpdatedAt}}<span class="note-updated">Edited {{formatUpdated .CurrentNote.UpdatedAt}}</span>{{end}}<span id="note-status" class="note-status" role="status" aria-live="polite"></span></p>
-<textarea id="note-editor" class="note-editor"
+<textarea id="note-editor" class="note-editor" aria-label="{{.CurrentNote.Title}}"
           data-note-id="{{.CurrentNote.ID}}"
           data-updated-at="{{.CurrentNote.UpdatedAt}}"
           data-revision="{{.CurrentNote.Revision}}"

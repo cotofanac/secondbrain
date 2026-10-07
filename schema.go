@@ -15,7 +15,7 @@ func dbTime(t time.Time) string { return t.UTC().Format(time.RFC3339) }
 const sqlNow = `strftime('%Y-%m-%dT%H:%M:%SZ','now')`
 
 // schemaVersion is the migration number the tables below correspond to.
-const schemaVersion = 8
+const schemaVersion = 9
 
 type tableDef struct{ name, columns string }
 
@@ -26,7 +26,8 @@ var schemaTables = []tableDef{
 		name TEXT NOT NULL,
 		position INTEGER NOT NULL DEFAULT 0,
 		archived INTEGER NOT NULL DEFAULT 0 CHECK(archived IN (0,1)),
-		completed INTEGER NOT NULL DEFAULT 0 CHECK(completed IN (0,1))`},
+		completed INTEGER NOT NULL DEFAULT 0 CHECK(completed IN (0,1)),
+        revision INTEGER NOT NULL DEFAULT 1`},
 	// Headings split a project's list into parts. They hold no state of their
 	// own: deleting one moves its tasks to the top of the project.
 	{"headings", `id INTEGER PRIMARY KEY,
@@ -75,14 +76,22 @@ var schemaTables = []tableDef{
 		status TEXT NOT NULL DEFAULT 'pending',
 		result TEXT NOT NULL DEFAULT '',
 		PRIMARY KEY(endpoint,event_key)`},
-	// Key/value store: VAPID keys, reminder schedule and time zone.
+	// VAPID keys and delivery markers. Calendar and reminder configuration
+	// comes from the deployment, not this table.
 	{"settings", `key TEXT PRIMARY KEY,
 		value TEXT NOT NULL`},
+	{"undo_operations", `token TEXT PRIMARY KEY,
+        payload TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        consumed INTEGER NOT NULL DEFAULT 0 CHECK(consumed IN (0,1))`},
 	{"schema_migrations", `version INTEGER PRIMARY KEY,
 		applied_at TEXT NOT NULL`},
 }
 
 var schemaIndexes = []string{
+	`CREATE INDEX idx_todos_active_project ON todos(project_id,category,done,due_date) WHERE archived=0`,
+	`CREATE INDEX idx_todos_progress ON todos(project_id,done) WHERE category='todo' AND (archived=0 OR done=1)`,
+	`CREATE INDEX idx_undo_expires ON undo_operations(expires_at)`,
 	`CREATE INDEX idx_todos_project_heading ON todos(project_id,heading_id,archived)`,
 	`CREATE INDEX idx_todos_due ON todos(category,archived,done,due_date)`,
 	`CREATE INDEX idx_todos_completed ON todos(completed_at)`,
@@ -95,6 +104,10 @@ var schemaIndexes = []string{
 // migrations bring an existing database from the previous version to the
 // keyed one, inside a transaction. Never edit an applied step.
 var migrations = map[int][]string{
+	9: {`CREATE INDEX idx_todos_active_project ON todos(project_id,category,done,due_date) WHERE archived=0`, `ALTER TABLE projects ADD COLUMN revision INTEGER NOT NULL DEFAULT 1`,
+		`CREATE TABLE undo_operations(token TEXT PRIMARY KEY,payload TEXT NOT NULL,expires_at TEXT NOT NULL,consumed INTEGER NOT NULL DEFAULT 0 CHECK(consumed IN (0,1)))`,
+		`CREATE INDEX idx_undo_expires ON undo_operations(expires_at)`,
+		`CREATE INDEX idx_todos_progress ON todos(project_id,done) WHERE category='todo' AND (archived=0 OR done=1)`},
 	// Stages become headings: no archive of their own. Tasks under an archived
 	// stage were hidden, so they are archived themselves (restorable from the
 	// archive, at the top of their project) before the stage goes.

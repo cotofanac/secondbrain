@@ -51,7 +51,7 @@ function loadProjectBody(details) {
             // it, so several projects opening at once must not share a source.
             source: target,
             target: '#' + target.id,
-            swap: 'innerHTML'
+            swap: 'innerHTML',
         })
         .then(() => {
             target.dataset.loaded = '1';
@@ -80,7 +80,7 @@ document.addEventListener(
         if (d.matches?.('details[data-persist]')) writeLocal(sectionStorageKey(d), d.open ? '1' : '0');
         if (d.matches?.('.project-group')) loadProjectBody(d);
     },
-    true
+    true,
 );
 function captureDraftKey(form) {
     return 'capture-draft-' + form.id;
@@ -122,8 +122,8 @@ function scrollAnchors(focused) {
     add(inUse?.parentElement?.closest('.project-group'));
     add(
         [...document.querySelectorAll('#todo-items :is(' + ANCHOR_SELECTOR + ')')].find(
-            el => el.getClientRects().length && el.getBoundingClientRect().top >= 0
-        )
+            el => el.getClientRects().length && el.getBoundingClientRect().top >= 0,
+        ),
     );
     return anchors;
 }
@@ -155,7 +155,7 @@ function rememberWorkspace() {
             ? 'check'
             : el?.classList.contains('task-label')
               ? 'label'
-              : ''
+              : '',
     };
 }
 function restoreWorkspace() {
@@ -178,7 +178,9 @@ function restoreWorkspace() {
         }
         // Rows in open projects come back only once their bodies load, so
         // focus is put back now and again after that.
+        const navigation = navigationVersion;
         const refocus = () => {
+            if (navigation !== navigationVersion || document.body.dataset.mode !== 'todos') return;
             if (s.focus) {
                 const el = document.getElementById(s.focus)?.elements.namedItem(s.name);
                 if (!el || el === document.activeElement) return;
@@ -211,6 +213,11 @@ function restoreWorkspace() {
                 Promise.race([loading, new Promise(done => setTimeout(done, 5000))]).then(() => {
                     // A newer refresh took over and will finish the job.
                     if (workspaceRestore !== s) return;
+                    if (navigation !== navigationVersion || document.body.dataset.mode !== 'todos') {
+                        workspaceRestore = null;
+                        list?.style.removeProperty('min-height');
+                        return;
+                    }
                     workspaceRestore = null;
                     if (list) list.style.minHeight = '';
                     for (const a of s.anchors) {
@@ -275,6 +282,7 @@ function setDestination(values) {
     url.search = '';
     Object.entries(values).forEach(([k, v]) => url.searchParams.set(k, v));
     if (url.href === location.href) return;
+    navigationVersion++;
     const state = { secondbrain: true, ...values };
     if (restoringHistory) history.replaceState(state, '', url);
     else history.pushState(state, '', url);
@@ -290,6 +298,7 @@ function closePopupMenus() {
 // is being edited. One task is open at a time, in Tasks or in Today.
 let taskEditor = null;
 let taskEditorOpening = 0;
+const taskBuffers = new Map();
 function taskRow(id, scope) {
     return scope === 'today'
         ? document.querySelector('#today-content [data-task-id="' + id + '"]')
@@ -309,35 +318,45 @@ async function openTask(id, options = {}) {
     }
     const opening = ++taskEditorOpening;
     closeTaskEditor({ focus: false });
+    const navigation = navigationVersion;
+    const buffer = taskBuffers.get(id);
+    const retained = buffer && (buffer.dirty || buffer.saving || buffer.conflict) ? buffer : null;
     let html;
     try {
-        const response = await fetch('/task/edit?id=' + id, { headers: { 'HX-Request': 'true' } });
+        const response = await fetch('/task/edit?id=' + id, {
+            headers: { 'HX-Request': 'true' },
+        });
         html = await response.text();
         if (response.status === 401) {
             location.href = '/login';
             return;
         }
         if (!response.ok) {
-            showToast(response.status < 500 && html.length < 120 ? html.trim() : 'Something went wrong — try again');
+            showToast(
+                response.status < 500 && html.length < 120 ? html.trim() : 'Something went wrong — try again',
+            );
             return;
         }
     } catch (_) {
         showToast('You appear to be offline');
         return;
     }
-    const form = new DOMParser().parseFromString(html, 'text/html').getElementById('task-editor');
-    if (!form || opening !== taskEditorOpening) return;
+    const form =
+        retained?.form || new DOMParser().parseFromString(html, 'text/html').getElementById('task-editor');
+    if (!form || opening !== taskEditorOpening || navigation !== navigationVersion) return;
     if (scope === 'todos') {
         if (currentWorkspaceSection() === 'archive')
             document.body.dataset.workspaceSection = readLocal('desktop-workspace') || 'tasks';
         switchMode('todos');
+        const destinationVersion = navigationVersion;
         if (document.querySelector('#todo-items .archive-header')) await refreshWorkspace();
+        if (destinationVersion !== navigationVersion) return;
         const project = document.getElementById('project-' + form.dataset.projectId);
         if (project) {
             project.open = true;
             await loadProjectBody(project);
         }
-        if (opening !== taskEditorOpening) return;
+        if (opening !== taskEditorOpening || destinationVersion !== navigationVersion) return;
         revealTask(id);
         setDestination({ view: 'todos', task: id });
     }
@@ -346,8 +365,26 @@ async function openTask(id, options = {}) {
         showToast('Task unavailable. It may have been archived.');
         return;
     }
-    taskEditor = { id, scope, form, savedText: form.elements.text.value, dirty: false, changed: false };
+    taskEditor = retained || {
+        id,
+        scope,
+        form,
+        savedText: form.elements.text.value,
+        dirty: false,
+        changed: false,
+    };
+    taskEditor.scope = scope;
+    taskBuffers.set(id, taskEditor);
     attachTaskEditor(taskEditor, row);
+    const attachedVersion = navigationVersion;
+    if (!retained) await restoreTaskDraft(taskEditor);
+    if (
+        opening !== taskEditorOpening ||
+        attachedVersion !== navigationVersion ||
+        !taskEditor?.form.isConnected
+    )
+        return;
+    if (taskEditor.conflict) showTaskConflict(taskEditor, taskEditor.conflict);
     // Only a tap animates the editor in; re-attaching it after a refresh does not.
     form.classList.add('is-opening');
     setTimeout(() => form.classList.remove('is-opening'), 260);
@@ -373,6 +410,37 @@ function focusTaskEditor(editor) {
     } else editor.form.focus({ preventScroll: true });
     editor.form.scrollIntoView({ block: 'nearest' });
 }
+function taskDraft(editor) {
+    return Object.fromEntries(new FormData(editor.form));
+}
+async function storeTaskDraft(editor) {
+    try {
+        await editorDrafts.write('tasks', editor.id, taskDraft(editor));
+    } catch (_) {
+        showTaskStatus(editor, 'Draft kept in this tab. Browser storage is unavailable.');
+    }
+}
+async function restoreTaskDraft(editor) {
+    try {
+        const draft = await editorDrafts.read('tasks', editor.id);
+        if (!draft || editor.dirty) return;
+        const fields = editor.form.elements;
+        if (
+            ['text', 'due_date', 'repeat', 'list'].every(
+                key => String(draft[key] || '') === String(fields[key]?.value || ''),
+            )
+        ) {
+            await editorDrafts.remove('tasks', editor.id);
+            return;
+        }
+        for (const key of ['text', 'due_date', 'repeat', 'list', 'revision']) {
+            if (fields[key] && draft[key] !== undefined) fields[key].value = draft[key];
+        }
+        editor.dirty = true;
+        markSetChips(editor.form);
+        showTaskStatus(editor, 'Unsaved draft restored. Edit to retry saving.');
+    } catch (_) {}
+}
 function closeTaskEditor(options = {}) {
     const editor = taskEditor;
     if (!editor) return;
@@ -381,7 +449,8 @@ function closeTaskEditor(options = {}) {
     const focused = editor.form.contains(document.activeElement);
     editor.form.remove();
     row?.classList.remove('editing', 'selected');
-    if (options.focus !== false && focused) row?.querySelector('[data-edit-label]')?.focus({ preventScroll: true });
+    if (options.focus !== false && focused)
+        row?.querySelector('[data-edit-label]')?.focus({ preventScroll: true });
     if (editor.scope === 'todos' && new URLSearchParams(location.search).has('task'))
         setDestination({ view: 'todos' });
     // A blank title would not save; keep the last saved one instead.
@@ -396,10 +465,10 @@ function closeTaskEditor(options = {}) {
 }
 function refreshTaskViews() {
     if (document.body.dataset.mode === 'today') {
-        preserveScroll();
         htmx.ajax('GET', '/today', '#today-content');
     }
-    refreshWorkspace();
+    invalidateViews(['todos', 'today']);
+    refreshStaleView();
 }
 function showTaskStatus(editor, message) {
     const status = editor.form.querySelector('.task-save-status');
@@ -407,6 +476,8 @@ function showTaskStatus(editor, message) {
 }
 function scheduleTaskSave(editor) {
     editor.dirty = true;
+    editorDrafts.state(editor.form, 'dirty');
+    void storeTaskDraft(editor);
     clearTimeout(editor.timer);
     editor.timer = setTimeout(() => saveTaskEditor(editor), 600);
 }
@@ -416,7 +487,12 @@ async function saveTaskEditor(editor, options = {}) {
     clearTimeout(editor.timer);
     editor.timer = null;
     while (editor.saving) await editor.saving;
-    if (!editor.dirty) return true;
+    if (editor.conflict) return false;
+    if (!editor.dirty) {
+        if (!editor.form.isConnected && taskBuffers.get(editor.id) === editor) taskBuffers.delete(editor.id);
+        return true;
+    }
+    await storeTaskDraft(editor);
     const form = editor.form;
     if (!form.elements.text.value.trim()) {
         showTaskStatus(editor, 'Enter a task title to save.');
@@ -424,14 +500,18 @@ async function saveTaskEditor(editor, options = {}) {
     }
     const body = new URLSearchParams(new FormData(form));
     editor.dirty = false;
+    editorDrafts.state(form, 'saving');
     showTaskStatus(editor, 'Saving…');
     editor.saving = (async () => {
         try {
             const response = await fetch('/task/save', {
                 method: 'POST',
-                headers: { 'HX-Request': 'true', 'Content-Type': 'application/x-www-form-urlencoded' },
+                headers: {
+                    'HX-Request': 'true',
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
                 body,
-                keepalive: !!options.keepalive
+                keepalive: !!options.keepalive,
             });
             const text = await response.text();
             let data = null;
@@ -440,31 +520,45 @@ async function saveTaskEditor(editor, options = {}) {
             } catch (_) {}
             if (response.status === 409 && data?.task) {
                 editor.dirty = true;
+                editor.conflict = data.task;
+                editorDrafts.state(form, 'conflicted');
                 showTaskConflict(editor, data.task);
                 return false;
             }
             if (!response.ok || data?.status !== 'saved') {
                 editor.dirty = true;
-                const reason = response.status === 401 ? 'Session expired. Sign in again to save.' : text.trim();
-                showTaskStatus(editor, response.status < 500 && reason.length < 120 ? reason : 'Not saved. Try again.');
-                if (!form.isConnected) showToast('That task edit was not saved.');
+                editorDrafts.state(form, 'failed');
+                const reason =
+                    response.status === 401 ? 'Session expired. Sign in again to save.' : text.trim();
+                showTaskStatus(
+                    editor,
+                    response.status < 500 && reason.length < 120 ? reason : 'Not saved. Try again.',
+                );
+                if (!form.isConnected) showToast('Not saved. Your task draft is kept for next time.');
                 return false;
             }
             form.elements.revision.value = data.revision;
             editor.savedText = body.get('text');
             editor.changed = true;
+            if (editor.dirty) await storeTaskDraft(editor);
+            else await editorDrafts.remove('tasks', editor.id);
+            editorDrafts.state(form, editor.dirty ? 'dirty' : 'clean');
+            reportMutationEffects(response);
             refreshSidebar();
             showTaskStatus(editor, editor.dirty ? '' : 'Saved');
             return true;
         } catch (_) {
             editor.dirty = true;
-            showTaskStatus(editor, 'Offline. Your changes will save when you edit again online.');
-            if (!form.isConnected) showToast('Offline. That task edit was not saved.');
+            editorDrafts.state(form, 'failed');
+            showTaskStatus(editor, 'Offline. Your draft is kept. Edit to retry saving.');
+            if (!form.isConnected) showToast('Offline. Your task draft is kept for next time.');
             return false;
         }
     })();
     const saved = await editor.saving;
     editor.saving = null;
+    if (!editor.dirty && !editor.form.isConnected && taskBuffers.get(editor.id) === editor)
+        taskBuffers.delete(editor.id);
     return saved;
 }
 function showTaskConflict(editor, latest) {
@@ -474,7 +568,6 @@ function showTaskConflict(editor, latest) {
         return;
     }
     showTaskStatus(editor, '');
-    form.elements.revision.value = latest.revision;
     let conflict = form.querySelector('.edit-conflict');
     if (!conflict) {
         conflict = document.createElement('section');
@@ -486,14 +579,23 @@ function showTaskConflict(editor, latest) {
     const title = document.createElement('h3');
     title.textContent = 'Changed on another device';
     const copy = document.createElement('p');
-    copy.textContent = 'Latest task: ' + latest.text;
+    const details = [
+        latest.due_date ? relativeDate(latest.due_date) : 'No date',
+        latest.repeat ? 'Repeats ' + latest.repeat : '',
+    ];
+    copy.textContent = 'Latest task: ' + latest.text + ' · ' + details.filter(Boolean).join(' · ');
     const keep = taskAction('Keep mine', () => {
         conflict.remove();
+        editor.conflict = null;
+        form.elements.revision.value = latest.revision;
         saveTaskEditor(editor);
     });
     const use = taskAction('Use latest', () => {
         conflict.remove();
+        editor.conflict = null;
+        void editorDrafts.remove('tasks', editor.id);
         const fields = form.elements;
+        fields.revision.value = latest.revision;
         fields.text.value = latest.text;
         if (fields.due_date) fields.due_date.value = latest.due_date;
         if (fields.repeat) fields.repeat.value = latest.repeat;
@@ -520,21 +622,6 @@ function markSetChips(form) {
 }
 // Words a YYYY-MM-DD date like the list rows do (relativeDate in main.go):
 // "Today", "Tomorrow", "Fri", "in 9 days", "3 days ago", "Oct 12".
-function relativeDate(value) {
-    const [y, m, d] = value.split('-').map(Number);
-    const [ty, tm, td] = todayISO().split('-').map(Number);
-    const days = Math.round((Date.UTC(y, m - 1, d) - Date.UTC(ty, tm - 1, td)) / 86400000);
-    const date = new Date(Date.UTC(y, m - 1, d));
-    const format = options => date.toLocaleDateString('en-US', { timeZone: 'UTC', ...options });
-    if (days === 0) return 'Today';
-    if (days === 1) return 'Tomorrow';
-    if (days === -1) return 'Yesterday';
-    if (days >= 2 && days <= 6) return format({ weekday: 'short' });
-    if (days >= 7 && days <= 13) return `in ${days} days`;
-    if (days <= -2 && days >= -13) return `${-days} days ago`;
-    if (y === ty) return format({ month: 'short', day: 'numeric' });
-    return format({ month: 'short', day: 'numeric', year: 'numeric' });
-}
 // A date chip shows its date in the list rows' wording ("Tomorrow"), or "Date".
 function syncDateChips(root = document) {
     root.querySelectorAll?.('.chip-date').forEach(chip => {
@@ -574,60 +661,6 @@ document.addEventListener('click', e => {
 // on fri", "Renew passport 30 sep") becomes its due date and leaves the title.
 // The date chip previews it while typing; × or picking another date keeps the
 // words as typed.
-const WEEKDAY_NAMES = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
-const MONTH_NAMES = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'];
-const NUMBER_WORDS = { a: 1, an: 1, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6 };
-function todayISO() {
-    return new Date().toLocaleDateString('en-CA', { timeZone: document.body.dataset.timezone || undefined });
-}
-function addDaysISO(iso, n) {
-    const d = new Date(iso + 'T00:00:00Z');
-    d.setUTCDate(d.getUTCDate() + n);
-    return d.toISOString().slice(0, 10);
-}
-// A name matches when it is at least three letters of the full word ("fri", "sept").
-function matchName(word, names) {
-    return word.length >= 3 ? names.findIndex(name => name.startsWith(word)) : -1;
-}
-function parseDatePhrase(phrase, today) {
-    const dow = new Date(today + 'T00:00:00Z').getUTCDay();
-    if (phrase === 'today') return today;
-    if (['tomorrow', 'tmr', 'tmrw'].includes(phrase)) return addDaysISO(today, 1);
-    if (phrase === 'next week') return addDaysISO(today, (8 - dow) % 7 || 7);
-    let m = phrase.match(/^in (\d{1,3}|a|an|one|two|three|four|five|six) (day|days|week|weeks)$/);
-    if (m) {
-        const n = NUMBER_WORDS[m[1]] || Number(m[1]);
-        return addDaysISO(today, m[2].startsWith('week') ? n * 7 : n);
-    }
-    // A weekday means its next one, never today: "fri" on a Friday is a week out.
-    const weekday = matchName(phrase.replace(/^next /, ''), WEEKDAY_NAMES);
-    if (weekday >= 0) return addDaysISO(today, (weekday - dow + 7) % 7 || 7);
-    m = phrase.match(/^(\d{1,2}) ([a-z]+)$/) || phrase.match(/^([a-z]+) (\d{1,2})$/);
-    if (m) {
-        const [day, month] = /^\d/.test(m[1]) ? [Number(m[1]), m[2]] : [Number(m[2]), m[1]];
-        const index = matchName(month, MONTH_NAMES);
-        if (index < 0) return null;
-        let year = Number(today.slice(0, 4));
-        const date = y => new Date(Date.UTC(y, index, day)).toISOString().slice(0, 10);
-        if (new Date(Date.UTC(year, index, day)).getUTCDate() !== day) return null;
-        if (date(year) < today) year++;
-        return date(year);
-    }
-    if (/^\d{4}-\d{2}-\d{2}$/.test(phrase) && !Number.isNaN(Date.parse(phrase))) return phrase;
-    return null;
-}
-// typedDate returns { title, due } for a title ending in a date, else null.
-function typedDate(text, today = todayISO()) {
-    const words = text.trim().split(/\s+/);
-    for (let n = Math.min(3, words.length - 1); n >= 1; n--) {
-        const due = parseDatePhrase(words.slice(-n).join(' ').toLowerCase(), today);
-        if (!due) continue;
-        let rest = words.slice(0, -n);
-        if (rest.length > 1 && ['on', 'by', 'due'].includes(rest[rest.length - 1].toLowerCase())) rest = rest.slice(0, -1);
-        return { title: rest.join(' '), due };
-    }
-    return null;
-}
 // Preview a typed date in the capture row's chip, unless a date was picked by
 // hand or the typed one was cleared.
 function previewTypedDate(form) {
@@ -676,28 +709,52 @@ function keepTaskEditor(e) {
         ? { name: el.name, start: el.selectionStart, end: el.selectionEnd }
         : null;
 }
-function restoreTaskEditor() {
+async function restoreTaskEditor() {
     const editor = taskEditor;
     if (!editor || editor.form.isConnected) return;
     const row = taskRow(editor.id, editor.scope);
     if (!row) {
         // A refresh reloads open projects' bodies after the list itself; wait
         // for them before deciding the task is gone.
-        const loading = document.querySelector('.project-group[open] > [data-lazy-project]:not([data-loaded])');
+        const loading = document.querySelector(
+            '.project-group[open] > [data-lazy-project]:not([data-loaded])',
+        );
         if (editor.scope !== 'todos' || !loading) closeTaskEditor({ focus: false });
         return;
     }
     attachTaskEditor(editor, row);
+    if (
+        !editor.dirty &&
+        !editor.saving &&
+        !editor.conflict &&
+        row.dataset.revision !== editor.form.elements.revision.value
+    ) {
+        try {
+            const response = await fetch('/task/edit?id=' + editor.id, { headers: { 'HX-Request': 'true' } });
+            if (!response.ok || taskEditor !== editor || editor.dirty || editor.saving) return;
+            const latest = new DOMParser()
+                .parseFromString(await response.text(), 'text/html')
+                .getElementById('task-editor');
+            if (!latest || editor.dirty || editor.saving) return;
+            for (const key of ['text', 'due_date', 'repeat', 'list', 'revision']) {
+                if (editor.form.elements[key] && latest.elements[key])
+                    editor.form.elements[key].value = latest.elements[key].value;
+            }
+            editor.savedText = editor.form.elements.text.value;
+            markSetChips(editor.form);
+        } catch (_) {}
+    }
     const field = editor.focus?.name && editor.form.elements.namedItem(editor.focus.name);
-    if (field) {
+    if (field && document.body.dataset.mode === editor.scope && field.getClientRects().length) {
         field.focus({ preventScroll: true });
-        if (typeof editor.focus.start === 'number') field.setSelectionRange?.(editor.focus.start, editor.focus.end);
+        if (typeof editor.focus.start === 'number')
+            field.setSelectionRange?.(editor.focus.start, editor.focus.end);
     }
     editor.focus = null;
 }
 document.addEventListener('input', e => {
     if (!taskEditor || !taskEditor.form.contains(e.target)) return;
-    taskEditor.form.querySelector('.edit-conflict')?.remove();
+    if (!taskEditor.conflict) taskEditor.form.querySelector('.edit-conflict')?.remove();
     showTaskStatus(taskEditor, '');
     markSetChips(taskEditor.form);
     scheduleTaskSave(taskEditor);
@@ -713,7 +770,12 @@ document.addEventListener('click', e => {
     if (row && e.target.isConnected && !row.contains(e.target)) closeTaskEditor({ focus: false });
 });
 function flushTaskEditor() {
-    if (taskEditor?.dirty) saveTaskEditor(taskEditor, { keepalive: true });
+    for (const editor of taskBuffers.values()) {
+        if (editor.dirty) {
+            void storeTaskDraft(editor);
+            void saveTaskEditor(editor, { keepalive: true });
+        }
+    }
 }
 document.addEventListener('visibilitychange', () => {
     if (document.hidden) flushTaskEditor();
@@ -744,7 +806,9 @@ function showProjectPage(id) {
 async function openProject(id) {
     if (!id) return;
     if (isDesktop()) {
+        const navigation = navigationVersion;
         if (document.querySelector('#todo-items .archive-header')) await refreshWorkspace();
+        if (navigation !== navigationVersion) return;
         showProjectPage(id);
         window.scrollTo({ top: 0, behavior: 'auto' });
         setDestination({ view: 'todos', project: id });
@@ -753,7 +817,9 @@ async function openProject(id) {
     document.body.dataset.workspaceSection = 'tasks';
     writeLocal('desktop-workspace', 'tasks');
     switchMode('todos');
+    const navigation = navigationVersion;
     if (document.querySelector('#todo-items .archive-header')) await refreshWorkspace();
+    if (navigation !== navigationVersion) return;
     const el = document.getElementById('project-' + id);
     if (el) {
         showWorkspaceContaining(el);
@@ -790,7 +856,13 @@ async function structureRename(kind, id, el) {
 // Archiving a heading puts it away with its tasks, for a finished section.
 async function archiveHeading(id, el) {
     closePopupMenus();
-    if (await showConfirm('Archive the heading “' + el.dataset.name + '” and its tasks? You can restore the tasks from the Archive.'))
+    if (
+        await showConfirm(
+            'Archive the heading “' +
+                el.dataset.name +
+                '” and its tasks? You can restore the tasks from the Archive.',
+        )
+    )
         structureAction('heading', id, 'archive');
 }
 async function deleteHeading(id, el) {
@@ -802,8 +874,35 @@ async function structureAction(kind, id, action, extra = {}) {
     closePopupMenus();
     await htmx.ajax('POST', kind === 'project' ? '/projects/action' : '/headings/action', {
         target: '#todo-items',
-        values: { id, action, ...extra }
+        values: { id, action, ...extra },
     });
+}
+// Finishing a project is a big moment: its ring closes into a tick, the project
+// lifts away, and only then is it sent to the archive.
+async function completeProject(id) {
+    closePopupMenus();
+    const project = document.getElementById('project-' + id);
+    const onPage = project?.hasAttribute('data-project-page');
+    try {
+        if (project && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+            // The ring is the moment; on a phone it may have scrolled under the top bar.
+            project.querySelector('summary')?.scrollIntoView({ block: 'nearest' });
+            project.classList.add('is-finishing');
+            await new Promise(done => setTimeout(done, 760));
+        }
+        await structureAction('project', id, 'complete');
+    } finally {
+        // A refused completion leaves the project where it was.
+        project?.classList.remove('is-finishing');
+    }
+    if (
+        onPage &&
+        document.body.dataset.mode === 'todos' &&
+        currentWorkspaceSection() === 'project' &&
+        document.body.dataset.projectId === String(id) &&
+        !document.getElementById('project-' + id)
+    )
+        switchWorkspaceSection('tasks');
 }
 // --- Archive ---
 // One view for everything archived, shown in the task area. Back returns to
@@ -812,22 +911,31 @@ let archiveReturn = null;
 function openArchive(kind = 'todo') {
     const mode = document.body.dataset.mode || 'todos';
     if (currentWorkspaceSection() !== 'archive' || mode !== 'todos')
-        archiveReturn = { mode, workspace: currentWorkspaceSection(), project: document.body.dataset.projectId };
+        archiveReturn = {
+            mode,
+            workspace: currentWorkspaceSection(),
+            project: document.body.dataset.projectId,
+        };
     document.body.dataset.workspaceSection = 'archive';
     switchMode('todos');
     setDestination({ view: 'archive', kind });
     htmx.ajax('GET', '/archive?kind=' + encodeURIComponent(kind), '#todo-items');
 }
 function hideArchive() {
+    const navigation = navigationVersion;
     const back = archiveReturn || { mode: 'todos', workspace: 'tasks' };
     archiveReturn = null;
     refreshWorkspace().then(() => {
+        if (navigation !== navigationVersion) return;
         if (back.mode !== 'todos') {
             document.body.dataset.workspaceSection = readLocal('desktop-workspace') || 'tasks';
             if (back.mode === 'today') openToday();
             else switchMode(back.mode);
         } else if (back.workspace === 'project' && back.project) showProjectPage(Number(back.project));
-        else switchWorkspaceSection(back.workspace === 'archive' ? 'tasks' : back.workspace, { preserveScroll: true });
+        else
+            switchWorkspaceSection(back.workspace === 'archive' ? 'tasks' : back.workspace, {
+                preserveScroll: true,
+            });
     });
 }
 function openToday() {
@@ -850,7 +958,9 @@ document.body.addEventListener('htmx:beforeSwap', e => {
     if (e.detail.target.id === 'todo-items') rememberWorkspace();
     if (e.detail.target.id === 'today-content') {
         const el = document.activeElement;
-        todayFocus = el?.closest('#capture-today') ? { start: el.selectionStart, end: el.selectionEnd } : null;
+        todayFocus = el?.closest('#capture-today')
+            ? { start: el.selectionStart, end: el.selectionEnd }
+            : null;
     }
     // A list replaced after a change inside it takes its capture row with it;
     // remember whether that row was being typed in.
@@ -858,7 +968,12 @@ document.body.addEventListener('htmx:beforeSwap', e => {
         const el = document.activeElement;
         const form = e.detail.target.contains(el) ? el.closest('.capture-form') : null;
         groupFocus = form
-            ? { form: form.id, name: el.name, start: el.selectionStart, end: el.selectionEnd }
+            ? {
+                  form: form.id,
+                  name: el.name,
+                  start: el.selectionStart,
+                  end: el.selectionEnd,
+              }
             : null;
     }
     // A background response must never overwrite a note being edited now.
@@ -874,7 +989,7 @@ document.body.addEventListener('htmx:beforeSwap', e => {
                 start: editor.selectionStart,
                 end: editor.selectionEnd,
                 scroll: editor.scrollTop,
-                focused: document.activeElement === editor
+                focused: document.activeElement === editor,
             };
     }
 });
@@ -963,7 +1078,7 @@ function restoreTaskGroup(group) {
     const focus = groupFocus;
     groupFocus = null;
     const el = focus && document.getElementById(focus.form)?.elements.namedItem(focus.name);
-    if (el && group.contains(el)) {
+    if (el && group.contains(el) && document.body.dataset.mode === 'todos' && el.getClientRects().length) {
         el.focus({ preventScroll: true });
         if (typeof focus.start === 'number') el.setSelectionRange?.(focus.start, focus.end);
     }
@@ -999,7 +1114,8 @@ document.body.addEventListener('htmx:afterSwap', e => {
         if (editor && noteViewState?.id === editor.dataset.noteId) {
             editor.setSelectionRange(noteViewState.start, noteViewState.end);
             editor.scrollTop = noteViewState.scroll;
-            if (noteViewState.focused) editor.focus({ preventScroll: true });
+            if (noteViewState.focused && document.body.dataset.mode === 'notes')
+                editor.focus({ preventScroll: true });
         }
         noteViewState = null;
     }
@@ -1015,15 +1131,16 @@ document.body.addEventListener('htmx:afterSwap', e => {
         processNow(form);
         if (form) restoreCaptureDrafts(form.parentElement);
         const added = e.detail.requestConfig?.elt?.id === 'capture-today';
-        if (form && (added || todayFocus)) {
+        if (form && document.body.dataset.mode === 'today' && (added || todayFocus)) {
             form.elements.text.focus({ preventScroll: true });
-            if (typeof todayFocus?.start === 'number') form.elements.text.setSelectionRange(todayFocus.start, todayFocus.end);
+            if (typeof todayFocus?.start === 'number')
+                form.elements.text.setSelectionRange(todayFocus.start, todayFocus.end);
         }
         todayFocus = null;
     }
 });
 document.body.addEventListener('sbWorkspaceChanged', e => {
-    refreshWorkspace();
+    invalidateViews(['todos', 'today', 'sidebar']);
     if (e.detail.message) showToast(e.detail.message);
 });
 document.addEventListener('input', e => {
@@ -1054,7 +1171,7 @@ document.addEventListener('keydown', e => {
 document.addEventListener('click', e =>
     document.querySelectorAll('.row-menu[open],.app-menu[open]').forEach(d => {
         if (!d.contains(e.target)) d.open = false;
-    })
+    }),
 );
 window.addEventListener('beforeunload', e => {
     if (document.getElementById('note-editor')?.dataset.dirty || taskEditor?.dirty) {

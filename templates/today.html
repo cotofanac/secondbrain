@@ -40,7 +40,7 @@
 
 {{define "today-task"}}
 <div class="today-row" data-task-id="{{.ID}}">
- <form hx-post="/todos/toggle" hx-target="#today-content"><input type="hidden" name="id" value="{{.ID}}"><button type="submit" class="check-btn" aria-label="Complete {{.Text}}"><span class="task-checkmark" aria-hidden="true"></span></button></form>
+ <form hx-post="/todos/toggle" hx-target="#today-content"><input type="hidden" name="done" value="true"><input type="hidden" name="revision" value="{{.Revision}}"><input type="hidden" name="id" value="{{.ID}}"><button type="submit" class="check-btn" aria-label="Complete {{.Text}}"><span class="task-checkmark" aria-hidden="true"></span></button></form>
  <button type="button" class="today-row-label" data-edit-label data-call="openTodayTask" data-args='[{{.ID}}]'>{{.Text}}{{if .Project}}<small>{{.Project}}</small>{{end}}</button>
  <div class="today-row-end">{{if or .Date .Repeat}}<span class="todo-date {{if and .Date (lt .Date .Today)}}overdue{{end}}">{{if .Repeat}}{{template "repeat-badge" .Repeat}}{{end}}<time datetime="{{.Date}}">{{formatDate .Date}}</time></span>{{end}}
   <details class="row-menu today-row-menu"><summary class="icon-button" aria-label="Task actions">{{template "icon-more"}}</summary><div class="menu-panel">
@@ -53,7 +53,7 @@
 
 {{define "today-suggestion"}}
 <div class="today-row today-suggestion" data-task-id="{{.ID}}">
- <form hx-post="/todos/toggle" hx-target="#today-content"><input type="hidden" name="id" value="{{.ID}}"><button type="submit" class="check-btn" aria-label="Complete {{.Text}}"><span class="task-checkmark" aria-hidden="true"></span></button></form>
+ <form hx-post="/todos/toggle" hx-target="#today-content"><input type="hidden" name="done" value="true"><input type="hidden" name="revision" value="{{.Revision}}"><input type="hidden" name="id" value="{{.ID}}"><button type="submit" class="check-btn" aria-label="Complete {{.Text}}"><span class="task-checkmark" aria-hidden="true"></span></button></form>
  <button type="button" class="today-row-label" data-edit-label data-call="openTodayTask" data-args='[{{.ID}}]'>{{.Text}}{{if .Project}}<small>Next in {{.Project}}</small>{{end}}</button>
  <form class="today-row-end" hx-post="/today/reschedule" hx-target="#today-content"><input type="hidden" name="id" value="{{.ID}}"><input type="hidden" name="revision" value="{{.Revision}}"><button name="due_date" value="{{.Today}}" class="text-action">Do today</button></form>
 </div>

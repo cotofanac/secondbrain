@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -30,6 +31,7 @@ func handleTodos(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleAddTodo(w http.ResponseWriter, r *http.Request) {
+	mutationEffects(w, "todos", "today", "sidebar")
 	if r.Method != "POST" {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -84,7 +86,7 @@ func handleAddTodo(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case err == nil:
 			if _, err = tx.Exec(
-				"UPDATE todos SET done = 0, archived = 0, due_date = '' WHERE id = ?",
+				"UPDATE todos SET done = 0, archived = 0, due_date = '', revision=revision+1 WHERE id = ? AND (done=1 OR archived=1)",
 				existingID,
 			); err != nil {
 				http.Error(w, "DB error", http.StatusInternalServerError)
@@ -118,7 +120,7 @@ func handleAddTodo(w http.ResponseWriter, r *http.Request) {
 		defer tx.Rollback()
 		project, heading, err = parseList(tx, r.FormValue("list"))
 		if err != nil {
-			http.Error(w, err.Error(), 400)
+			writeDomainError(w, err, "Could not add task")
 			return
 		}
 		_, err = tx.Exec("INSERT INTO todos (category,text,due_date,project_id,heading_id) VALUES(?,?,?,NULLIF(?,0),NULLIF(?,0))", category, text, dueDate, project, heading)
@@ -156,36 +158,28 @@ func handleToggleTodo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tx, err := db.Begin()
+	var desired *bool
+	if raw := r.FormValue("done"); raw != "" {
+		value, err := strconv.ParseBool(raw)
+		if err != nil {
+			http.Error(w, "Invalid completion state", 400)
+			return
+		}
+		desired = &value
+	}
+	expected, parseErr := strconv.Atoi(r.FormValue("revision"))
+	if desired != nil && (parseErr != nil || expected < 1) {
+		http.Error(w, "Invalid task revision", 400)
+		return
+	}
+	result, err := setTaskDone(id, desired, expected, appNow())
 	if err != nil {
-		http.Error(w, "DB error", http.StatusInternalServerError)
+		writeDomainError(w, err, "Could not update task")
 		return
 	}
-	defer tx.Rollback()
-	var category string
-	var projectID, headingID int
-	var done bool
-	err = tx.QueryRow(`SELECT t.category,COALESCE(t.project_id,0),COALESCE(t.heading_id,0),t.done FROM todos t WHERE t.id=? AND `+activeTaskSQL, id).Scan(&category, &projectID, &headingID, &done)
-	if err != nil {
-		http.Error(w, "Not found", http.StatusNotFound)
-		return
-	}
-
-	now := appNow()
-	// Only tasks record completion and tidy away; list items are just unchecked later.
-	if _, err = tx.Exec(`UPDATE todos SET completed_at=CASE WHEN done=0 AND category='todo' THEN ? END,
- archive_after=CASE WHEN done=0 AND category='todo' THEN ? END, done=1-done WHERE id=?`, dbTime(now), dbTime(now.AddDate(0, 0, 7)), id); err != nil {
-		http.Error(w, "DB error", http.StatusInternalServerError)
-		return
-	}
-	next, repeats, err := repeatAfterToggle(tx, id, !done, now.Format("2006-01-02"))
-	if err == nil {
-		err = tx.Commit()
-	}
-	if err != nil {
-		http.Error(w, "DB error", http.StatusInternalServerError)
-		return
-	}
+	category, projectID, headingID := result.Task.Category, result.Task.ProjectID, result.Task.HeadingID
+	next, repeats := result.Next, result.Repeats
+	mutationEffects(w, "todos", "today", "sidebar")
 	if repeats {
 		// The next occurrence changes counts outside the swapped task group.
 		// The event fires before the swap, while the form is still in the page;
@@ -220,24 +214,14 @@ func handleDeleteTodo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var category string
-	var projectID, headingID int
-	err := db.QueryRow("SELECT category,COALESCE(project_id,0),COALESCE(heading_id,0) FROM todos WHERE id = ?", id).Scan(&category, &projectID, &headingID)
+	result, err := archiveTask(id)
 	if err != nil {
-		http.Error(w, "Not found", http.StatusNotFound)
+		writeDomainError(w, err, "Could not archive task")
 		return
 	}
-
-	if _, err := db.Exec("UPDATE todos SET archived = 1, archived_at = ? WHERE id = ?", dbTime(time.Now()), id); err != nil {
-		http.Error(w, "DB error", http.StatusInternalServerError)
-		return
-	}
-	log.Printf("Todo archived: id=%d [%s]", id, category)
-
-	// Archiving is a single tap on a small control with no confirmation step,
-	// so offer the reversal rather than making the user go find the archive.
-	hxTrigger(w, "sbUndo", map[string]any{"kind": "todo", "id": id})
-
+	category, projectID, headingID := result.Task.Category, result.Task.ProjectID, result.Task.HeadingID
+	mutationEffects(w, "todos", "today", "sidebar")
+	hxTrigger(w, "sbUndo", map[string]any{"kind": "todo", "id": id, "token": result.Undo})
 	if r.FormValue("response") == "task-group" {
 		handleTaskGroup(w, r, category, projectID, headingID)
 		return
@@ -247,6 +231,7 @@ func handleDeleteTodo(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleClearChecked(w http.ResponseWriter, r *http.Request) {
+	mutationEffects(w, "todos", "today", "sidebar")
 	if !requirePost(w, r) {
 		return
 	}
@@ -257,9 +242,51 @@ func handleClearChecked(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, err := db.Exec("UPDATE todos SET done = 0 WHERE category = ? AND archived = 0 AND done = 1", category); err != nil {
-		http.Error(w, "DB error", http.StatusInternalServerError)
+	tx, err := db.Begin()
+	if err != nil {
+		writeDomainError(w, err, "Could not uncheck items")
 		return
+	}
+	defer tx.Rollback()
+	rows, err := tx.Query(`SELECT id,revision FROM todos WHERE category=? AND archived=0 AND done=1`, category)
+	if err != nil {
+		writeDomainError(w, err, "Could not uncheck items")
+		return
+	}
+	var changes []undoChange
+	for rows.Next() {
+		var id, revision int
+		if err = rows.Scan(&id, &revision); err != nil {
+			break
+		}
+		changes = append(changes, undoChange{Table: "todos", ID: id, Revision: revision + 1, Values: map[string]any{"done": 1}})
+	}
+	if err == nil {
+		err = rows.Err()
+	}
+	rows.Close()
+	if err != nil {
+		writeDomainError(w, err, "Could not uncheck items")
+		return
+	}
+	if _, err = tx.Exec(`UPDATE todos SET done=0,revision=revision+1 WHERE category=? AND archived=0 AND done=1`, category); err != nil {
+		writeDomainError(w, err, "Could not uncheck items")
+		return
+	}
+	var token string
+	if len(changes) > 0 {
+		token, err = recordUndo(tx, undoOperation{Changes: changes, SkipChanged: true})
+		if err != nil {
+			writeDomainError(w, err, "Could not record undo")
+			return
+		}
+	}
+	if err = tx.Commit(); err != nil {
+		writeDomainError(w, err, "Could not uncheck items")
+		return
+	}
+	if token != "" {
+		hxTrigger(w, "sbUndo", map[string]any{"kind": "list", "token": token, "message": "Items unchecked"})
 	}
 	log.Printf("Cleared checked items: [%s]", category)
 
@@ -268,6 +295,7 @@ func handleClearChecked(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleRestoreTodo(w http.ResponseWriter, r *http.Request) {
+	mutationEffects(w, "todos", "today", "sidebar")
 	if !requirePost(w, r) {
 		return
 	}
@@ -284,7 +312,7 @@ func handleRestoreTodo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, err := db.Exec("UPDATE todos SET archived = 0, archive_after=CASE WHEN done=1 AND category='todo' THEN ? END WHERE id = ?", dbTime(appNow().AddDate(0, 0, 7)), id); err != nil {
+	if _, err := db.Exec("UPDATE todos SET archived = 0, revision=revision+1, archive_after=CASE WHEN done=1 AND category='todo' THEN ? END WHERE id = ? AND archived=1", dbTime(appNow().AddDate(0, 0, 7)), id); err != nil {
 		http.Error(w, "DB error", http.StatusInternalServerError)
 		return
 	}
@@ -302,6 +330,7 @@ func handleRestoreTodo(w http.ResponseWriter, r *http.Request) {
 }
 
 func handlePermanentDeleteTodo(w http.ResponseWriter, r *http.Request) {
+	mutationEffects(w, "todos", "today", "sidebar")
 	if !requirePost(w, r) {
 		return
 	}
@@ -330,7 +359,7 @@ func handlePermanentDeleteTodo(w http.ResponseWriter, r *http.Request) {
 
 // Completed tasks tidy away seven days after completion; unfinished work stays.
 func archiveStaleTodos(now time.Time) (int64, error) {
-	res, err := db.Exec(`UPDATE todos SET archived=1, archived_at=?
+	res, err := db.Exec(`UPDATE todos SET archived=1, archived_at=?,revision=revision+1
  WHERE category='todo' AND archived=0 AND done=1 AND archive_after IS NOT NULL AND archive_after<=?`, dbTime(now), dbTime(now))
 	if err != nil {
 		return 0, err

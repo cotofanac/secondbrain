@@ -3,13 +3,18 @@
  <h2 class="archive-title">Archive</h2>
 </div>
 <nav class="archive-kinds" aria-label="Archived items">{{range .Kinds}}<button type="button" data-call="openArchive" data-args='["{{.Key}}"]'{{if eq .Key $.Kind}} class="active" aria-current="page"{{end}}>{{.Label}}</button>{{end}}</nav>
+<form class="archive-search" hx-get="/archive" hx-target="#todo-items" hx-swap="innerHTML">
+ <input type="hidden" name="kind" value="{{.Kind}}">
+ <input type="search" name="q" value="{{.Query}}" placeholder="Find archived items…" aria-label="Find archived items">
+ <button class="btn btn-sm" type="submit">Find</button>
+</form>
 {{if eq .Kind "projects"}}
 {{range .Projects}}
 <div class="todo-item archived-item">
  <span class="todo-text">{{.Name}}</span>
- <span class="archived-ago">{{if .Completed}}Completed{{else}}Archived{{end}} · {{.Group.Completed}}/{{.Group.Total}}</span>
+ <span class="archived-ago">{{if .Completed}}Completed{{else}}Archived{{end}} · {{.Progress.Completed}}/{{.Progress.Total}}</span>
  <form hx-post="/projects/action" hx-target="#todo-items" hx-swap="innerHTML" class="todo-action">
-  <input type="hidden" name="id" value="{{.ID}}"><input type="hidden" name="return" value="archive">
+  <input type="hidden" name="q" value="{{$.Query}}"><input type="hidden" name="offset" value="{{$.Offset}}"><input type="hidden" name="id" value="{{.ID}}"><input type="hidden" name="return" value="archive">
   <button type="submit" name="action" value="{{if .Completed}}reopen{{else}}restore{{end}}" class="btn-restore" title="{{if .Completed}}Reopen{{else}}Restore{{end}}" aria-label="{{if .Completed}}Reopen{{else}}Restore{{end}} {{.Name}}">{{template "icon-restore"}}</button>
  </form>
 </div>
@@ -19,11 +24,11 @@
 <div class="todo-item archived-item">
  <span class="todo-text">{{.Title}}</span>
  <form hx-post="/notes/restore" hx-target="#todo-items" hx-swap="innerHTML" class="todo-action">
-  <input type="hidden" name="id" value="{{.ID}}">
+  <input type="hidden" name="q" value="{{$.Query}}"><input type="hidden" name="offset" value="{{$.Offset}}"><input type="hidden" name="id" value="{{.ID}}">
   <button type="submit" class="btn-restore" title="Restore" aria-label="Restore {{.Title}}">{{template "icon-restore"}}</button>
  </form>
  <form hx-post="/notes/permanent-delete" hx-target="#todo-items" hx-swap="innerHTML" class="todo-action" hx-confirm="Delete this note forever? This can't be undone.">
-  <input type="hidden" name="id" value="{{.ID}}">
+  <input type="hidden" name="q" value="{{$.Query}}"><input type="hidden" name="offset" value="{{$.Offset}}"><input type="hidden" name="id" value="{{.ID}}">
   <button type="submit" class="del-btn" title="Delete forever" aria-label="Delete {{.Title}} forever">{{template "icon-delete"}}</button>
  </form>
 </div>
@@ -35,13 +40,18 @@
  {{$ago := todoArchivedAgo .ArchivedAt}}{{if $ago}}<span class="archived-ago">{{$ago}}</span>{{end}}
  {{if .DueDate}}<span class="todo-date"><time datetime="{{.DueDate}}">{{formatDate .DueDate}}</time></span>{{end}}
  <form hx-post="/todos/restore" hx-target="#todo-items" hx-swap="innerHTML" class="todo-action">
-  <input type="hidden" name="id" value="{{.ID}}">
+  <input type="hidden" name="q" value="{{$.Query}}"><input type="hidden" name="offset" value="{{$.Offset}}"><input type="hidden" name="id" value="{{.ID}}">
   <button type="submit" class="btn-restore" title="Restore" aria-label="Restore {{.Text}}">{{template "icon-restore"}}</button>
  </form>
  <form hx-post="/todos/permanent-delete" hx-target="#todo-items" hx-swap="innerHTML" class="todo-action" hx-confirm="Delete this item forever? This can't be undone.">
-  <input type="hidden" name="id" value="{{.ID}}">
+  <input type="hidden" name="q" value="{{$.Query}}"><input type="hidden" name="offset" value="{{$.Offset}}"><input type="hidden" name="id" value="{{.ID}}">
   <button type="submit" class="del-btn" title="Delete forever" aria-label="Delete {{.Text}} forever">{{template "icon-delete"}}</button>
  </form>
 </div>
 {{else}}<div class="empty-state">Nothing archived</div>{{end}}
 {{end}}
+
+<nav class="archive-pagination" aria-label="Archive pages">
+ {{if .PreviousURL}}<button class="btn btn-sm" hx-get="{{.PreviousURL}}" hx-target="#todo-items" hx-swap="innerHTML">Newer items</button>{{end}}
+ {{if .NextURL}}<button class="btn btn-sm" hx-get="{{.NextURL}}" hx-target="#todo-items" hx-swap="innerHTML">Older items</button>{{end}}
+</nav>

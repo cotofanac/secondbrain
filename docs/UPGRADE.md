@@ -1,98 +1,82 @@
-# Database upgrade notes
+# Deployment, upgrades, and restoration
 
-## Migrations 6–8: headings, no note links, reminders from the deployment (2026-09)
+The current application uses schema version 9. Database migrations run
+transactionally at startup. Before migrating, the app saves a standalone copy
+next to the database as `secondbrain.db.v<version>-<UTC time>`. Retain the previous
+image tag/digest or binary alongside this copy. `latest` alone is insufficient
+for rollback. Do not remove migration markers or edit applied migrations.
 
-Before migrating, the app copies the database next to itself as `secondbrain.db.v<old version>-<UTC time>`. Restore that copy together with the older image to roll back; older images cannot run on the migrated database.
+## Current deployment settings
 
-- **6:** stages become headings. Tasks under an archived stage are archived themselves (restorable from the Archive, at the top of their project); the stage archive flag is dropped and `todos.stage_id` becomes `heading_id`.
-- **7:** linking notes to projects is retired and `project_notes` is dropped. Notes are unchanged.
-- **8:** the reminder settings saved by the old settings screen (`task_time`, `task_enabled`, `timezone`) are removed. The reminder time now comes only from `TASK_REMINDER_TIME` (default `09:00`, or `off`) and the calendar zone only from `TZ` (default `Europe/Bucharest`). Set both in your compose file if the defaults are not what you want; changes apply on restart.
+`PASSCODE` is an eight-digit secret. `PORT` defaults to 8080 and `DATA_DIR` to
+`./data`. Calendar dates and reminders use `TZ` (default `Europe/Bucharest`).
+`TASK_REMINDER_TIME` defaults to `09:00`; `off` disables daily reminders. Changes
+to these variables apply on restart; there is no settings screen. Each device
+enables push in Today. Preserve `PUSH_SUBJECT` and VAPID keys in the database.
 
-## Migration 5: clean database format (2026-09)
+`INACTIVITY_LOGOUT_MINUTES` defaults to 45. Set `TRUSTED_PROXY` to the proxy IPs or
+CIDRs when forwarding client addresses. Do not expose the passcode in logs or
+commit deployment secrets. `/health` is unauthenticated for readiness checks.
 
-On first startup this version rebuilds every table in its final shape and copies the rows across. It first writes `secondbrain-before-v5.db` to the backup folder (`BACKUP_DIR`, default `backups/` next to the database) and runs the rebuild in one transaction that checks row counts, timestamps and references before committing.
+The supplied Docker container writes as UID 1000. Its data and backup bind mounts
+must be writable by that user. `BACKUP_KEEP` defaults to seven daily snapshots;
+zero disables them. The binary uses `BACKUP_DIR`, defaulting to `DATA_DIR/backups`.
+Compose's `BACKUP_PATH` selects the host backup folder. Put an additional copy on
+another disk or host if recovery must survive losing the deployment disk.
 
-- All timestamps become UTC RFC3339 text (`2026-09-27T19:00:00Z`); SQLite's `2026-09-27 19:00:00` format is no longer used.
-- Flags, due dates and note content become `NOT NULL`; `repeat` values and all references are enforced.
-- Weekly reviews (`weekly_reviews`, `/review`) and `todos.position` are removed, with the retired review and reminder settings.
-- Grocery and Buys items no longer carry task completion or cleanup stamps.
+## Upgrade and rollback
 
-Older images cannot run on the rebuilt database. To roll back, restore `secondbrain-before-v5.db` along with the older image.
-
-Later releases no longer contain the upgrade code. A database older than version 5 is refused at startup: run the 2026-09-27 release (commit `02c622b`) on it once, then upgrade.
-
-# Workspace update: database and rollout notes
-
-## Database changes
-
-**This update changes the SQLite schema on first startup. Back up the database before deploying it.** Migration 1 runs in a transaction, records its version, and is safe to run again. It adds:
-
-- `projects`, `stages`, and `project_notes` tables.
-- Optional `todos.project_id` and `todos.stage_id` references.
-- `todos.completed_at` and `todos.archive_after` timestamps.
-- `weekly_reviews` for immutable generated summaries.
-- `push_deliveries` for per-device results, retry counts, and expiration.
-- `schema_migrations` and indexes for membership, due dates, completion, and pending delivery.
-
-Migration 2 adds `revision INTEGER NOT NULL DEFAULT 1` to `todos` and `notes`. These counters provide atomic conflict detection for direct task-title edits, task details, and note saves; `updated_at` remains display metadata rather than a concurrency token. Migration 2 is also transactional and versioned.
-
-There are no dropped tables or columns, and existing task/note/habit rows are preserved. Existing tasks become standalone. Previously archived tasks remain archived. Existing completed tasks receive a seven-day cleanup window starting at migration; their unknown completion dates remain NULL, so the review does not claim they were completed this week.
-
-The cleanup behavior changes: **unfinished tasks no longer automatically archive**. Completed ordinary tasks archive seven days after completion. Restoring a completed task restarts its cleanup window without changing its completion history. Groceries and Buys remain reusable lists.
-
-## Compatibility and rollback
-
-The old binary is not a safe rollback target for a database used by this update. Although the schema additions are compatible with its explicit-column SQL, its old cleanup job can archive unfinished project tasks, and its subscription replacement behavior can erase delivery tracking.
-
-For rollback, stop the new app, keep a copy of the new database, and restore the pre-upgrade database together with the previous pinned image/binary. Changes made after the backup will not exist in the restored database. Do not delete migration markers or manually drop the added columns.
-
-The push test API now requires a JSON body identifying the current device's endpoint. It no longer broadcasts a test to all devices. Push APIs return JSON errors, including HTTP 401 on expired sessions.
-
-## Backup and deployment
-
-1. Record the current image tag/digest or retain the old binary. Avoid relying on `latest` for rollback.
-2. Stop SecondBrain cleanly (`docker compose stop secondbrain` for the supplied deployment). Shutdown checkpoints SQLite's WAL.
-3. Back up the database before starting the new image. For the supplied `./data` bind mount, with `sqlite3` installed on the host:
+1. Record the current image tag/digest and deployment variables.
+2. Stop the app cleanly; the shutdown checkpoints SQLite's WAL.
+3. Retain a standalone backup. With SQLite installed on the host:
 
    ```sh
-   sqlite3 data/secondbrain.db ".backup 'data/secondbrain-before-workspace.db'"
-   sqlite3 data/secondbrain-before-workspace.db 'PRAGMA integrity_check;'
+   sqlite3 data/secondbrain.db ".backup 'data/secondbrain-before-upgrade.db'"
+   sqlite3 data/secondbrain-before-upgrade.db 'PRAGMA integrity_check;'
    ```
 
-   The integrity result should be `ok`. Store an additional copy outside the deployment directory. For a custom data location, substitute its path.
+   The integrity result should be `ok`. Use your actual data location.
+4. Start the new pinned image. Check `/health` and startup logs. Verify notes,
+   projects, headings, repeating tasks, and archive/undo.
+5. On each installed device, test push from Today and opening its notification.
 
-4. Start the new image. Check startup logs for successful database initialization and absence of migration/scheduler errors.
-5. Check existing notes, habits, and lists; create a project and task; then confirm archive/restore.
-6. Open Notifications on each installed device and run the notification test. Keep the backup until both devices have been verified.
+To roll back, stop the new app and move the entire current data directory aside,
+including `secondbrain.db-wal` and `secondbrain.db-shm`. Create a clean data
+directory containing the pre-upgrade standalone database named `secondbrain.db`,
+with ownership matching the container, and start the previous pinned image.
+Changes after the backup will not exist in that restored state. Preserve the
+moved directory until recovery is verified; never mix old snapshots with newer
+WAL sidecars.
 
-No live database, deployment, image publication, or repository push was performed as part of local implementation validation.
+## Restore a daily snapshot
 
-## Schedule and PWA changes
+Daily snapshots are consistent standalone SQLite files produced by `VACUUM INTO`
+while the app runs. To restore one, stop the app, preserve its complete current
+data directory as above, and put the selected snapshot into a clean data directory
+as `secondbrain.db`. Verify integrity, restore directory ownership and deployment
+variables, then start a compatible image. Startup migrates older supported
+snapshots when necessary.
 
-_Superseded by migration 8: the reminder time and calendar zone now come only from `TASK_REMINDER_TIME` and `TZ`._
+Snapshots contain tasks, repeat relationships, notes, projects, headings, VAPID
+keys, subscriptions, delivery records, and other database state. Browser-local
+unsaved drafts and deployment variables are separate; keep the deployment's
+calendar and reminder configuration. The Go suite exercises restoring this
+application state through the normal startup path.
 
-The shared calendar time zone (`TZ`, default Europe/Bucharest) determines due-date comparisons, habit days, and daily reminder times. Scheduled weekly reviews are retired; existing saved reviews remain readable from their old links and their database rows are preserved.
+## Migration history
 
-Each device opts into delivery separately. Subscription registration is confirmed by the server. Revoked subscriptions are removed and remembered by an endpoint hash in settings, so resuming the app cannot silently re-register a revoked endpoint. Failed transient deliveries retry at most twice, after one and then five minutes; successful devices are not retried. Queued daily delivery attempts expire at the next local midnight. Legacy queued weekly deliveries are skipped. Server acceptance cannot establish that an Apple device actually displayed a banner.
+- **9:** project revision counters and guarded, expiring undo operations.
+- **8:** removes reminder/time-zone settings formerly saved by the settings screen;
+  `TASK_REMINDER_TIME` and `TZ` now supply them.
+- **7:** removes retired project-note links; notes remain independent.
+- **6:** stages become headings. Tasks under archived stages are individually
+  archived and detached before those stages are removed.
+- **5:** the September 2026 rebuild normalises timestamps to UTC RFC3339, enforces
+  flags and references, removes weekly reviews and task positions, and retires
+  habits in favour of repeating tasks.
 
-The service worker retains `/static/sw.js` but gains `/` scope through `Service-Worker-Allowed: /`. The old `/static/` registration is removed only after a working root subscription has been saved. PNG icons and a stable manifest identity are included. A device may need to be enabled again after updating. VAPID keys remain in the existing database and must be retained across deploys.
+Databases older than version 5 are refused. Upgrade them once with the
+2026-09-27 release (commit `02c622b`) before running this application.
 
-If a push service rejects credentials, inspect the result in Notifications and configure `PUSH_SUBJECT` with a real `mailto:` contact or HTTPS contact URL. The server must have working public DNS and outbound HTTPS access to the push endpoint.
-
-Brave requires **Use Google services for push messaging** under `brave://settings/privacy`. If it is disabled, Brave grants notification permission and then rejects `PushManager.subscribe()` with “Registration failed - push service error” before contacting SecondBrain. The app detects this case and shows the required setting. Relaunch Brave after changing it. Safari is the recommended Mac verification browser for this Apple-only deployment.
-
-## Validation record
-
-Local verification passed with `go test -race ./...`, the notification client checks, and the full browser workflow. Automated checks use disposable temporary databases, never `./data/secondbrain.db`:
-
-- Go tests: legacy migration and idempotence, Today grouping and suggestions, revision conflicts, large-note saves, membership validation, reassignment, completion/archival, shared note links, ordering, template rendering/search, weekly-review retirement, per-device retry limits, push test targeting, and expired-session errors.
-- `node scripts/push-smoke.cjs`: direct user activation, denied permission, rejected subscription storage, test status, and expired-subscription renewal.
-- `scripts/ui-smoke.cjs`: real Chromium interactions for Today, tasks/projects/stages, completion, due-date editing, capture/notes preservation including delayed responses and cursor selection, mobile detail panels and navigation geometry, larger text, keyboard search, reminders, root worker readiness, and 320/375/390/430/1024/1440px layouts. Playwright is a development-only tool; it is not added to the application dependencies. See the script for optional `PLAYWRIGHT_MODULE`, `TEST_BROWSER`, `TEST_BASE_URL`, and `TEST_PASSCODE` environment variables. Run it only against a fresh disposable database.
-
-Still required on real devices before rollout is considered verified:
-
-- Installed iPhone PWA: initial permission tap, blocked-permission guidance, test delivery with the app closed, notification opening, Home Screen icon, software keyboard, safe areas, and larger system text.
-- Installed Mac PWA: permission/test delivery with the app closed, Focus/notification settings, keyboard navigation, and existing service-worker/subscription upgrade.
-- Open a task or reminder notification after session expiry and verify login returns to its destination.
-
-These Apple checks cannot be replaced by Chromium emulation or mocked push responses. Reference: [Apple Web Push requirements](https://webkit.org/blog/13878/web-push-for-web-apps-on-ios-and-ipados/).
+See [ARCHITECTURE.md](ARCHITECTURE.md) for current behavior and design decisions,
+and [DEVELOPMENT.md](DEVELOPMENT.md) for verification and real-device checks.

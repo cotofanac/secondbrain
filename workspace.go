@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -14,9 +15,9 @@ import (
 const activeTaskSQL = `t.archived=0 AND (t.project_id IS NULL OR EXISTS(SELECT 1 FROM projects p WHERE p.id=t.project_id AND p.archived=0 AND p.completed=0))`
 
 type TaskGroup struct {
-	Key, Name, Category                    string
-	ProjectID, HeadingID, Total, Completed int
-	Tasks, Done                            []Todo
+	Key, Name, Category  string
+	ProjectID, HeadingID int
+	Tasks, Done          []Todo
 }
 
 // List names the list a task captured into this group joins (see parseList).
@@ -35,27 +36,32 @@ type Heading struct {
 	Name          string
 	Group         TaskGroup
 }
-type Project struct {
+type ProjectSummary struct {
 	ID                  int
 	Name                string
 	Archived, Completed bool
-	// Group holds the tasks directly in the project; its counts cover the
-	// whole project, headings included.
+	Progress            ProjectProgress
+}
+
+// Project is a loaded body. Workspace and sidebar use summaries instead.
+type Project struct {
+	ProjectSummary
 	Group    TaskGroup
 	Headings []Heading
 }
 type Workspace struct {
-	Tasks, Groceries, Buys     TaskGroup
-	Projects, ArchivedProjects []Project
+	Tasks, Groceries, Buys TaskGroup
+	Projects               []ProjectSummary
+	ArchivedProjectCount   int
 }
 
 // placeTask files a task (or n archived completions, with no row) into its
 // project, adding it to the project's progress, and returns the group it is
 // listed in: the heading's, or the project's own.
 func (p *Project) placeTask(headingID, n int, done bool) *TaskGroup {
-	p.Group.Total += n
+	p.Progress.Total += n
 	if done {
-		p.Group.Completed += n
+		p.Progress.Completed += n
 	}
 	for i := range p.Headings {
 		if p.Headings[i].ID == headingID {
@@ -79,62 +85,18 @@ func newHeading(id, projectID int, name string) Heading {
 // Dated tasks first, soonest (so overdue) on top; undated tasks newest first.
 const taskOrderSQL = `ORDER BY done,due_date='',due_date,created_at DESC,id DESC`
 
-func loadWorkspace() (Workspace, error) {
+func loadWorkspace() (Workspace, error) { return loadWorkspaceContext(context.Background()) }
+func loadWorkspaceContext(ctx context.Context) (Workspace, error) {
 	w := Workspace{Tasks: TaskGroup{Key: "tasks", Name: "Tasks", Category: "todo"}, Groceries: TaskGroup{Key: "groceries", Name: "Groceries", Category: "groceries"}, Buys: TaskGroup{Key: "shopping", Name: "Buys", Category: "shopping"}}
-	rows, err := db.Query(`SELECT id,name,archived,completed FROM projects ORDER BY position,id`)
+	var err error
+	w.Projects, err = loadProjectSummaries(ctx, false)
 	if err != nil {
 		return w, err
 	}
-	var projects []Project
-	for rows.Next() {
-		var p Project
-		if err = rows.Scan(&p.ID, &p.Name, &p.Archived, &p.Completed); err != nil {
-			rows.Close()
-			return w, err
-		}
-		p.Group = TaskGroup{Key: fmt.Sprint("project-", p.ID), Category: "todo", ProjectID: p.ID}
-		projects = append(projects, p)
-	}
-	err = rows.Err()
-	rows.Close()
-	if err != nil {
+	if err = db.QueryRowContext(ctx, `SELECT count(*) FROM projects WHERE archived=1 OR completed=1`).Scan(&w.ArchivedProjectCount); err != nil {
 		return w, err
 	}
-	pm := map[int]*Project{}
-	for i := range projects {
-		pm[projects[i].ID] = &projects[i]
-	}
-	rows, err = db.Query(`SELECT id,project_id,name FROM headings ORDER BY position,id`)
-	if err != nil {
-		return w, err
-	}
-	for rows.Next() {
-		var id, projectID int
-		var name string
-		if err = rows.Scan(&id, &projectID, &name); err != nil {
-			rows.Close()
-			return w, err
-		}
-		if p := pm[projectID]; p != nil {
-			p.Headings = append(p.Headings, newHeading(id, projectID, name))
-		}
-	}
-	err = rows.Err()
-	rows.Close()
-	if err != nil {
-		return w, err
-	}
-	groupFor := func(category string, projectID, headingID, n int, done bool) *TaskGroup {
-		if category == "groceries" {
-			return &w.Groceries
-		} else if category == "shopping" {
-			return &w.Buys
-		} else if p := pm[projectID]; p != nil {
-			return p.placeTask(headingID, n, done)
-		}
-		return &w.Tasks
-	}
-	rows, err = db.Query(`SELECT id,category,text,due_date,done,COALESCE(project_id,0),COALESCE(heading_id,0),revision,repeat FROM todos WHERE archived=0 ` + taskOrderSQL)
+	rows, err := db.QueryContext(ctx, `SELECT id,category,text,due_date,done,COALESCE(project_id,0),COALESCE(heading_id,0),revision,repeat FROM todos t WHERE t.archived=0 AND t.project_id IS NULL `+taskOrderSQL)
 	if err != nil {
 		return w, err
 	}
@@ -144,45 +106,26 @@ func loadWorkspace() (Workspace, error) {
 			rows.Close()
 			return w, err
 		}
-		groupFor(t.Category, t.ProjectID, t.HeadingID, 1, t.Done).add(t)
-	}
-	err = rows.Err()
-	rows.Close()
-	if err != nil {
-		return w, err
-	}
-	// Completed project work that has since been tidied into the archive still
-	// counts toward progress. Only the totals are needed, not the rows.
-	rows, err = db.Query(`SELECT project_id,count(*) FROM todos WHERE archived=1 AND done=1 AND category='todo' AND project_id IS NOT NULL GROUP BY project_id`)
-	if err != nil {
-		return w, err
-	}
-	for rows.Next() {
-		var projectID, n int
-		if err = rows.Scan(&projectID, &n); err != nil {
-			rows.Close()
-			return w, err
-		}
-		if p := pm[projectID]; p != nil {
-			p.placeTask(0, n, true)
+		switch t.Category {
+		case "groceries":
+			w.Groceries.add(t)
+		case "shopping":
+			w.Buys.add(t)
+		default:
+			w.Tasks.add(t)
 		}
 	}
 	err = rows.Err()
 	rows.Close()
 	if err != nil {
 		return w, err
-	}
-	for _, p := range projects {
-		if p.Archived || p.Completed {
-			w.ArchivedProjects = append(w.ArchivedProjects, p)
-		} else {
-			w.Projects = append(w.Projects, p)
-		}
 	}
 	return w, nil
 }
 func handleWorkspace(w http.ResponseWriter, r *http.Request) {
-	data, err := loadWorkspace()
+	ctx, cancel := readContext(r)
+	defer cancel()
+	data, err := loadWorkspaceContext(ctx)
 	if err != nil {
 		http.Error(w, "Could not load tasks", 500)
 		return
@@ -194,41 +137,19 @@ func handleWorkspace(w http.ResponseWriter, r *http.Request) {
 // count its header shows: the project's progress, or the list's open items.
 type taskGroupView struct {
 	Group   TaskGroup
-	Project *Project
+	Project *ProjectSummary
 }
 
 // handleTaskGroup answers a change made inside one list (an add, a check-off,
 // an archive) with just that list, so open projects elsewhere on the page are
 // not reloaded. The header count is swapped in out-of-band.
 func handleTaskGroup(w http.ResponseWriter, r *http.Request, category string, projectID, headingID int) {
-	data, err := loadWorkspace()
+	ctx, cancel := readContext(r)
+	defer cancel()
+	view, err := loadTaskGroup(ctx, category, projectID, headingID)
 	if err != nil {
-		http.Error(w, "Could not load tasks", http.StatusInternalServerError)
+		writeDomainError(w, err, "Could not load tasks")
 		return
-	}
-	view := taskGroupView{Group: data.Tasks}
-	if category == "groceries" {
-		view.Group = data.Groceries
-	} else if category == "shopping" {
-		view.Group = data.Buys
-	} else if projectID != 0 {
-		for i := range data.Projects {
-			p := &data.Projects[i]
-			if p.ID != projectID {
-				continue
-			}
-			view.Project, view.Group = p, p.Group
-			for j := range p.Headings {
-				if p.Headings[j].ID == headingID {
-					view.Group = p.Headings[j].Group
-				}
-			}
-			break
-		}
-		if view.Project == nil {
-			http.Error(w, "Task group unavailable", http.StatusNotFound)
-			return
-		}
 	}
 	renderTemplate(w, r, "task-group-response", view)
 }
@@ -264,19 +185,21 @@ func parseList(tx *sql.Tx, raw string) (projectID, headingID int, err error) {
 	return projectID, headingID, nil
 }
 func registerWorkspaceRoutes() {
-	for path, h := range map[string]http.HandlerFunc{"/workspace": handleWorkspace, "/workspace/project": handleWorkspaceProject, "/projects/action": handleProjectAction, "/headings/action": handleHeadingAction, "/task/edit": handleTaskEdit, "/task/save": handleTaskSave, "/sidebar": handleSidebar, "/archive": handleArchive} {
+	for path, h := range map[string]http.HandlerFunc{"/workspace": handleWorkspace, "/workspace/project": handleWorkspaceProject, "/projects/action": handleProjectAction, "/headings/action": handleHeadingAction, "/task/edit": handleTaskEdit, "/task/save": handleTaskSave, "/undo": handleUndo, "/sidebar": handleSidebar, "/archive": handleArchive} {
 		http.HandleFunc(path, authMiddleware(h))
 	}
 }
 func handleWorkspaceProject(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := readContext(r)
+	defer cancel()
 	id, _ := strconv.Atoi(r.URL.Query().Get("id"))
 	var p Project
-	if err := db.QueryRow(`SELECT id,name FROM projects WHERE id=? AND archived=0 AND completed=0`, id).Scan(&p.ID, &p.Name); err != nil {
+	if err := db.QueryRowContext(ctx, `SELECT id,name FROM projects WHERE id=? AND archived=0 AND completed=0`, id).Scan(&p.ID, &p.Name); err != nil {
 		http.Error(w, "Project unavailable", 404)
 		return
 	}
 	p.Group = TaskGroup{Key: fmt.Sprint("project-", id), Category: "todo", ProjectID: id}
-	if err := loadProjectTasks(&p); err != nil {
+	if err := loadProjectTasksContext(ctx, &p); err != nil {
 		http.Error(w, "Could not load project", 500)
 		return
 	}
@@ -285,8 +208,9 @@ func handleWorkspaceProject(w http.ResponseWriter, r *http.Request) {
 
 // loadProjectTasks fills one project's headings, tasks and progress, the same
 // way loadWorkspace does for all of them.
-func loadProjectTasks(p *Project) error {
-	rows, err := db.Query(`SELECT id,name FROM headings WHERE project_id=? ORDER BY position,id`, p.ID)
+func loadProjectTasks(p *Project) error { return loadProjectTasksContext(context.Background(), p) }
+func loadProjectTasksContext(ctx context.Context, p *Project) error {
+	rows, err := db.QueryContext(ctx, `SELECT id,name FROM headings WHERE project_id=? ORDER BY position,id`, p.ID)
 	if err != nil {
 		return err
 	}
@@ -304,7 +228,7 @@ func loadProjectTasks(p *Project) error {
 	if err != nil {
 		return err
 	}
-	rows, err = db.Query(`SELECT id,category,text,due_date,done,COALESCE(heading_id,0),revision,repeat FROM todos WHERE project_id=? AND archived=0 `+taskOrderSQL, p.ID)
+	rows, err = db.QueryContext(ctx, `SELECT id,category,text,due_date,done,COALESCE(heading_id,0),revision,repeat FROM todos WHERE project_id=? AND archived=0 `+taskOrderSQL, p.ID)
 	if err != nil {
 		return err
 	}
@@ -322,12 +246,11 @@ func loadProjectTasks(p *Project) error {
 	if err != nil {
 		return err
 	}
-	// Match loadWorkspace: archived completions still count toward progress.
-	var n int
-	if err = db.QueryRow(`SELECT count(*) FROM todos WHERE project_id=? AND archived=1 AND done=1 AND category='todo'`, p.ID).Scan(&n); err != nil {
+	summaries := []ProjectSummary{p.ProjectSummary}
+	if err = fillProjectProgress(ctx, summaries); err != nil {
 		return err
 	}
-	p.placeTask(0, n, true)
+	p.Progress = summaries[0].Progress
 	return nil
 }
 func handleProjectAction(w http.ResponseWriter, r *http.Request) { handleStructureAction(w, r, false) }
@@ -351,6 +274,8 @@ func handleStructureAction(w http.ResponseWriter, r *http.Request, heading bool)
 	id, _ := strconv.Atoi(r.FormValue("id"))
 	parent, _ := strconv.Atoi(r.FormValue("project_id"))
 	var archivedTasks int64
+	var undoToken string
+	var inverse undoOperation
 	tx, err := db.Begin()
 	if err != nil {
 		http.Error(w, "DB error", 500)
@@ -370,7 +295,77 @@ func handleStructureAction(w http.ResponseWriter, r *http.Request, heading bool)
 	if action != "create" {
 		var existing int
 		if err = tx.QueryRow("SELECT id FROM "+table+" WHERE id=?", id).Scan(&existing); err != nil {
-			http.Error(w, "Not found", 404)
+			writeDomainError(w, err, "Could not load item")
+			return
+		}
+	}
+	if action != "create" {
+		if heading {
+			var active int
+			if err = tx.QueryRow(`SELECT count(*) FROM headings h JOIN projects p ON p.id=h.project_id WHERE h.id=? AND p.archived=0 AND p.completed=0`, id).Scan(&active); err != nil {
+				writeDomainError(w, err, "Could not update heading")
+				return
+			}
+			if active != 1 {
+				http.Error(w, "Heading unavailable", 404)
+				return
+			}
+		} else if action == "rename" || action == "up" || action == "down" {
+			if _, _, err = parseList(tx, fmt.Sprint("project:", id)); err != nil {
+				writeDomainError(w, err, "Could not update project")
+				return
+			}
+		}
+	}
+	if !heading && (action == "archive" || action == "complete") {
+		var archived, completed, revision int
+		if err = tx.QueryRow(`SELECT archived,completed,revision FROM projects WHERE id=?`, id).Scan(&archived, &completed, &revision); err != nil {
+			writeDomainError(w, err, "Could not update project")
+			return
+		}
+		if action == "complete" && archived != 0 {
+			http.Error(w, "Project unavailable", 404)
+			return
+		}
+		if (action == "archive" && archived == 0) || (action == "complete" && completed == 0) {
+			inverse.Changes = append(inverse.Changes, undoChange{Table: "projects", ID: id, Revision: revision + 1, Values: map[string]any{"archived": archived, "completed": completed}})
+		}
+	}
+	if heading && (action == "delete" || action == "archive") {
+		h := &undoHeading{ID: id}
+		if err = tx.QueryRow(`SELECT project_id,name,position FROM headings WHERE id=?`, id).Scan(&h.ProjectID, &h.Name, &h.Position); err != nil {
+			writeDomainError(w, err, "Could not update heading")
+			return
+		}
+		inverse.Heading = h
+		rows, readErr := tx.Query(`SELECT id,revision,archived,archived_at FROM todos WHERE heading_id=?`, id)
+		if readErr != nil {
+			writeDomainError(w, readErr, "Could not update heading")
+			return
+		}
+		for rows.Next() {
+			var taskID, rev, archived int
+			var at sql.NullString
+			if err = rows.Scan(&taskID, &rev, &archived, &at); err != nil {
+				break
+			}
+			values := map[string]any{"heading_id": id}
+			if action == "archive" {
+				values["archived"] = archived
+				if at.Valid {
+					values["archived_at"] = at.String
+				} else {
+					values["archived_at"] = nil
+				}
+			}
+			inverse.Changes = append(inverse.Changes, undoChange{Table: "todos", ID: taskID, Revision: rev + 1, Values: values})
+		}
+		if err == nil {
+			err = rows.Err()
+		}
+		rows.Close()
+		if err != nil {
+			writeDomainError(w, err, "Could not update heading")
 			return
 		}
 	}
@@ -378,7 +373,7 @@ func handleStructureAction(w http.ResponseWriter, r *http.Request, heading bool)
 	case "create":
 		if heading {
 			if _, _, err = parseList(tx, fmt.Sprint("project:", parent)); err != nil {
-				http.Error(w, err.Error(), 400)
+				writeDomainError(w, err, "Could not update list")
 				return
 			}
 			_, err = tx.Exec(`INSERT INTO headings(name,project_id,position) SELECT ?,?,COALESCE(MAX(position),0)+1 FROM headings WHERE project_id=?`, name, parent, parent)
@@ -386,15 +381,15 @@ func handleStructureAction(w http.ResponseWriter, r *http.Request, heading bool)
 			_, err = tx.Exec(`INSERT INTO projects(name,position) SELECT ?,COALESCE(MAX(position),0)+1 FROM projects`, name)
 		}
 	case "rename":
-		_, err = tx.Exec("UPDATE "+table+" SET name=? WHERE id=?", name, id)
+		_, err = tx.Exec("UPDATE "+table+" SET name=?"+revisionUpdate(heading)+" WHERE id=?", name, id)
 	case "delete":
 		// A heading only groups tasks: they move up to the project itself.
-		if _, err = tx.Exec(`UPDATE todos SET heading_id=NULL WHERE heading_id=?`, id); err == nil {
+		if _, err = tx.Exec(`UPDATE todos SET heading_id=NULL,revision=revision+1 WHERE heading_id=?`, id); err == nil {
 			_, err = tx.Exec(`DELETE FROM headings WHERE id=?`, id)
 		}
 	case "archive":
 		if !heading {
-			_, err = tx.Exec(`UPDATE projects SET archived=1 WHERE id=?`, id)
+			_, err = tx.Exec(`UPDATE projects SET archived=1,revision=revision+1 WHERE id=? AND archived=0`, id)
 			break
 		}
 		// A finished section: its open tasks go to the archive with it (each
@@ -402,12 +397,12 @@ func handleStructureAction(w http.ResponseWriter, r *http.Request, heading bool)
 		var res sql.Result
 		if res, err = tx.Exec(`UPDATE todos SET archived=1,archived_at=? WHERE heading_id=? AND archived=0`, dbTime(time.Now()), id); err == nil {
 			archivedTasks, _ = res.RowsAffected()
-			if _, err = tx.Exec(`UPDATE todos SET heading_id=NULL WHERE heading_id=?`, id); err == nil {
+			if _, err = tx.Exec(`UPDATE todos SET heading_id=NULL,revision=revision+1 WHERE heading_id=?`, id); err == nil {
 				_, err = tx.Exec(`DELETE FROM headings WHERE id=?`, id)
 			}
 		}
 	case "restore":
-		_, err = tx.Exec(`UPDATE projects SET archived=0 WHERE id=?`, id)
+		_, err = tx.Exec(`UPDATE projects SET archived=0,revision=revision+1 WHERE id=? AND archived=1`, id)
 	case "complete":
 		var remaining int
 		err = tx.QueryRow(`SELECT count(*) FROM todos t WHERE project_id=? AND done=0 AND `+activeTaskSQL, id).Scan(&remaining)
@@ -416,26 +411,39 @@ func handleStructureAction(w http.ResponseWriter, r *http.Request, heading bool)
 			return
 		}
 		if err == nil {
-			_, err = tx.Exec(`UPDATE projects SET completed=1 WHERE id=? AND archived=0`, id)
+			_, err = tx.Exec(`UPDATE projects SET completed=1,revision=revision+1 WHERE id=? AND archived=0 AND completed=0`, id)
 		}
 	case "reopen":
-		_, err = tx.Exec(`UPDATE projects SET completed=0,archived=0 WHERE id=?`, id)
+		_, err = tx.Exec(`UPDATE projects SET completed=0,archived=0,revision=revision+1 WHERE id=? AND (completed=1 OR archived=1)`, id)
 	case "up", "down":
 		err = moveSibling(tx, heading, id, action == "up")
 	}
 	if err != nil {
-		http.Error(w, "Could not update: "+err.Error(), 400)
+		writeDomainError(w, err, "Could not update list")
 		return
+	}
+	if inverse.Heading != nil || len(inverse.Changes) > 0 {
+		undoToken, err = recordUndo(tx, inverse)
+		if err != nil {
+			writeDomainError(w, err, "Could not record undo")
+			return
+		}
 	}
 	if err = tx.Commit(); err != nil {
 		http.Error(w, "DB error", 500)
 		return
 	}
 	if action == "archive" && heading {
-		hxTrigger(w, "sbNotice", map[string]any{"message": fmt.Sprintf("Heading archived with %d task(s)", archivedTasks)})
-	} else if action == "archive" {
-		hxTrigger(w, "sbUndo", map[string]any{"kind": "project", "id": id})
+		hxTrigger(w, "sbUndo", map[string]any{"kind": "heading", "token": undoToken, "message": fmt.Sprintf("Heading archived with %d task(s)", archivedTasks)})
+	} else if action == "archive" && undoToken != "" {
+		hxTrigger(w, "sbUndo", map[string]any{"kind": "project", "id": id, "token": undoToken})
+	} else if action == "complete" && undoToken != "" {
+		hxTrigger(w, "sbUndo", map[string]any{"kind": "project-completed", "id": id, "token": undoToken})
 	}
+	if action == "delete" && heading {
+		hxTrigger(w, "sbUndo", map[string]any{"kind": "heading", "token": undoToken, "message": "Heading removed; tasks moved to the project"})
+	}
+	mutationEffects(w, "todos", "today", "sidebar")
 	if r.FormValue("return") == "archive" {
 		renderArchive(w, r, "projects")
 		return
@@ -487,7 +495,7 @@ func moveSibling(tx *sql.Tx, heading bool, id int, up bool) error {
 		table = "headings"
 	}
 	for i, n := range ids {
-		if _, err = tx.Exec("UPDATE "+table+" SET position=? WHERE id=?", i, n); err != nil {
+		if _, err = tx.Exec("UPDATE "+table+" SET position=?"+revisionUpdate(heading)+" WHERE id=?", i, n); err != nil {
 			return err
 		}
 	}
@@ -595,7 +603,7 @@ func handleTaskSave(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback()
 	var category string
 	if err = tx.QueryRow(`SELECT t.category FROM todos t WHERE t.id=? AND `+activeTaskSQL, id).Scan(&category); err != nil {
-		http.Error(w, "Not found", 404)
+		writeDomainError(w, err, "Could not load item")
 		return
 	}
 	p, h := 0, 0
@@ -605,7 +613,7 @@ func handleTaskSave(w http.ResponseWriter, r *http.Request) {
 		due, repeat = "", ""
 	}
 	if err != nil {
-		http.Error(w, err.Error(), 400)
+		writeDomainError(w, err, "Could not update list")
 		return
 	}
 	res, err := tx.Exec(`UPDATE todos SET text=?,due_date=?,repeat=?,project_id=NULLIF(?,0),heading_id=NULLIF(?,0),revision=revision+1 WHERE id=? AND revision=?`, name, due, repeat, p, h, id, revision)
@@ -630,5 +638,14 @@ func handleTaskSave(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Could not save task", 500)
 		return
 	}
+	mutationEffects(w, "todos", "today", "sidebar")
 	writeJSON(w, http.StatusOK, map[string]any{"status": "saved", "revision": revision + 1})
+}
+
+// Headings have no lifecycle revision; project names/order invalidate undo.
+func revisionUpdate(heading bool) string {
+	if heading {
+		return ""
+	}
+	return ",revision=revision+1"
 }

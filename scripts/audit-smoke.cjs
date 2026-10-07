@@ -42,6 +42,7 @@ const base = process.env.TEST_BASE_URL || 'http://127.0.0.1:18080';
  await page.getByRole('button',{name:'Complete Water the plants',exact:true}).click();
  await page.locator('#toast').filter({hasText:/^Next one due in 7 days$/}).waitFor();
  await page.waitForFunction(()=>document.querySelectorAll('#section-tasks .todo-item:not(.done) .todo-repeat').length===1);
+ await page.locator('#section-tasks .todo-item.done').filter({hasText:'Water the plants'}).waitFor({state:'attached'});
  assert.equal(await page.locator('#section-tasks .todo-item.done').filter({hasText:'Water the plants'}).count(),1,'completed occurrence missing');
 
  await page.keyboard.press('Meta+k');

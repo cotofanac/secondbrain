@@ -1,0 +1,38 @@
+{
+  "relative": [
+    {"today":"2026-10-06","date":"2026-10-06","label":"Today"},
+    {"today":"2026-10-06","date":"2026-10-07","label":"Tomorrow"},
+    {"today":"2026-10-06","date":"2026-10-05","label":"Yesterday"},
+    {"today":"2026-10-06","date":"2026-10-09","label":"Fri"},
+    {"today":"2026-10-06","date":"2026-10-15","label":"in 9 days"},
+    {"today":"2026-10-06","date":"2026-10-03","label":"3 days ago"},
+    {"today":"2026-10-06","date":"2026-09-01","label":"Sep 1"},
+    {"today":"2026-12-31","date":"2027-01-20","label":"Jan 20, 2027"},
+    {"today":"2026-03-28","date":"2026-03-30","label":"Mon"}
+  ],
+  "typed": [
+    {"today":"2026-10-06","text":"Call tomorrow","title":"Call","date":"2026-10-07"},
+    {"today":"2026-10-09","text":"Call on fri","title":"Call","date":"2026-10-16"},
+    {"today":"2026-12-31","text":"Pay next week","title":"Pay","date":"2027-01-04"},
+    {"today":"2026-03-28","text":"Walk in two days","title":"Walk","date":"2026-03-30"},
+    {"today":"2026-10-06","text":"Call 2026-02-30","date":""},
+    {"today":"2024-03-01","text":"Call 29 feb","date":""},
+    {"today":"2024-01-01","text":"Call 29 feb","title":"Call","date":"2024-02-29"},
+    {"today":"2026-10-06","text":"Call 31 apr","date":""},
+    {"today":"2026-10-06","text":"Remember next week supplies","date":""}
+  ],
+  "zones": [
+    {"instant":"2026-10-06T22:30:00Z","zone":"Europe/Bucharest","date":"2026-10-07"},
+    {"instant":"2026-10-06T02:30:00Z","zone":"America/New_York","date":"2026-10-05"},
+    {"instant":"2026-03-29T01:30:00Z","zone":"Europe/Bucharest","date":"2026-03-29"},
+    {"instant":"2026-10-25T01:30:00Z","zone":"Europe/Bucharest","date":"2026-10-25"}
+  ],
+  "repeat": [
+    {"rule":"monthly","due":"2026-01-31","today":"2026-01-31","date":"2026-02-28"},
+    {"rule":"yearly","due":"2024-02-29","today":"2024-02-29","date":"2025-02-28"},
+    {"rule":"weekly","due":"2026-03-22","today":"2026-03-28","date":"2026-03-29"},
+    {"rule":"daily","due":"2026-10-24","today":"2026-10-24","date":"2026-10-25"},
+    {"rule":"monthly","due":"2026-01-31","today":"2026-03-31","date":"2026-04-30"}
+  ],
+  "invalid": ["2026-02-29","2026-02-30","2026-13-01","2026-04-31","2026-1-01"]
+}

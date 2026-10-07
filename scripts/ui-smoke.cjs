@@ -106,6 +106,28 @@ const shot = name => require('node:path').join(process.env.SCREENSHOT_DIR || req
  await page.getByRole('button',{name:'Rename',exact:true}).waitFor();
  await page.screenshot({path:shot('secondbrain-desktop.png'),fullPage:true});
  await page.locator('[data-project-page] .project-menu > summary').click();
+ // A delayed completion keeps the user's new destination; Undo restores the project.
+ await page.getByRole('button',{name:'New project',exact:true}).click();
+ await page.locator('#custom-dialog-input').fill('Completion timing');await page.locator('#custom-dialog-confirm').click();
+ const timingProject=page.locator('.sidebar-project').filter({hasText:'Completion timing'});
+ await timingProject.click();
+ const timingID=await timingProject.getAttribute('data-project-id');
+ await page.locator('[data-project-page] .project-menu > summary').click();
+ let releaseProject;const heldProject=new Promise(resolve=>releaseProject=resolve);
+ await page.route('**/projects/action',async route=>{const response=await route.fetch();await heldProject;await route.fulfill({response});},{times:1});
+ const projectRequest=page.waitForRequest('**/projects/action');
+ await page.getByRole('button',{name:'Complete project',exact:true}).click();await projectRequest;
+ await page.getByRole('button',{name:'Notes',exact:true}).click();releaseProject();
+ await page.locator('#project-'+timingID).waitFor({state:'detached'});
+ assert.equal(await page.evaluate(()=>document.body.dataset.mode),'notes','project completion changed the selected view');
+ await page.locator('#toast .toast-action').click();
+ await timingProject.click();
+ await page.locator('[data-project-page] .project-menu > summary').click();
+ await page.getByRole('button',{name:'Complete project',exact:true}).click();
+ await page.locator('#project-'+timingID).waitFor({state:'detached'});
+ await page.waitForFunction(()=>document.body.dataset.mode==='todos'&&document.body.dataset.workspaceSection==='tasks');
+ await page.locator('.sidebar-project').filter({hasText:'Car'}).click();
+ await page.locator('[data-project-page] > summary').filter({hasText:'Car'}).waitFor();
  // One archive for everything, opened from the sidebar; Back returns to the project.
  await page.locator('.bottom-nav-btn[data-workspace="archive"]').click();
  await page.locator('.archive-kinds button.active').filter({hasText:'Tasks'}).waitFor();
@@ -180,6 +202,32 @@ const shot = name => require('node:path').join(process.env.SCREENSHOT_DIR || req
  await page.locator('#today-content').getByRole('button',{name:'Book the practical lessons',exact:true}).waitFor();
  await page.getByRole('button',{name:'Tasks',exact:true}).click();
  await page.locator('.inbox-group').getByRole('button',{name:'Book the practical lessons',exact:true}).waitFor();
+ // Switching to Tasks before Today's completion response still updates the visible list.
+ await page.locator('.bottom-nav-btn[data-mode="today"]').click();
+ let releaseCompletion;const heldCompletion=new Promise(resolve=>releaseCompletion=resolve);
+ await page.route('**/todos/toggle',async route=>{const response=await route.fetch();await heldCompletion;await route.fulfill({response});},{times:1});
+ const completionRequest=page.waitForRequest('**/todos/toggle');
+ await page.locator('#today-content').getByRole('button',{name:'Complete Book the practical lessons'}).click();
+ await completionRequest;
+ await page.getByRole('button',{name:'Tasks',exact:true}).click();releaseCompletion();
+ const doneLessons=page.locator('.inbox-group .todo-item.done').filter({hasText:'Book the practical lessons'});
+ await doneLessons.waitFor({state:'attached'});
+ // A failed refresh is retried when Tasks is revisited.
+ await doneLessons.evaluate(el=>{el.closest('details').open=true;});
+ await doneLessons.getByRole('button',{name:'Reopen Book the practical lessons',exact:true}).click();
+ await page.locator('.inbox-group .todo-item:not(.done)').filter({hasText:'Book the practical lessons'}).waitFor();
+ await page.locator('.bottom-nav-btn[data-mode="today"]').click();
+ await page.locator('#today-content').getByRole('button',{name:'Complete Book the practical lessons'}).click();
+ await page.locator('#today-content').getByRole('button',{name:'Book the practical lessons',exact:true}).waitFor({state:'detached'});
+ await page.route('**/workspace',route=>route.fulfill({status:503,body:'Temporary failure'}),{times:1});
+ const failedRefresh=page.waitForResponse(response=>new URL(response.url()).pathname==='/workspace'&&response.status()===503);
+ await page.getByRole('button',{name:'Tasks',exact:true}).click();
+ await failedRefresh;
+ await page.locator('#toast').filter({hasText:'Something went wrong'}).waitFor();
+ assert.equal(await page.locator('.inbox-group .todo-item:not(.done)').filter({hasText:'Book the practical lessons'}).count(),1,'failure fixture did not leave a stale task');
+ await page.locator('.bottom-nav-btn[data-mode="today"]').click();
+ await page.getByRole('button',{name:'Tasks',exact:true}).click();
+ await doneLessons.waitFor({state:'attached'});
  await page.evaluate(()=>document.documentElement.style.fontSize='24px');
  assert.equal(await page.evaluate(()=>document.getElementById('app').getBoundingClientRect().right<=innerWidth),true,'large-text overflow');
  await page.evaluate(()=>document.documentElement.style.fontSize='');

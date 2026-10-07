@@ -72,16 +72,6 @@ no service holding your notes on your behalf.
 
 It is intentionally small: one Go application, one database, one person.
 
-## Version 4
-
-Version 4 is a new chapter for Second Brain. It brings a focused desktop
-workspace, a new Today view, thoughtful mobile navigation, faster capture,
-direct editing, stronger notes, richer habits, project details, daily planning,
-notifications, and a visual identity that finally feels like the product.
-
-The result is not a system you have to manage. It is simply a dependable place
-to return to.
-
 ## Make It Yours
 
 Create a `.env` file with your own eight-digit passcode:
@@ -113,3 +103,8 @@ that made them, instead of everyone arriving through the proxy.
 
 For upgrades, backups, and deployment details, see
 [the upgrade guide](docs/UPGRADE.md).
+
+For application contracts and local verification, see [the architecture](docs/ARCHITECTURE.md)
+and [development guide](docs/DEVELOPMENT.md). Unsaved task and note drafts are
+kept on the device until saved or explicitly replaced; archived items remain
+searchable and accessible through pages.

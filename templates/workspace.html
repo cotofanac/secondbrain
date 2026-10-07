@@ -3,7 +3,7 @@
 {{define "date-chip"}}<span class="chip chip-date{{if .}} is-set{{end}}" title="Due date">{{template "icon-calendar"}}<span class="chip-text">{{if .}}{{formatDate .}}{{else}}Date{{end}}</span><input type="date" name="due_date" value="{{.}}" aria-label="Due date"><button type="button" class="chip-clear" aria-label="Clear due date"{{if not .}} hidden{{end}}>{{template "icon-close"}}</button></span>{{end}}
 {{define "task-row"}}
 <div class="todo-item {{if .Done}}done{{end}}" id="task-{{.ID}}" data-task-id="{{.ID}}" data-revision="{{.Revision}}">
- <form hx-post="/todos/toggle" hx-target="closest .task-group" hx-swap="outerHTML swap:140ms"><input type="hidden" name="id" value="{{.ID}}"><input type="hidden" name="response" value="task-group"><button class="check-btn {{if .Done}}checked{{end}}" aria-label="{{if .Done}}Reopen{{else}}Complete{{end}} {{.Text}}"><span class="task-checkmark" aria-hidden="true"></span></button></form>
+ <form hx-post="/todos/toggle" hx-target="closest .task-group" hx-swap="outerHTML swap:140ms"><input type="hidden" name="done" value="{{if .Done}}false{{else}}true{{end}}"><input type="hidden" name="revision" value="{{.Revision}}"><input type="hidden" name="id" value="{{.ID}}"><input type="hidden" name="response" value="task-group"><button class="check-btn {{if .Done}}checked{{end}}" aria-label="{{if .Done}}Reopen{{else}}Complete{{end}} {{.Text}}"><span class="task-checkmark" aria-hidden="true"></span></button></form>
  <button type="button" class="task-label" data-edit-label data-call="openTask" data-args='[{{.ID}}]'>{{.Text}}</button>
  {{if or .DueDate .Repeat}}<span class="todo-date {{if and (not .Done) (isOverdue .DueDate)}}overdue{{end}}">{{if .Repeat}}{{template "repeat-badge" .Repeat}}{{end}}<time datetime="{{.DueDate}}">{{formatDate .DueDate}}</time></span>{{end}}
  <details class="row-menu"><summary class="icon-button" aria-label="Task actions">{{template "icon-more"}}</summary><div class="menu-panel"><form hx-post="/todos/delete" hx-target="closest .task-group" hx-swap="outerHTML"><input type="hidden" name="id" value="{{.ID}}"><input type="hidden" name="response" value="task-group"><button class="action-with-icon">{{template "icon-archive"}}<span>Archive</span></button></form></div></details>
@@ -22,9 +22,10 @@
 </div>
 {{end}}
 {{/* A project's progress ring and done/total count, in its summary. */}}
-{{define "project-stats"}}<span class="project-progress" style="--progress:{{if .Group.Total}}{{.Group.Completed}}{{else}}0{{end}};--total:{{if .Group.Total}}{{.Group.Total}}{{else}}1{{end}}" aria-label="{{.Group.Completed}} of {{.Group.Total}} complete"></span><span class="section-count">{{.Group.Completed}}/{{.Group.Total}}</span>{{end}}
+{{define "project-stats"}}<span class="project-progress" style="--progress:{{if .Progress.Total}}{{.Progress.Completed}}{{else}}0{{end}};--total:{{if .Progress.Total}}{{.Progress.Total}}{{else}}1{{end}}" aria-label="{{.Progress.Completed}} of {{.Progress.Total}} complete"></span><span class="section-count">{{.Progress.Completed}}/{{.Progress.Total}}</span>{{end}}
 {{/* One list after a change inside it, and its header count out-of-band. */}}
-{{define "task-group-response"}}{{template "task-group" .Group}}{{with .Project}}<span class="project-stats" id="project-stats-{{.ID}}" hx-swap-oob="true">{{template "project-stats" .}}</span>{{else}}<span class="section-count" id="count-{{.Group.Key}}" hx-swap-oob="true">{{len .Group.Tasks}}</span>{{end}}{{end}}
+{{define "project-complete"}}<button type="button" data-call="completeProject" data-args='[{{.ID}}]' {{if ne .Progress.Completed .Progress.Total}}disabled title="Complete or archive the remaining tasks first"{{end}}>Complete project</button>{{end}}
+{{define "task-group-response"}}{{template "task-group" .Group}}{{with .Project}}<span class="project-stats" id="project-stats-{{.ID}}" hx-swap-oob="true">{{template "project-stats" .}}</span><span class="project-complete" id="project-complete-{{.ID}}" hx-swap-oob="true">{{template "project-complete" .}}</span>{{else}}<span class="section-count" id="count-{{.Group.Key}}" hx-swap-oob="true">{{len .Group.Tasks}}</span>{{end}}{{end}}
 {{define "list-section"}}
 <details class="workspace-section" id="section-{{.Key}}" data-persist="{{.Key}}" {{if eq .Key "tasks"}}open{{end}}>
  <summary><span class="disclosure-icon">{{template "icon-chevron"}}</span><span class="section-kind-icon">{{if eq .Category "groceries"}}{{template "icon-cart"}}{{else if eq .Category "shopping"}}{{template "icon-bag"}}{{else}}{{template "icon-inbox"}}{{end}}</span><span class="section-title">{{.Name}}</span><span class="section-count" id="count-{{.Key}}">{{len .Tasks}}</span></summary>
@@ -38,7 +39,7 @@
   <button type="button" data-call="structureRename" data-args='["project",{{.ID}},"$el"]' data-name="{{.Name}}">Rename</button>
   <button type="button" data-call="structureAction" data-args='["project",{{.ID}},"up"]'>Move up</button>
   <button type="button" data-call="structureAction" data-args='["project",{{.ID}},"down"]'>Move down</button>
-  <button type="button" data-call="structureAction" data-args='["project",{{.ID}},"complete"]' {{if ne .Group.Completed .Group.Total}}disabled title="Complete or archive the remaining tasks first"{{end}}>Complete project</button>
+  <span class="project-complete" id="project-complete-{{.ID}}">{{template "project-complete" .}}</span>
   <button type="button" data-call="structureAction" data-args='["project",{{.ID}},"archive"]'>Archive project</button>
  </div></details></div>
 {{template "task-group" .Group}}
@@ -64,7 +65,7 @@
  </section>
  <section class="projects-group" aria-labelledby="projects-heading">
   <div class="workspace-subheading"><span class="section-kind-icon project-icon">{{template "icon-folder"}}</span><h2 id="projects-heading">Projects</h2><span class="section-count">{{len .Projects}}</span></div>
-  <div class="section-footer projects-actions"><button class="action-with-icon" data-call="structureCreate" data-args='["project",0]'>{{template "icon-plus"}}<span>New project</span></button>{{if .ArchivedProjects}}<button class="action-with-icon" data-call="openArchive" data-args='["projects"]'>{{template "icon-archive"}}<span>Archived</span></button>{{end}}</div>
+  <div class="section-footer projects-actions"><button class="action-with-icon" data-call="structureCreate" data-args='["project",0]'>{{template "icon-plus"}}<span>New project</span></button>{{if .ArchivedProjectCount}}<button class="action-with-icon" data-call="openArchive" data-args='["projects"]'>{{template "icon-archive"}}<span>Archived</span></button>{{end}}</div>
  {{range .Projects}}
  <details class="project-group" id="project-{{.ID}}" data-persist="project-{{.ID}}">
   <summary><span class="disclosure-icon">{{template "icon-chevron"}}</span><span class="project-name">{{.Name}}</span><span class="project-stats" id="project-stats-{{.ID}}">{{template "project-stats" .}}</span></summary>

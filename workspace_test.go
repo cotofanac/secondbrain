@@ -100,19 +100,19 @@ func TestProjectTasksMembershipAndLifecycle(t *testing.T) {
 		t.Fatalf("heading capture filed the task under %d/%d", project, heading)
 	}
 	requireOK(t, formRequest(t, handleToggleTodo, "/todos/toggle", url.Values{"id": {"1"}}))
-	requireOK(t, formRequest(t, handleTaskSave, "/task/save", url.Values{"id": {"1"}, "revision": {"1"}, "text": {"Book lessons"}, "due_date": {"2026-10-01"}, "list": {"heading:2"}}))
+	requireOK(t, formRequest(t, handleTaskSave, "/task/save", url.Values{"id": {"1"}, "revision": {"2"}, "text": {"Book lessons"}, "due_date": {"2026-10-01"}, "list": {"heading:2"}}))
 	var done int
 	var completed string
 	db.QueryRow(`SELECT done,project_id,heading_id,completed_at FROM todos WHERE id=?`, id).Scan(&done, &project, &heading, &completed)
 	if done != 1 || project != 2 || heading != 2 || completed == "" {
 		t.Fatalf("move lost task state %d %d %d %q", done, project, heading, completed)
 	}
-	requireOK(t, formRequest(t, handleTaskSave, "/task/save", url.Values{"id": {"1"}, "revision": {"2"}, "text": {"Just the project"}, "list": {"project:1"}}))
+	requireOK(t, formRequest(t, handleTaskSave, "/task/save", url.Values{"id": {"1"}, "revision": {"3"}, "text": {"Just the project"}, "list": {"project:1"}}))
 	db.QueryRow(`SELECT project_id,COALESCE(heading_id,0) FROM todos WHERE id=1`).Scan(&project, &heading)
 	if project != 1 || heading != 0 {
 		t.Fatalf("project move left %d/%d", project, heading)
 	}
-	requireOK(t, formRequest(t, handleTaskSave, "/task/save", url.Values{"id": {"1"}, "revision": {"3"}, "text": {"Standalone again"}, "due_date": {""}, "list": {""}}))
+	requireOK(t, formRequest(t, handleTaskSave, "/task/save", url.Values{"id": {"1"}, "revision": {"4"}, "text": {"Standalone again"}, "due_date": {""}, "list": {""}}))
 	var standalone bool
 	db.QueryRow(`SELECT project_id IS NULL AND heading_id IS NULL FROM todos WHERE id=1`).Scan(&standalone)
 	if !standalone {
@@ -129,7 +129,7 @@ func TestProjectArchiveCompletionAndCounts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ws.Projects[0].Group.Completed != 1 || ws.Projects[0].Group.Total != 2 {
+	if ws.Projects[0].Progress.Completed != 1 || ws.Projects[0].Progress.Total != 2 {
 		t.Fatal("archived completion excluded from progress")
 	}
 	w := formRequest(t, handleProjectAction, "/projects/action", url.Values{"id": {"1"}, "action": {"complete"}})
@@ -165,8 +165,19 @@ func TestProjectArchiveCompletionAndCounts(t *testing.T) {
 	if len(tasks) != 1 {
 		t.Fatal("deleting a heading hid its task")
 	}
-	requireOK(t, formRequest(t, handleToggleTodo, "/todos/toggle", url.Values{"id": {"2"}}))
-	requireOK(t, formRequest(t, handleProjectAction, "/projects/action", url.Values{"id": {"1"}, "action": {"complete"}}))
+	// Checking off the last task re-enables "Complete project" without a reload.
+	w = formRequest(t, handleToggleTodo, "/todos/toggle", url.Values{"id": {"2"}, "response": {"task-group"}})
+	requireOK(t, w)
+	page := w.Body.String()
+	_, button, _ := strings.Cut(page, `id="project-complete-1" hx-swap-oob="true"`)
+	if button == "" || strings.Contains(strings.SplitN(button, "</button>", 2)[0], "disabled") {
+		t.Fatalf("toggle response lacks an enabled Complete project button: %s", page)
+	}
+	w = formRequest(t, handleProjectAction, "/projects/action", url.Values{"id": {"1"}, "action": {"complete"}})
+	requireOK(t, w)
+	if !strings.Contains(w.Header().Get("HX-Trigger"), "project-completed") {
+		t.Fatal("missing completion undo")
+	}
 	requireOK(t, formRequest(t, handleProjectAction, "/projects/action", url.Values{"id": {"1"}, "action": {"reopen"}}))
 }
 
@@ -580,13 +591,13 @@ func TestProjectBodyMatchesWorkspace(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	body := Project{ID: 1}
+	body := Project{ProjectSummary: ProjectSummary{ID: 1}}
 	if err = loadProjectTasks(&body); err != nil {
 		t.Fatal(err)
 	}
 	all := ws.Projects[0]
-	if all.Group.Completed != 1 || all.Group.Total != 3 || body.Group.Completed != 1 || body.Group.Total != 3 {
-		t.Fatalf("progress %d/%d (workspace) and %d/%d (project body), want 1/3", all.Group.Completed, all.Group.Total, body.Group.Completed, body.Group.Total)
+	if all.Progress.Completed != 1 || all.Progress.Total != 3 || body.Progress.Completed != 1 || body.Progress.Total != 3 {
+		t.Fatalf("progress %d/%d (workspace) and %d/%d (project body), want 1/3", all.Progress.Completed, all.Progress.Total, body.Progress.Completed, body.Progress.Total)
 	}
 	if len(body.Headings) != 1 || len(body.Headings[0].Group.Tasks) != 1 || len(body.Group.Tasks) != 1 {
 		t.Fatal("tasks not filed under their heading")

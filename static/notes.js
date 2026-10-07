@@ -4,25 +4,29 @@ let saveTimer = null;
 function initNoteEditor() {
     const editor = document.getElementById('note-editor');
     if (!editor || editor.dataset.initialized) return;
-    editor.dataset.initialized="1";
+    editor.dataset.initialized = '1';
+    editorDrafts.state(editor, 'clean');
     void restoreNoteDraft(editor);
 
-    editor.addEventListener('keydown', function(e) {
+    editor.addEventListener('keydown', function (e) {
         handleNoteEditorKeydown(e, editor);
     });
 
-    editor.addEventListener('input', function() {
+    editor.addEventListener('input', function () {
         applyInlineNoteCommands(editor);
         clearTimeout(saveTimer);
-        editor.dataset.dirty='1';
+        editor.dataset.dirty = '1';
+        editorDrafts.state(editor, 'dirty');
         clearTimeout(noteDraftTimer);
-        noteDraftTimer=setTimeout(()=>{void storeNoteDraft(editor);},250);
+        noteDraftTimer = setTimeout(() => {
+            void storeNoteDraft(editor);
+        }, 250);
         showNoteStatus('Unsaved…');
         saveTimer = setTimeout(() => saveCurrentNote(), 800);
     });
 
     // Click/tap within the checkbox marker area to toggle
-    editor.addEventListener('click', function() {
+    editor.addEventListener('click', function () {
         const pos = editor.selectionStart;
         const line = getCurrentLine(editor.value, pos);
         if (pos - line.start <= 6) toggleCheckboxLine(editor);
@@ -128,7 +132,8 @@ function toggleWrappedSelection(editor, marker) {
     if (start === end) return;
 
     const selected = editor.value.slice(start, end);
-    const wrapped = selected.startsWith(marker) && selected.endsWith(marker) && selected.length >= marker.length * 2;
+    const wrapped =
+        selected.startsWith(marker) && selected.endsWith(marker) && selected.length >= marker.length * 2;
 
     if (wrapped) {
         const unwrapped = selected.slice(marker.length, selected.length - marker.length);
@@ -147,7 +152,7 @@ function getCurrentLine(text, position) {
     return {
         start,
         end,
-        text: text.slice(start, end)
+        text: text.slice(start, end),
     };
 }
 
@@ -160,48 +165,176 @@ let noteSavePending = null;
 let noteConflict = null;
 let noteDraftTimer = null;
 const NOTE_KEEPALIVE_LIMIT = 60000;
-function noteDraftDB(){return new Promise((resolve,reject)=>{const request=indexedDB.open('secondbrain-drafts',1);request.onupgradeneeded=()=>request.result.createObjectStore('notes');request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error);});}
-async function noteDraftWrite(id,value){const db=await noteDraftDB();return new Promise((resolve,reject)=>{const tx=db.transaction('notes','readwrite');tx.objectStore('notes').put(value,String(id));tx.oncomplete=()=>{db.close();resolve();};tx.onerror=()=>{db.close();reject(tx.error);};});}
-async function noteDraftRead(id){const db=await noteDraftDB();return new Promise((resolve,reject)=>{const tx=db.transaction('notes','readonly');const request=tx.objectStore('notes').get(String(id));request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error);tx.oncomplete=()=>db.close();});}
-async function noteDraftDelete(id){const db=await noteDraftDB();return new Promise((resolve,reject)=>{const tx=db.transaction('notes','readwrite');tx.objectStore('notes').delete(String(id));tx.oncomplete=()=>{db.close();resolve();};tx.onerror=()=>{db.close();reject(tx.error);};});}
+function noteDraftWrite(id, value) {
+    return editorDrafts.write('notes', id, value);
+}
+function noteDraftRead(id) {
+    return editorDrafts.read('notes', id);
+}
+function noteDraftDelete(id) {
+    return editorDrafts.remove('notes', id);
+}
 function storeNoteDraft(editor) {
-    return noteDraftWrite(editor.dataset.noteId,{content:editor.value,revision:Number(editor.dataset.revision),savedAt:Date.now()}).catch(()=>{});
+    return noteDraftWrite(editor.dataset.noteId, {
+        content: editor.value,
+        revision: Number(editor.dataset.revision),
+        savedAt: Date.now(),
+    }).catch(() => {});
 }
 async function restoreNoteDraft(editor) {
-    const noteId=editor.dataset.noteId;
-    const initialContent=editor.value;
-    try { const draft=await noteDraftRead(noteId);if(!draft||!editor.isConnected||editor.dataset.noteId!==noteId||editor.dataset.dirty||editor.value!==initialContent)return;if(draft.content!==editor.value){editor.value=draft.content;editor.dataset.revision=String(draft.revision||editor.dataset.revision);editor.dataset.dirty='1';autoResize(editor);showNoteStatus('Unsaved draft restored.');}else await noteDraftDelete(noteId); } catch (_) {}
+    const noteId = editor.dataset.noteId;
+    const initialContent = editor.value;
+    try {
+        const draft = await noteDraftRead(noteId);
+        if (
+            !draft ||
+            !editor.isConnected ||
+            editor.dataset.noteId !== noteId ||
+            editor.dataset.dirty ||
+            editor.value !== initialContent
+        )
+            return;
+        if (draft.content !== editor.value) {
+            editor.value = draft.content;
+            editor.dataset.revision = String(draft.revision || editor.dataset.revision);
+            editor.dataset.dirty = '1';
+            editorDrafts.state(editor, 'dirty');
+            autoResize(editor);
+            showNoteStatus('Unsaved draft restored.');
+        } else await noteDraftDelete(noteId);
+    } catch (_) {}
 }
-function clearNoteConflict(){document.getElementById('note-conflict')?.remove();noteConflict=null;}
-function showNoteConflict(editor,latest){
- noteConflict=latest;let panel=document.getElementById('note-conflict');if(!panel){panel=document.createElement('section');panel.id='note-conflict';panel.className='edit-conflict note-conflict';panel.setAttribute('role','alertdialog');panel.setAttribute('aria-labelledby','note-conflict-title');editor.insertAdjacentElement('afterend',panel);}
- panel.replaceChildren();const heading=document.createElement('h3');heading.id='note-conflict-title';heading.textContent='Changed on another device';const copy=document.createElement('p');copy.textContent='Your draft is still in the editor. The latest saved version is below.';const latestBox=document.createElement('textarea');latestBox.readOnly=true;latestBox.value=latest.content;latestBox.setAttribute('aria-label','Latest saved note');const actions=document.createElement('div');actions.className='conflict-actions';const keep=document.createElement('button');keep.type='button';keep.className='btn btn-primary';keep.textContent='Keep mine';keep.onclick=()=>{editor.dataset.revision=String(latest.revision);clearNoteConflict();void saveCurrentNote(false,true);};const use=document.createElement('button');use.type='button';use.className='btn';use.textContent='Use latest';use.onclick=async()=>{editor.value=latest.content;editor.dataset.revision=String(latest.revision);delete editor.dataset.dirty;await noteDraftDelete(editor.dataset.noteId);clearNoteConflict();autoResize(editor);showNoteStatus('Latest version loaded');editor.focus();};actions.append(keep,use);panel.append(heading,copy,latestBox,actions);keep.focus();
+function clearNoteConflict() {
+    document.getElementById('note-conflict')?.remove();
+    noteConflict = null;
 }
-async function saveCurrentNote(finalFlush=false, force=false) {
-    clearTimeout(saveTimer); saveTimer=null;
-    if(noteSavePending) {
-        if(!await noteSavePending) return false;
-        return saveCurrentNote(finalFlush,force);
+function showNoteConflict(editor, latest) {
+    noteConflict = latest;
+    let panel = document.getElementById('note-conflict');
+    if (!panel) {
+        panel = document.createElement('section');
+        panel.id = 'note-conflict';
+        panel.className = 'edit-conflict note-conflict';
+        panel.setAttribute('role', 'alertdialog');
+        panel.setAttribute('aria-labelledby', 'note-conflict-title');
+        editor.insertAdjacentElement('afterend', panel);
     }
-    const editor=document.getElementById('note-editor');
-    if(!editor || !editor.dataset.dirty) return true;
-    const content=editor.value, revision=Number(editor.dataset.revision);
-    if(finalFlush) void storeNoteDraft(editor); else await storeNoteDraft(editor);
-    noteSavePending=(async()=>{
+    panel.replaceChildren();
+    const heading = document.createElement('h3');
+    heading.id = 'note-conflict-title';
+    heading.textContent = 'Changed on another device';
+    const copy = document.createElement('p');
+    copy.textContent = 'Your draft is still in the editor. The latest saved version is below.';
+    const latestBox = document.createElement('textarea');
+    latestBox.readOnly = true;
+    latestBox.value = latest.content;
+    latestBox.setAttribute('aria-label', 'Latest saved note');
+    const actions = document.createElement('div');
+    actions.className = 'conflict-actions';
+    const keep = document.createElement('button');
+    keep.type = 'button';
+    keep.className = 'btn btn-primary';
+    keep.textContent = 'Keep mine';
+    keep.onclick = () => {
+        editor.dataset.revision = String(latest.revision);
+        clearNoteConflict();
+        void saveCurrentNote(false, true);
+    };
+    const use = document.createElement('button');
+    use.type = 'button';
+    use.className = 'btn';
+    use.textContent = 'Use latest';
+    use.onclick = async () => {
+        editor.value = latest.content;
+        editor.dataset.revision = String(latest.revision);
+        delete editor.dataset.dirty;
+        await noteDraftDelete(editor.dataset.noteId);
+        clearNoteConflict();
+        autoResize(editor);
+        editorDrafts.state(editor, 'clean');
+        showNoteStatus('Latest version loaded');
+        editor.focus();
+    };
+    actions.append(keep, use);
+    panel.append(heading, copy, latestBox, actions);
+    keep.focus();
+}
+async function saveCurrentNote(finalFlush = false, force = false) {
+    clearTimeout(saveTimer);
+    saveTimer = null;
+    if (noteSavePending) {
+        if (!(await noteSavePending)) return false;
+        return saveCurrentNote(finalFlush, force);
+    }
+    const editor = document.getElementById('note-editor');
+    if (!editor || !editor.dataset.dirty) return true;
+    if (noteConflict && !force) return false;
+    const content = editor.value,
+        revision = Number(editor.dataset.revision);
+    if (finalFlush) void storeNoteDraft(editor);
+    else await storeNoteDraft(editor);
+    noteSavePending = (async () => {
         try {
-            const body=new URLSearchParams({id:editor.dataset.noteId,content,revision:String(revision)});
-            if(finalFlush && body.toString().length>NOTE_KEEPALIVE_LIMIT){showNoteStatus('Draft kept for next time');return false;}
-            const response=await fetch('/notes/save',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},keepalive:finalFlush,body});
-            if(response.redirected) throw new Error('Session expired — sign in to save your draft.');
-            const data=await response.json();
-            if(response.status===409&&data.note){showNoteStatus('Changed on another device');showNoteConflict(editor,data.note);return false;}
-            if(!response.ok||data.status!=='saved') throw new Error('Could not save — your draft is kept here.');
-            editor.dataset.revision=String(data.revision);clearNoteConflict();
-            if(editor.value===content){delete editor.dataset.dirty;await noteDraftDelete(editor.dataset.noteId);showNoteStatus('Saved');}else{await storeNoteDraft(editor);}
+            const body = new URLSearchParams({
+                id: editor.dataset.noteId,
+                content,
+                revision: String(revision),
+            });
+            if (finalFlush && body.toString().length > NOTE_KEEPALIVE_LIMIT) {
+                showNoteStatus('Draft kept for next time');
+                return false;
+            }
+            editorDrafts.state(editor, 'saving');
+            showNoteStatus('Saving…');
+            const response = await fetch('/notes/save', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                keepalive: finalFlush,
+                body,
+            });
+            if (response.redirected) throw new Error('Session expired — sign in to save your draft.');
+            const reply = await response.text();
+            let data;
+            try {
+                data = JSON.parse(reply);
+            } catch (_) {
+                throw new Error('Could not save — your draft is kept here.');
+            }
+            if (response.status === 409 && data.note) {
+                editorDrafts.state(editor, 'conflicted');
+                showNoteStatus('Changed on another device');
+                showNoteConflict(editor, data.note);
+                return false;
+            }
+            if (!response.ok || data.status !== 'saved')
+                throw new Error('Could not save — your draft is kept here.');
+            reportMutationEffects(response, document.getElementById('notes-content'));
+            editor.dataset.revision = String(data.revision);
+            clearNoteConflict();
+            if (editor.value === content) {
+                delete editor.dataset.dirty;
+                await noteDraftDelete(editor.dataset.noteId);
+                editorDrafts.state(editor, 'clean');
+                showNoteStatus('Saved');
+            } else {
+                await storeNoteDraft(editor);
+            }
             return true;
-        } catch(error){showNoteStatus(error.message || 'Offline — your draft is kept here.');return false;}
+        } catch (error) {
+            editorDrafts.state(editor, 'failed');
+            showNoteStatus(
+                error instanceof TypeError
+                    ? 'Offline — your draft is kept here.'
+                    : error.message || 'Could not save — your draft is kept here.',
+            );
+            return false;
+        }
     })();
-    const ok=await noteSavePending;noteSavePending=null;return ok;
+    const ok = await noteSavePending;
+    noteSavePending = null;
+    return ok;
 }
 
 function showNoteStatus(msg) {
@@ -221,13 +354,15 @@ async function saveBeforeNoteAction() {
 // If the tab is being hidden or closed with an edit still in the debounce
 // window, save it now (keepalive on the fetch lets it finish during unload).
 function flushPendingNoteSave() {
-    const editor=document.getElementById('note-editor');if(!editor?.dataset.dirty)return;
+    const editor = document.getElementById('note-editor');
+    if (!editor?.dataset.dirty) return;
     clearTimeout(saveTimer);
     clearTimeout(noteDraftTimer);
     saveTimer = null;
-    void storeNoteDraft(editor);void saveCurrentNote(true);
+    void storeNoteDraft(editor);
+    void saveCurrentNote(true);
 }
-document.addEventListener('visibilitychange', function() {
+document.addEventListener('visibilitychange', function () {
     if (document.hidden) flushPendingNoteSave();
 });
 window.addEventListener('pagehide', flushPendingNoteSave);
@@ -237,7 +372,10 @@ window.addEventListener('pagehide', flushPendingNoteSave);
 function setNotePickerOpen(open) {
     const panel = document.getElementById('note-picker-panel');
     if (!panel) return;
-    panel.hidden = !open;
+    if (matchMedia('(min-width: 1024px)').matches) return;
+    if (open)
+        openModal(panel, panel.querySelector('.note-picker-item.active') || panel.querySelector('button'));
+    else closeModal(panel);
     const backdrop = document.getElementById('note-sheet-backdrop');
     if (backdrop) backdrop.hidden = !open;
     document.querySelector('.note-picker-btn')?.setAttribute('aria-expanded', String(open));
@@ -272,19 +410,18 @@ function filterNotes(query) {
 }
 
 async function selectNote(id) {
-    if(!await saveBeforeNoteAction()) return;
+    if (!(await saveBeforeNoteAction())) return;
     closeNotePicker();
-    htmx.ajax('GET','/notes?id='+id,'#notes-content');
+    htmx.ajax('GET', '/notes?id=' + id, '#notes-content');
 }
 
-document.addEventListener('click', function(e) {
+document.addEventListener('click', function (e) {
     const picker = document.getElementById('note-picker');
     if (picker && !picker.contains(e.target)) closeNotePicker();
 });
 
-
 function loadNote(id) {
-    htmx.ajax('GET', '/notes?id=' + id, '#notes-content');
+    return htmx.ajax('GET', '/notes' + (id ? '?id=' + id : ''), '#notes-content');
 }
 
 function showPrompt(label, defaultValue = '') {
@@ -305,7 +442,10 @@ function showPrompt(label, defaultValue = '') {
             cleanup();
             resolve(val || null);
         }
-        function dismiss() { cleanup(); resolve(null); }
+        function dismiss() {
+            cleanup();
+            resolve(null);
+        }
         function cleanup() {
             closeModal(dialog);
             confirmBtn.removeEventListener('click', submit);
@@ -314,10 +454,15 @@ function showPrompt(label, defaultValue = '') {
             dialog.removeEventListener('click', onBackdrop);
         }
         function onKey(e) {
-            if (e.key === 'Enter') { e.preventDefault(); submit(); }
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                submit();
+            }
             if (e.key === 'Escape') dismiss();
         }
-        function onBackdrop(e) { if (e.target === dialog) dismiss(); }
+        function onBackdrop(e) {
+            if (e.target === dialog) dismiss();
+        }
 
         confirmBtn.addEventListener('click', submit);
         cancelBtn.addEventListener('click', dismiss);
@@ -329,10 +474,10 @@ function showPrompt(label, defaultValue = '') {
 async function createNote() {
     const title = await showPrompt('Note name');
     if (!title) return;
-    if (!await saveBeforeNoteAction()) return;
+    if (!(await saveBeforeNoteAction())) return;
     htmx.ajax('POST', '/notes/create', {
         target: '#notes-content',
-        values: { title }
+        values: { title },
     });
 }
 
@@ -357,15 +502,24 @@ function showConfirm(message) {
             dialog.removeEventListener('click', onBackdrop);
             resolve(result);
         }
-        function onConfirm() { finish(true); }
-        function onCancel() { finish(false); }
+        function onConfirm() {
+            finish(true);
+        }
+        function onCancel() {
+            finish(false);
+        }
         function onKey(e) {
             // A focused button activates itself on Enter; intercepting it here
             // would turn Enter on Cancel into a confirmation.
-            if (e.key === 'Enter' && !(e.target instanceof HTMLButtonElement)) { e.preventDefault(); finish(true); }
+            if (e.key === 'Enter' && !(e.target instanceof HTMLButtonElement)) {
+                e.preventDefault();
+                finish(true);
+            }
             if (e.key === 'Escape') finish(false);
         }
-        function onBackdrop(e) { if (e.target === dialog) finish(false); }
+        function onBackdrop(e) {
+            if (e.target === dialog) finish(false);
+        }
 
         confirmBtn.addEventListener('click', onConfirm);
         cancelBtn.addEventListener('click', onCancel);
@@ -378,12 +532,10 @@ async function archiveNote() {
     closeNoteMenu();
     const editor = document.getElementById('note-editor');
     if (!editor) return;
-    const ok = await showConfirm('Archive this note?');
-    if (!ok) return;
-    if (!await saveBeforeNoteAction()) return;
+    if (!(await saveBeforeNoteAction())) return;
     htmx.ajax('POST', '/notes/delete', {
         target: '#notes-content',
-        values: { id: editor.dataset.noteId }
+        values: { id: editor.dataset.noteId },
     });
 }
 
@@ -395,9 +547,9 @@ async function renameNote() {
     const current = label ? label.textContent.trim() : '';
     const title = await showPrompt('Rename note', current);
     if (!title || title === current) return;
-    if (!await saveBeforeNoteAction()) return;
+    if (!(await saveBeforeNoteAction())) return;
     htmx.ajax('POST', '/notes/rename', {
         target: '#notes-content',
-        values: { id: editor.dataset.noteId, title }
+        values: { id: editor.dataset.noteId, title },
     });
 }

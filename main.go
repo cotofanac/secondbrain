@@ -54,7 +54,7 @@ var (
 // one of them changes.
 func computeAssetVersion() string {
 	h := sha256.New()
-	for _, name := range []string{"static/app.js", "static/notes.js", "static/style.css", "static/htmx.min.js", "static/workspace.js", "static/push.js", "static/login.js", "static/sw.js", "static/manifest.json"} {
+	for _, name := range []string{"static/app.js", "static/notes.js", "static/drafts.js", "static/calendar.js", "static/style.css", "static/htmx.min.js", "static/workspace.js", "static/push.js", "static/login.js", "static/sw.js", "static/manifest.json"} {
 		b, err := staticFiles.ReadFile(name)
 		if err != nil {
 			// Fall back to a build-time value so the app still boots.
@@ -235,6 +235,9 @@ func startMaintenance() {
 				log.Printf("Delivery cleanup failed: %v", err)
 			} else if n > 0 {
 				log.Printf("Removed %d old notification deliveries", n)
+			}
+			if _, err := db.Exec(`DELETE FROM undo_operations WHERE expires_at<=?`, dbTime(appNow())); err != nil {
+				log.Printf("Undo cleanup failed: %v", err)
 			}
 			time.Sleep(1 * time.Hour)
 		}
@@ -442,7 +445,9 @@ func initDB() {
 
 	// Seed a default note if none exist
 	var count int
-	db.QueryRow("SELECT COUNT(*) FROM notes").Scan(&count)
+	if err = db.QueryRow("SELECT COUNT(*) FROM notes").Scan(&count); err != nil {
+		log.Fatalf("Read initial notes: %v", err)
+	}
 	if count == 0 {
 		db.Exec("INSERT INTO notes (title, content) VALUES (?, ?)", "Quick Notes", "")
 		log.Printf("Database initialized with default note")
@@ -461,26 +466,28 @@ const maxSuggestions = 200
 // loadSuggestions returns autocomplete entries for a checklist category, newest
 // first (a recently used item is the likeliest next entry) and then sorted for
 // a stable, scannable datalist.
-func loadSuggestions(category string) []string {
+func loadSuggestions(category string) ([]string, error) {
 	rows, err := db.Query(
 		`SELECT text FROM todos WHERE category = ?
 		 GROUP BY text ORDER BY MAX(created_at) DESC LIMIT ?`,
 		category, maxSuggestions,
 	)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	defer rows.Close()
 	var items []string
 	for rows.Next() {
 		var s string
-		rows.Scan(&s)
+		if err = rows.Scan(&s); err != nil {
+			return nil, err
+		}
 		items = append(items, s)
 	}
 	// The query orders by recency to pick *which* entries survive the limit;
 	// present them alphabetically, as before.
 	sort.Strings(items)
-	return items
+	return items, rows.Err()
 }
 
 func handleIndex(w http.ResponseWriter, r *http.Request) {
@@ -500,10 +507,15 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 	if len(notesList) > 0 {
 		currentNote.ID = notesList[0].ID
 		currentNote.Title = notesList[0].Title
-		db.QueryRow("SELECT content, updated_at, revision FROM notes WHERE id = ?", currentNote.ID).Scan(&currentNote.Content, &currentNote.UpdatedAt, &currentNote.Revision)
+		if err = db.QueryRow("SELECT content, updated_at, revision FROM notes WHERE id = ?", currentNote.ID).Scan(&currentNote.Content, &currentNote.UpdatedAt, &currentNote.Revision); err != nil {
+			writeDomainError(w, err, "Could not load note")
+			return
+		}
 	}
 
-	workspace, err := loadWorkspace()
+	ctx, cancel := readContext(r)
+	defer cancel()
+	workspace, err := loadWorkspaceContext(ctx)
 	if err != nil {
 		http.Error(w, "Could not load workspace", 500)
 		return
@@ -514,6 +526,16 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	groceries, err := loadSuggestions("groceries")
+	if err != nil {
+		writeDomainError(w, err, "Could not load suggestions")
+		return
+	}
+	shopping, err := loadSuggestions("shopping")
+	if err != nil {
+		writeDomainError(w, err, "Could not load suggestions")
+		return
+	}
 	data := struct {
 		Notes                    []Note
 		CurrentNote              Note
@@ -532,8 +554,8 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 		Notes:                    notesList,
 		CurrentNote:              currentNote,
 		InactivityTimeoutSeconds: inactivityTimeoutMinutes * 60,
-		GrocerySuggestions:       loadSuggestions("groceries"),
-		ShoppingSuggestions:      loadSuggestions("shopping"),
+		GrocerySuggestions:       groceries,
+		ShoppingSuggestions:      shopping,
 	}
 
 	renderTemplate(w, r, "index.html", data)

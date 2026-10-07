@@ -33,8 +33,15 @@ jobs:
       - name: Go tests
         run: go test ./...
 
-      - name: Notification client checks
-        run: node scripts/push-smoke.cjs
+      - name: Go static checks
+        run: |
+          go vet ./...
+          test -z "$(gofmt -l .)"
+
+      - name: Client contract checks
+        run: |
+          node scripts/push-smoke.cjs
+          node scripts/calendar-check.cjs
 
       # Browser checks run against a throwaway database. Playwright is pinned
       # and installed outside the repository; the app has no npm dependencies.
@@ -50,6 +57,25 @@ jobs:
           for i in $(seq 1 30); do curl -fs http://127.0.0.1:18080/health && break; sleep 1; done
           node scripts/ui-smoke.cjs
           node scripts/audit-smoke.cjs
+          node scripts/lifecycle-smoke.cjs
+
+      - name: Settled visual checks
+        env:
+          PLAYWRIGHT_MODULE: ${{ runner.temp }}/pw/node_modules/playwright
+          TEST_BASE_URL: http://127.0.0.1:18082
+          SCREENSHOT_DIR: ${{ runner.temp }}/visuals
+        run: |
+          DATA_DIR="$RUNNER_TEMP/visual-data" PASSCODE=12345678 PORT=18082 TZ=Europe/Bucharest BACKUP_KEEP=0 "$RUNNER_TEMP/secondbrain" > "$RUNNER_TEMP/visual-server.log" 2>&1 &
+          for i in $(seq 1 30); do curl -fs http://127.0.0.1:18082/health && break; sleep 1; done
+          node scripts/visual-check.cjs
+
+      - name: Visual review artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: settled-layouts
+          path: ${{ runner.temp }}/visuals
+          if-no-files-found: ignore
 
       - name: Server log
         if: failure()

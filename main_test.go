@@ -450,7 +450,10 @@ func TestLoadSuggestionsIsBoundedAndRecencyPicked(t *testing.T) {
 		t.Fatalf("insert duplicate: %v", err)
 	}
 
-	got := loadSuggestions("groceries")
+	got, err := loadSuggestions("groceries")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(got) != maxSuggestions {
 		t.Fatalf("len(suggestions) = %d, want %d", len(got), maxSuggestions)
 	}
@@ -466,7 +469,11 @@ func TestLoadSuggestionsIsBoundedAndRecencyPicked(t *testing.T) {
 		t.Error("suggestions are not sorted")
 	}
 	// Other categories are unaffected.
-	if n := len(loadSuggestions("shopping")); n != 0 {
+	shopping, err := loadSuggestions("shopping")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := len(shopping); n != 0 {
 		t.Errorf("shopping suggestions = %d, want 0", n)
 	}
 }

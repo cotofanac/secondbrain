@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"net/url"
@@ -147,6 +148,7 @@ func handleToday(w http.ResponseWriter, r *http.Request) {
 	renderTemplate(w, r, "today.html", view)
 }
 func handleTodayReschedule(w http.ResponseWriter, r *http.Request) {
+	mutationEffects(w, "todos", "today", "sidebar")
 	if !requirePost(w, r) {
 		return
 	}
@@ -213,7 +215,12 @@ func handleTodayMoveOverdue(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var m movedDate
 		if err = rows.Scan(&m.ID, &m.Revision, &m.Due); err != nil {
+			err = rows.Err()
 			rows.Close()
+			if err != nil {
+				writeDomainError(w, err, "Could not move tasks")
+				return
+			}
 			http.Error(w, "Could not move tasks", 500)
 			return
 		}
@@ -227,13 +234,26 @@ func handleTodayMoveOverdue(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	var changes []undoChange
+	for _, m := range moved {
+		changes = append(changes, undoChange{Table: "todos", ID: m.ID, Revision: m.Revision, Values: map[string]any{"due_date": m.Due}})
+	}
+	var token string
+	if len(changes) > 0 {
+		token, err = recordUndo(tx, undoOperation{Changes: changes, SkipChanged: true})
+		if err != nil {
+			writeDomainError(w, err, "Could not record undo")
+			return
+		}
+	}
+	mutationEffects(w, "todos", "today", "sidebar")
 	if err = tx.Commit(); err != nil {
 		http.Error(w, "Could not move tasks", 500)
 		return
 	}
 	if len(moved) > 0 {
 		hxTrigger(w, "sbWorkspaceChanged", map[string]any{})
-		hxTrigger(w, "sbUndo", map[string]any{"kind": "dates", "items": moved})
+		hxTrigger(w, "sbUndo", map[string]any{"kind": "dates", "items": moved, "token": token, "message": fmt.Sprintf("Moved %d task(s) to today", len(moved))})
 	}
 	handleToday(w, r)
 }
@@ -241,6 +261,7 @@ func handleTodayMoveOverdue(w http.ResponseWriter, r *http.Request) {
 // handleTodayUndoMove puts back the dates "Move all to today" replaced,
 // skipping any task edited since.
 func handleTodayUndoMove(w http.ResponseWriter, r *http.Request) {
+	mutationEffects(w, "todos", "today", "sidebar")
 	if !requirePost(w, r) {
 		return
 	}
