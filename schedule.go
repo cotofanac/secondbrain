@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -148,7 +149,6 @@ func handleToday(w http.ResponseWriter, r *http.Request) {
 	renderTemplate(w, r, "today.html", view)
 }
 func handleTodayReschedule(w http.ResponseWriter, r *http.Request) {
-	mutationEffects(w, "todos", "today", "sidebar")
 	if !requirePost(w, r) {
 		return
 	}
@@ -162,24 +162,62 @@ func handleTodayReschedule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	due := r.FormValue("due_date")
+	if due == "today" {
+		due = appNow().Format("2006-01-02")
+	}
 	if due != "" {
 		if _, err = time.Parse("2006-01-02", due); err != nil {
 			http.Error(w, "Invalid date", 400)
 			return
 		}
 	}
-	result, err := db.Exec(`UPDATE todos AS t SET due_date=?,revision=revision+1 WHERE id=? AND revision=? AND category='todo' AND done=0 AND `+activeTaskSQL, due, id, revision)
+	tx, err := db.Begin()
 	if err != nil {
-		http.Error(w, "Could not reschedule task", 500)
+		writeDomainError(w, err, "Could not reschedule task")
 		return
 	}
-	changed, _ := result.RowsAffected()
-	if changed == 0 {
-		http.Error(w, "This task changed elsewhere. Refresh and try again.", 409)
+	defer tx.Rollback()
+	var previous string
+	var project, heading int
+	err = tx.QueryRow(`SELECT due_date,COALESCE(project_id,0),COALESCE(heading_id,0) FROM todos t WHERE id=? AND revision=? AND category='todo' AND done=0 AND `+activeTaskSQL, id, revision).Scan(&previous, &project, &heading)
+	if err == sql.ErrNoRows {
+		err = errConflict
+	}
+	if err != nil {
+		writeDomainError(w, err, "Could not reschedule task")
 		return
 	}
-	hxTrigger(w, "sbWorkspaceChanged", map[string]any{"message": "Task scheduled"})
-	handleToday(w, r)
+	var token string
+	if previous != due {
+		if _, err = tx.Exec(`UPDATE todos SET due_date=?,revision=revision+1 WHERE id=? AND revision=?`, due, id, revision); err != nil {
+			writeDomainError(w, err, "Could not reschedule task")
+			return
+		}
+		token, err = recordUndo(tx, undoOperation{Changes: []undoChange{{Table: "todos", ID: id, Revision: revision + 1, Values: map[string]any{"due_date": previous}}}})
+		if err != nil {
+			writeDomainError(w, err, "Could not record undo")
+			return
+		}
+	}
+	if err = tx.Commit(); err != nil {
+		writeDomainError(w, err, "Could not reschedule task")
+		return
+	}
+	mutationEffects(w, "todos", "today", "sidebar")
+	if token != "" {
+		message := "Task scheduled"
+		if due == appNow().Format("2006-01-02") {
+			message = "Moved to today"
+		}
+		hxTrigger(w, "sbUndo", map[string]any{"kind": "dates", "token": token, "message": message})
+	}
+	if r.Header.Get("HX-Target") == "today-content" {
+		handleToday(w, r)
+	} else if r.FormValue("response") == "task-group" {
+		handleTaskGroup(w, r, "todo", project, heading)
+	} else {
+		handleTodos(w, r)
+	}
 }
 
 // movedDate is one task moved by "Move all to today": enough to put it back

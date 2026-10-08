@@ -545,7 +545,7 @@ function hideToast() {
     if (!el || el.hidden) return;
     clearTimeout(toastTimer);
     el.classList.remove('show');
-    setTimeout(() => {
+    toastTimer = setTimeout(() => {
         el.hidden = true;
     }, 300);
 }

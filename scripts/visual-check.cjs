@@ -1,6 +1,6 @@
 // Seed representative content on a fresh disposable server. Capture settled
 // layouts independently of the mutation/animation smoke checks.
-const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
+const playwright = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -43,7 +43,8 @@ async function comparePixels(page, current, previous) {
 
 (async () => {
     fs.mkdirSync(output, { recursive: true });
-    const browser = await chromium.launch({ headless: true, executablePath: process.env.TEST_BROWSER });
+    const browserType = process.env.TEST_BROWSER_ENGINE || 'chromium';
+    const browser = await playwright[browserType].launch({ headless: true, executablePath: process.env.TEST_BROWSER });
     try {
         const context = await browser.newContext({
             viewport: { width: 1280, height: 900 },
@@ -101,6 +102,7 @@ async function comparePixels(page, current, previous) {
         });
         await page.goto(base, { waitUntil: 'networkidle' });
         const manifest = {
+            engine: browserType,
             browser: browser.version(),
             widths,
             modes: ['today', 'todos', 'notes'],
@@ -142,10 +144,34 @@ async function comparePixels(page, current, previous) {
                         window.scrollTo(0, 0);
                     });
                     assert.equal(
-                        await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
+                        await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth && document.body.scrollWidth <= innerWidth),
                         true,
                         `${mode} ${theme} ${width} overflow`,
                     );
+                    if (mode === 'todos' && width <= 390) {
+                        // WebKit's native date and list controls used to expand
+                        // the page when the editor opened, despite fitting boxes.
+                        await page.getByRole('button', { name: 'Get tiles for the kitchen', exact: true }).click();
+                        await page.locator('#task-editor').waitFor();
+                        await page.waitForLoadState('networkidle');
+                        const editorLayout = await page.evaluate(() => ({
+                            page: document.documentElement.scrollWidth,
+                            body: document.body.scrollWidth,
+                            viewport: innerWidth,
+                        }));
+                        assert.equal(
+                            editorLayout.page <= editorLayout.viewport && editorLayout.body <= editorLayout.viewport,
+                            true,
+                            `${theme} ${width} task editor overflow: ${JSON.stringify(editorLayout)}`,
+                        );
+                        await page.keyboard.press('Escape');
+                        await page.locator('#task-editor').waitFor({ state: 'detached' });
+                        await page.waitForLoadState('networkidle');
+                        await page.evaluate(() => {
+                            document.activeElement?.blur();
+                            window.scrollTo(0, 0);
+                        });
+                    }
                     const name = `${mode}-${theme}-${width}.png`;
                     const current = await page.screenshot({
                         path: path.join(output, name),

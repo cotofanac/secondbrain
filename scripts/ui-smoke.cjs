@@ -82,6 +82,20 @@ const shot = name => require('node:path').join(process.env.SCREENSHOT_DIR || req
  // Escape and tapping elsewhere close the editor too.
  await openTaskEditor('Book practical lessons');await page.keyboard.press('Escape');await page.locator('#task-editor').waitFor({state:'detached'});
  await openTaskEditor('Book practical lessons');await page.locator('[data-project-page] > summary').click();await page.locator('#task-editor').waitFor({state:'detached'});
+ // Schedule from a project heading in one tap, without opening the editor.
+ const lessonsRow=page.locator('.heading-group .todo-item').filter({hasText:'Book practical lessons'});
+ await lessonsRow.getByRole('button',{name:'Do today',exact:true}).click();
+ const scheduledToday=await page.evaluate(()=>todayISO());
+ await lessonsRow.locator('time[datetime="'+scheduledToday+'"]').waitFor();
+ assert.equal(await page.locator('#task-editor').count(),0,'Do today opened the editor');
+ assert.equal(await lessonsRow.getByRole('button',{name:'Do today',exact:true}).count(),0,'already scheduled task still offers Do today');
+ await page.locator('#toast .toast-action').click();
+ await lessonsRow.locator('time[datetime="2026-10-01"]').waitFor();
+ await lessonsRow.getByRole('button',{name:'Do today',exact:true}).waitFor();
+ // Dismissing one toast must not hide a new confirmation during its fade.
+ await page.evaluate(()=>{hideToast();showToast('New confirmation');});
+ await page.waitForTimeout(350);
+ assert.equal(await page.locator('#toast').isVisible(),true,'previous toast dismissal hid a new message');
  // Completion and reopening preserve the task and collapsed state.
  await page.locator('#section-tasks').evaluate(el=>el.dataset.testStable='true');
  await page.getByRole('button',{name:'Complete Book practical lessons',exact:true}).click();

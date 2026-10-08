@@ -364,6 +364,7 @@ body {
 
 .search-input {
     flex: 1;
+    min-width: 0;
     background: none;
     border: none;
     color: var(--text);
@@ -1327,6 +1328,18 @@ summary::-webkit-details-marker {
     flex-shrink: 0;
     font-size: 0.75rem;
 }
+.task-schedule {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    flex: 0 0 auto;
+}
+.task-schedule .text-action {
+    min-height: 44px;
+    padding: 0 0.35rem;
+    font-size: 0.78rem;
+    white-space: nowrap;
+}
 .todo-item .row-menu {
     position: relative;
     flex-shrink: 0;
@@ -1421,6 +1434,7 @@ summary::-webkit-details-marker {
     border-radius: 10px;
 }
 .editing [data-edit-label],
+.editing .task-schedule,
 .editing .todo-date {
     display: none;
 }
@@ -1456,6 +1470,8 @@ summary::-webkit-details-marker {
 }
 .chip {
     display: inline-flex;
+    /* WebKit's native date/select contents can overflow their visible boxes. */
+    overflow: hidden;
     align-items: center;
     gap: 0.3rem;
     min-width: 0;
@@ -1607,6 +1623,7 @@ summary::-webkit-details-marker {
 }
 .today-section h2 {
     display: flex;
+    flex-wrap: wrap;
     align-items: baseline;
     gap: 0.5rem;
     margin: 0 0 0.4rem;

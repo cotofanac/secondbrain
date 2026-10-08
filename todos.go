@@ -24,6 +24,10 @@ type Todo struct {
 	Repeat     string `json:"repeat"`
 }
 
+func (t Todo) CanDoToday() bool {
+	return t.Category == "todo" && !t.Done && t.DueDate != appNow().Format("2006-01-02")
+}
+
 // handleTodos renders the task workspace. Mutations call it after changing a
 // row; the Today view and task groups have their own renderers.
 func handleTodos(w http.ResponseWriter, r *http.Request) {

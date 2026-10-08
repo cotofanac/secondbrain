@@ -51,6 +51,7 @@ jobs:
         run: |
           npm install --prefix "$RUNNER_TEMP/pw" --no-audit --no-fund playwright@1.63.0
           "$RUNNER_TEMP/pw/node_modules/.bin/playwright" install --with-deps --only-shell chromium
+          "$RUNNER_TEMP/pw/node_modules/.bin/playwright" install --with-deps webkit
           go build -o "$RUNNER_TEMP/secondbrain" .
           mkdir -p "$RUNNER_TEMP/data"
           PASSCODE=12345678 PORT=18080 DATA_DIR="$RUNNER_TEMP/data" "$RUNNER_TEMP/secondbrain" > "$RUNNER_TEMP/server.log" 2>&1 &
@@ -68,6 +69,9 @@ jobs:
           DATA_DIR="$RUNNER_TEMP/visual-data" PASSCODE=12345678 PORT=18082 TZ=Europe/Bucharest BACKUP_KEEP=0 "$RUNNER_TEMP/secondbrain" > "$RUNNER_TEMP/visual-server.log" 2>&1 &
           for i in $(seq 1 30); do curl -fs http://127.0.0.1:18082/health && break; sleep 1; done
           node scripts/visual-check.cjs
+          DATA_DIR="$RUNNER_TEMP/webkit-data" PASSCODE=12345678 PORT=18083 TZ=Europe/Bucharest BACKUP_KEEP=0 "$RUNNER_TEMP/secondbrain" > "$RUNNER_TEMP/webkit-server.log" 2>&1 &
+          for i in $(seq 1 30); do curl -fs http://127.0.0.1:18083/health && break; sleep 1; done
+          TEST_BROWSER_ENGINE=webkit TEST_BASE_URL=http://127.0.0.1:18083 SCREENSHOT_DIR="$RUNNER_TEMP/visuals/webkit" node scripts/visual-check.cjs
 
       - name: Visual review artifacts
         if: always()
