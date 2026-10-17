@@ -30,12 +30,7 @@
 
  {{if .Upcoming}}<details class="today-section today-upcoming" data-persist="today-upcoming"><summary><h2>Next 7 days <span>{{len .Upcoming}}</span>{{template "icon-chevron"}}</h2></summary>{{range .Upcoming}}{{template "today-task" .}}{{end}}</details>{{end}}
 
- {{if .Reminder}}<footer class="today-footer today-reminder">
-  <p class="today-reminder-line">{{template "icon-bell"}}<span>Reminder at {{.Reminder}} when tasks are due</span></p>
-  <p id="push-status" class="today-reminder-status" role="status"></p>
-  <p id="push-last-result" class="today-reminder-status"></p>
-  <div class="today-reminder-actions"><button type="button" class="text-action" id="push-enable" data-call="enablePush" disabled>Enable on this device</button><button type="button" class="text-action" id="push-test" data-call="testPush" hidden>Send test</button><button type="button" class="text-action" id="push-disable" data-call="disablePush" hidden>Turn off</button></div>
- </footer>{{end}}
+ {{if .Reminder}}<p class="today-reminder" id="push-line" hidden>{{template "icon-bell"}}<span id="push-status" role="status"></span><button type="button" class="text-action" id="push-enable" data-call="enablePush" hidden disabled>Turn on</button></p>{{end}}
 </div>
 
 {{define "today-task"}}

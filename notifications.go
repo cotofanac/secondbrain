@@ -100,7 +100,7 @@ func handlePushSubscribe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if getSetting(expiredSubscriptionKey(sub.Endpoint)) != "" {
-		writeJSON(w, http.StatusConflict, map[string]any{"error": "This subscription expired. Enable this device again to replace it.", "renew": true})
+		writeJSON(w, http.StatusConflict, map[string]any{"error": "Reminders expired on this device. Turn them on again.", "renew": true})
 		return
 	}
 	if err := validatePushEndpoint(sub.Endpoint); err != nil {

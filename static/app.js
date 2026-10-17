@@ -16,7 +16,6 @@ const CALLABLE = new Set([
     'closeTaskEditor',
     'completeProject',
     'deleteHeading',
-    'disablePush',
     'enablePush',
     'filterNotes',
     'hideArchive',
@@ -40,7 +39,6 @@ const CALLABLE = new Set([
     'structureRename',
     'switchMode',
     'switchWorkspaceSection',
-    'testPush',
     'toggleNotePicker',
 ]);
 function dispatchCall(e) {

@@ -189,9 +189,9 @@ const shot = name => require('node:path').join(process.env.SCREENSHOT_DIR || req
  assert.equal(await page.locator('#section-groceries').isVisible(),true,'mobile workspace selection did not change');
  await page.locator('#topbar-title').click();await page.locator('[data-workspace-option="tasks"]').click();
  await page.locator('#topbar-stat').click();await page.locator('#today-content .today-heading').waitFor();
- // Today's footer says when the daily reminder goes out; there is no settings screen.
- assert.match(await page.locator('#today-content .today-reminder-line').textContent(),/Reminder at \d\d:\d\d when tasks are due/);
- await page.locator('#push-status').filter({hasText:/\S/}).waitFor();
+ // Today keeps one reminder line while this device is not getting reminders; there is no settings screen.
+ await page.locator('#push-line').filter({hasText:/off on this device/}).waitFor();
+ assert.equal(await page.locator('#push-enable').isVisible(),true,'the reminder line has no Turn on');
  await page.locator('#topbar-title').click();
  assert.equal(await page.locator('#mobile-workspace-menu').getByRole('button',{name:'Log out',exact:true}).isVisible(),true,'Go-to sheet has no Log out');
  await page.keyboard.press('Escape');

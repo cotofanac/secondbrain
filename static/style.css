@@ -1871,15 +1871,6 @@ summary::-webkit-details-marker {
     padding: 0.8rem 0.25rem;
     color: var(--text-dim);
 }
-.today-footer {
-    margin-top: 1.8rem;
-    padding: 1rem 0.25rem;
-    border-top: 1px solid var(--border);
-}
-.today-footer .icon {
-    width: 17px;
-    height: 17px;
-}
 .text-action {
     min-height: 44px;
     padding: 0;
@@ -3381,41 +3372,30 @@ details[open] > summary > .disclosure-icon .icon {
     opacity: 0.6;
     cursor: default;
 }
-/* Today's footer: when the daily reminder goes out, and this device's part in it. */
+/* Today's one reminder line, shown only while this device is not getting
+   the daily reminder (push.js toggles it). */
 .today-reminder {
-    display: grid;
-    gap: 0.25rem;
+    margin: 1.8rem 0 0;
+    padding: 0 0.25rem;
     color: var(--text-dim);
     font-size: 0.85rem;
-}
-.today-reminder p {
-    margin: 0;
-}
-.today-reminder-line {
-    display: flex;
-    align-items: center;
-    gap: 0.45rem;
-    color: var(--text);
-}
-.today-reminder-status {
-    padding-left: calc(17px + 0.45rem);
     overflow-wrap: anywhere;
 }
-.today-reminder-status:empty {
+.today-reminder[hidden] {
     display: none;
 }
-.today-reminder-actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0 1rem;
-    padding-left: calc(17px + 0.45rem);
+.today-reminder .icon {
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+    margin-right: 0.4rem;
+    vertical-align: -3px;
 }
-.today-reminder-actions .text-action {
+.today-reminder .text-action {
     min-height: 40px;
+    margin-left: 0.4rem;
     font-size: 0.85rem;
-}
-.today-reminder-actions .text-action:disabled {
-    color: var(--text-dim);
+    vertical-align: middle;
 }
 
 /* Motion. Short and eased like the view and item entrances above, only for

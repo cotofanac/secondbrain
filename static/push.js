@@ -24,7 +24,7 @@ async function isBraveBrowser() {
     }
 }
 async function pushSetupError(error) {
-    const message = error?.message || 'Could not enable this device. Try again.';
+    const message = error?.message || 'Could not turn on reminders. Try again.';
     if ((await isBraveBrowser()) && /registration failed|push service error/i.test(message)) {
         return 'Brave’s push service is off. Open brave://settings/privacy, enable “Use Google services for push messaging,” relaunch Brave, then try again.';
     }
@@ -41,7 +41,7 @@ async function pushAPI(path, body) {
             signal: controller.signal,
         });
         if (response.status === 401 || response.redirected)
-            throw new Error('Session expired. Sign in again, then enable this device.');
+            throw new Error('Session expired. Sign in again, then turn on reminders.');
         const data = await response.json();
         if (!response.ok) {
             const error = new Error(data.error || 'Could not update notifications.');
@@ -53,22 +53,20 @@ async function pushAPI(path, body) {
         clearTimeout(timeout);
     }
 }
-// The status lives in the Today footer, which is re-rendered often; renderPush
-// puts the last state back after each swap.
-let pushDisplay = ['Checking…', ''];
+// Today shows one line about reminders, only while this device is not getting
+// them; it is re-rendered often, so renderPush puts the last state back after each swap.
+let pushMessage = '';
 function renderPush() {
-    displayPush(...pushDisplay);
+    displayPush(pushMessage);
 }
-function displayPush(message, last) {
-    pushDisplay = [message, last];
+function displayPush(message) {
+    pushMessage = message;
+    const line = document.getElementById('push-line');
+    if (line) line.hidden = !message;
     const status = document.getElementById('push-status');
     if (status) status.textContent = message;
-    const result = document.getElementById('push-last-result');
-    if (result) result.textContent = last || '';
-    const enable = document.getElementById('push-enable'),
-        disable = document.getElementById('push-disable'),
-        test = document.getElementById('push-test');
-    // Enable only shows when it can work: supported, ready and not blocked.
+    // Turn on only shows when it can work: supported, ready and not blocked.
+    const enable = document.getElementById('push-enable');
     if (enable) {
         enable.disabled = !pushKey;
         enable.hidden =
@@ -76,8 +74,6 @@ function displayPush(message, last) {
             !pushRegistration ||
             (typeof Notification !== 'undefined' && Notification.permission === 'denied');
     }
-    if (disable) disable.hidden = !pushSubscription;
-    if (test) test.hidden = !pushRegistered;
 }
 function waitForWorker(reg) {
     return new Promise((resolve, reject) => {
@@ -105,25 +101,25 @@ async function preparePush() {
     if (!pushSupported()) {
         displayPush(
             !isSecureContext
-                ? 'Notifications need an HTTPS connection.'
-                : 'Open the installed Home Screen app to enable notifications on iPhone.',
+                ? 'Reminders need an HTTPS connection.'
+                : 'Open the installed Home Screen app to turn on reminders.',
         );
         return;
     }
     preparingPush = (async () => {
         try {
-            displayPush('Checking…');
-            pushRegistration = await waitForWorker(
-                await navigator.serviceWorker.register('/static/sw.js', {
-                    scope: '/',
-                    updateViaCache: 'none',
-                }),
-            );
+            displayPush('');
+            const registered = await navigator.serviceWorker
+                .register('/static/sw.js', { scope: '/', updateViaCache: 'none' })
+                .catch(() => {
+                    throw new Error('Could not set up reminders here. Reload to try again.');
+                });
+            pushRegistration = await waitForWorker(registered);
             pushKey = (await pushAPI('/push/public-key')).key;
             pushSubscription = await pushRegistration.pushManager.getSubscription();
             pushRegistered = false;
             if (Notification.permission === 'denied') {
-                displayPush('Permission blocked. Allow SecondBrain in your device’s notification settings.');
+                displayPush('Reminders are blocked. Allow SecondBrain in your device’s notification settings.');
                 return;
             }
             if (pushSubscription) {
@@ -135,7 +131,7 @@ async function preparePush() {
                         new Uint8Array(currentKey).some((v, i) => v !== expected[i]))
                 ) {
                     pushNeedsRenewal = true;
-                    displayPush('This device needs setting up again: turn it off, then enable it.');
+                    displayPush('Reminders need turning on again on this device.');
                     return;
                 }
                 // Upsert preserves per-device delivery history; repairs a missing server row.
@@ -144,17 +140,10 @@ async function preparePush() {
                     endpoint: pushSubscription.endpoint,
                 });
                 pushRegistered = status.registered;
-                displayPush(
-                    pushRegistered ? 'On for this device.' : 'Subscription needs repair.',
-                    status.last_result,
-                );
+                displayPush(pushRegistered ? '' : 'Reminders need turning on again on this device.');
                 if (pushRegistered) await retireOldWorker();
             } else
-                displayPush(
-                    Notification.permission === 'granted'
-                        ? 'Not on for this device yet.'
-                        : 'Off on this device.',
-                );
+                displayPush('Reminders are off on this device.');
         } catch (error) {
             if (error.renew) pushNeedsRenewal = true;
             displayPush(
@@ -192,7 +181,7 @@ function enablePush() {
     permission
         .then(async granted => {
             if (granted !== 'granted') {
-                displayPush('Permission was not granted. Allow SecondBrain in notification settings.');
+                displayPush('Reminders were not allowed. Allow SecondBrain in notification settings.');
                 return;
             }
             try {
@@ -210,7 +199,8 @@ function enablePush() {
                 });
                 await pushAPI('/push/subscribe', pushSubscription.toJSON());
                 pushRegistered = true;
-                displayPush('On for this device.');
+                displayPush('');
+                if (typeof showToast === 'function') showToast('Reminders are on for this device');
                 await retireOldWorker();
             } catch (error) {
                 pushRegistered = false;
@@ -218,40 +208,6 @@ function enablePush() {
             }
         })
         .catch(error => displayPush(error.message));
-}
-async function disablePush() {
-    try {
-        if (preparingPush) await preparingPush;
-        if (pushSubscription) {
-            await pushAPI('/push/unsubscribe', {
-                endpoint: pushSubscription.endpoint,
-            });
-            pushRegistered = false;
-            await pushSubscription.unsubscribe();
-            pushSubscription = null;
-        }
-        displayPush('Off on this device.');
-    } catch (error) {
-        displayPush(error.message);
-    }
-}
-async function testPush() {
-    const button = document.getElementById('push-test');
-    if (button) button.disabled = true;
-    try {
-        const result = await pushAPI('/push/test', {
-            endpoint: pushSubscription.endpoint,
-        });
-        if (result.registered === false) {
-            pushRegistered = false;
-            pushNeedsRenewal = true;
-        }
-        displayPush('Test sent.', result.message);
-    } catch (error) {
-        displayPush(error.message);
-    } finally {
-        if (button) button.disabled = false;
-    }
 }
 // Register even on browsers without PushManager so asset updates still work.
 document.addEventListener('DOMContentLoaded', () => {
