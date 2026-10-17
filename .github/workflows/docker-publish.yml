@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - claude/project-thread-0168al
     paths-ignore:
       - '**.md'
       - 'docs/**'
@@ -21,7 +22,8 @@ permissions:
   contents: read
 
 jobs:
-  test:
+  # The Go checks and the browser checks run side by side; publish waits for both.
+  go:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -43,34 +45,50 @@ jobs:
           node scripts/push-smoke.cjs
           node scripts/calendar-check.cjs
 
-      # Browser checks run against a throwaway database. Playwright is pinned
-      # and installed outside the repository; the app has no npm dependencies.
-      - name: Browser smoke tests
-        env:
-          PLAYWRIGHT_MODULE: ${{ runner.temp }}/pw/node_modules/playwright
+  # Browser checks run against throwaway databases. Playwright is pinned and
+  # installed outside the repository; the app has no npm dependencies.
+  browser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Build
+        run: go build -o "$RUNNER_TEMP/secondbrain" .
+
+      # Browser downloads are cached by Playwright version; their system
+      # packages still come from apt each run.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-1.63.0-${{ runner.os }}
+
+      - name: Install Playwright
         run: |
           npm install --prefix "$RUNNER_TEMP/pw" --no-audit --no-fund playwright@1.63.0
           "$RUNNER_TEMP/pw/node_modules/.bin/playwright" install --with-deps --only-shell chromium
           "$RUNNER_TEMP/pw/node_modules/.bin/playwright" install --with-deps webkit
-          go build -o "$RUNNER_TEMP/secondbrain" .
-          mkdir -p "$RUNNER_TEMP/data"
+          echo "PLAYWRIGHT_MODULE=$RUNNER_TEMP/pw/node_modules/playwright" >> "$GITHUB_ENV"
+
+      - name: Browser smoke tests
+        run: |
           PASSCODE=12345678 PORT=18080 DATA_DIR="$RUNNER_TEMP/data" "$RUNNER_TEMP/secondbrain" > "$RUNNER_TEMP/server.log" 2>&1 &
-          for i in $(seq 1 30); do curl -fs http://127.0.0.1:18080/health && break; sleep 1; done
+          node scripts/wait-health.cjs http://127.0.0.1:18080
           node scripts/ui-smoke.cjs
           node scripts/audit-smoke.cjs
           node scripts/lifecycle-smoke.cjs
 
       - name: Settled visual checks
         env:
-          PLAYWRIGHT_MODULE: ${{ runner.temp }}/pw/node_modules/playwright
-          TEST_BASE_URL: http://127.0.0.1:18082
           SCREENSHOT_DIR: ${{ runner.temp }}/visuals
         run: |
           DATA_DIR="$RUNNER_TEMP/visual-data" PASSCODE=12345678 PORT=18082 TZ=Europe/Bucharest BACKUP_KEEP=0 "$RUNNER_TEMP/secondbrain" > "$RUNNER_TEMP/visual-server.log" 2>&1 &
-          for i in $(seq 1 30); do curl -fs http://127.0.0.1:18082/health && break; sleep 1; done
-          node scripts/visual-check.cjs
           DATA_DIR="$RUNNER_TEMP/webkit-data" PASSCODE=12345678 PORT=18083 TZ=Europe/Bucharest BACKUP_KEEP=0 "$RUNNER_TEMP/secondbrain" > "$RUNNER_TEMP/webkit-server.log" 2>&1 &
-          for i in $(seq 1 30); do curl -fs http://127.0.0.1:18083/health && break; sleep 1; done
+          node scripts/wait-health.cjs http://127.0.0.1:18082 http://127.0.0.1:18083
+          TEST_BASE_URL=http://127.0.0.1:18082 node scripts/visual-check.cjs
           TEST_BROWSER_ENGINE=webkit TEST_BASE_URL=http://127.0.0.1:18083 SCREENSHOT_DIR="$RUNNER_TEMP/visuals/webkit" node scripts/visual-check.cjs
 
       - name: Visual review artifacts
@@ -86,7 +104,7 @@ jobs:
         run: cat "$RUNNER_TEMP/server.log" || true
 
   publish:
-    needs: test
+    needs: [go, browser]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
