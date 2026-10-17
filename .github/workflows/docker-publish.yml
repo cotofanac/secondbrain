@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-      - claude/project-thread-0168al
     paths-ignore:
       - '**.md'
       - 'docs/**'
