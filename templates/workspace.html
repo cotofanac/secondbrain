@@ -5,11 +5,10 @@
 <div class="todo-item {{if .Done}}done{{end}}" id="task-{{.ID}}" data-task-id="{{.ID}}" data-revision="{{.Revision}}">
  <form hx-post="/todos/toggle" hx-target="closest .task-group" hx-swap="outerHTML swap:140ms"><input type="hidden" name="done" value="{{if .Done}}false{{else}}true{{end}}"><input type="hidden" name="revision" value="{{.Revision}}"><input type="hidden" name="id" value="{{.ID}}"><input type="hidden" name="response" value="task-group"><button class="check-btn {{if .Done}}checked{{end}}" aria-label="{{if .Done}}Reopen{{else}}Complete{{end}} {{.Text}}"><span class="task-checkmark" aria-hidden="true"></span></button></form>
  <button type="button" class="task-label" data-edit-label data-call="openTask" data-args='[{{.ID}}]'>{{.Text}}</button>
- {{if or .DueDate .Repeat .CanDoToday}}<div class="task-schedule">
-  {{if or .DueDate .Repeat}}<span class="todo-date {{if and (not .Done) (isOverdue .DueDate)}}overdue{{end}}">{{if .Repeat}}{{template "repeat-badge" .Repeat}}{{end}}<time datetime="{{.DueDate}}">{{formatDate .DueDate}}</time></span>{{end}}
-  {{if .CanDoToday}}<form hx-post="/today/reschedule" hx-target="closest .task-group" hx-swap="outerHTML" hx-disabled-elt="find button"><input type="hidden" name="id" value="{{.ID}}"><input type="hidden" name="revision" value="{{.Revision}}"><input type="hidden" name="response" value="task-group"><button type="submit" name="due_date" value="today" class="text-action">Do today</button></form>{{end}}
+ {{if or .DueDate .Repeat}}<div class="task-schedule">
+  <span class="todo-date {{if and (not .Done) (isOverdue .DueDate)}}overdue{{end}}">{{if .Repeat}}{{template "repeat-badge" .Repeat}}{{end}}<time datetime="{{.DueDate}}">{{formatDate .DueDate}}</time></span>
  </div>{{end}}
- <details class="row-menu"><summary class="icon-button" aria-label="Task actions">{{template "icon-more"}}</summary><div class="menu-panel"><form hx-post="/todos/delete" hx-target="closest .task-group" hx-swap="outerHTML"><input type="hidden" name="id" value="{{.ID}}"><input type="hidden" name="response" value="task-group"><button class="action-with-icon">{{template "icon-archive"}}<span>Archive</span></button></form></div></details>
+ <details class="row-menu"><summary class="icon-button" aria-label="Task actions">{{template "icon-more"}}</summary><div class="menu-panel">{{if .CanDoToday}}<form hx-post="/today/reschedule" hx-target="closest .task-group" hx-swap="outerHTML" hx-disabled-elt="find button"><input type="hidden" name="id" value="{{.ID}}"><input type="hidden" name="revision" value="{{.Revision}}"><input type="hidden" name="response" value="task-group"><button type="submit" name="due_date" value="today" class="action-with-icon">{{template "icon-sun"}}<span>Do today</span></button></form>{{end}}<form hx-post="/todos/delete" hx-target="closest .task-group" hx-swap="outerHTML"><input type="hidden" name="id" value="{{.ID}}"><input type="hidden" name="response" value="task-group"><button class="action-with-icon">{{template "icon-archive"}}<span>Archive</span></button></form></div></details>
 </div>
 {{end}}
 {{define "task-group"}}
@@ -25,7 +24,7 @@
 </div>
 {{end}}
 {{/* A project's progress ring and done/total count, in its summary. */}}
-{{define "project-stats"}}<span class="project-progress" style="--progress:{{if .Progress.Total}}{{.Progress.Completed}}{{else}}0{{end}};--total:{{if .Progress.Total}}{{.Progress.Total}}{{else}}1{{end}}" aria-label="{{.Progress.Completed}} of {{.Progress.Total}} complete"></span><span class="section-count">{{.Progress.Completed}}/{{.Progress.Total}}</span>{{end}}
+{{define "project-stats"}}<span class="project-progress" style="--progress:{{if .Progress.Total}}{{.Progress.Completed}}{{else}}0{{end}};--total:{{if .Progress.Total}}{{.Progress.Total}}{{else}}1{{end}}" aria-label="{{.Progress.Completed}} of {{.Progress.Total}} complete"></span>{{if .Progress.Total}}<span class="section-count">{{.Progress.Completed}}/{{.Progress.Total}}</span>{{end}}{{end}}
 {{/* One list after a change inside it, and its header count out-of-band. */}}
 {{define "project-complete"}}<button type="button" data-call="completeProject" data-args='[{{.ID}}]' {{if ne .Progress.Completed .Progress.Total}}disabled title="Complete or archive the remaining tasks first"{{end}}>Complete project</button>{{end}}
 {{define "task-group-response"}}{{template "task-group" .Group}}{{with .Project}}<span class="project-stats" id="project-stats-{{.ID}}" hx-swap-oob="true">{{template "project-stats" .}}</span><span class="project-complete" id="project-complete-{{.ID}}" hx-swap-oob="true">{{template "project-complete" .}}</span>{{else}}<span class="section-count" id="count-{{.Group.Key}}" hx-swap-oob="true">{{len .Group.Tasks}}</span>{{end}}{{end}}

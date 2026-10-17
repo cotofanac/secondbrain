@@ -5,6 +5,7 @@ const PRECACHE = [
     '/static/style.css?v=__ASSET_VERSION__',
     '/static/app.js?v=__ASSET_VERSION__',
     '/static/notes.js?v=__ASSET_VERSION__',
+    '/static/markdown.js?v=__ASSET_VERSION__',
     '/static/drafts.js?v=__ASSET_VERSION__',
     '/static/calendar.js?v=__ASSET_VERSION__',
     '/static/htmx.min.js?v=__ASSET_VERSION__',

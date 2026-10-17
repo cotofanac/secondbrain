@@ -715,6 +715,125 @@ body {
     outline: none;
 }
 
+/* A note shown formatted (static/markdown.js); tapping it opens the editor. */
+.note-view {
+    min-height: calc(100vh - 10rem);
+    padding: 0 1rem 2rem;
+    font-size: 16px;
+    line-height: 1.6;
+    color: var(--text);
+    overflow-wrap: anywhere;
+    cursor: text;
+}
+.note-view:focus {
+    outline: none;
+}
+.note-view:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: 4px;
+}
+.note-view > * + *,
+.note-view blockquote > * + * {
+    margin-top: 0.6em;
+}
+.note-view .md-heading {
+    line-height: 1.3;
+    margin-top: 1.1em;
+}
+.note-view > .md-heading:first-child {
+    margin-top: 0;
+}
+.note-view h2 {
+    font-size: 1.35em;
+}
+.note-view h3 {
+    font-size: 1.15em;
+}
+.note-view h4,
+.note-view h5,
+.note-view h6 {
+    font-size: 1em;
+}
+.note-view ul,
+.note-view ol {
+    padding-left: 1.5em;
+}
+.note-view li > ul,
+.note-view li > ol {
+    margin-top: 0.15em;
+}
+.note-view li.md-task {
+    list-style: none;
+    margin-left: -1.5em;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5em;
+    align-items: baseline;
+}
+.note-view li.md-task > span {
+    flex: 1;
+    min-width: 0;
+}
+.note-view li.md-task > ul,
+.note-view li.md-task > ol {
+    flex-basis: 100%;
+    margin-left: 1.5em;
+}
+.note-view li.md-task input {
+    width: 1.1em;
+    height: 1.1em;
+    accent-color: var(--accent);
+    transform: translateY(0.15em);
+}
+.note-view li.md-task.done > span {
+    color: var(--text-dim);
+}
+.note-view a {
+    color: var(--accent);
+}
+.note-view code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.88em;
+    background: var(--surface2);
+    padding: 0.1em 0.3em;
+    border-radius: 4px;
+}
+.note-view pre {
+    background: var(--surface2);
+    padding: 0.75rem;
+    border-radius: var(--radius);
+    overflow-x: auto;
+}
+.note-view pre code {
+    padding: 0;
+    background: none;
+    white-space: pre;
+}
+.note-view blockquote {
+    border-left: 3px solid var(--border);
+    padding-left: 0.75rem;
+    color: var(--text-dim);
+}
+.note-view hr {
+    border: 0;
+    border-top: 1px solid var(--border);
+}
+.md-table-wrap {
+    overflow-x: auto;
+}
+.note-view table {
+    border-collapse: collapse;
+    font-size: 0.94em;
+}
+.note-view th,
+.note-view td {
+    border: 1px solid var(--border);
+    padding: 0.3em 0.6em;
+    text-align: left;
+    overflow-wrap: normal;
+}
+
 /* Scrollbar */
 ::-webkit-scrollbar {
     width: 4px;
@@ -938,7 +1057,8 @@ html {
         background: var(--bg);
         border-inline: 1px solid var(--border);
     }
-    .note-editor {
+    .note-editor,
+    .note-view {
         min-height: calc(100vh - 11rem);
         margin-inline: auto;
     }
@@ -1124,6 +1244,36 @@ body {
 .topbar-stat {
     overflow: hidden;
     text-overflow: ellipsis;
+}
+/* Today's header already gives the date; the bar keeps it elsewhere,
+   and always when showing the offline copy. */
+body[data-mode='today']:not([data-offline-copy]) .topbar-stat {
+    visibility: hidden;
+}
+@media (max-width: 1023px) {
+    /* The top bar names the view, so each page skips its own title: Today
+       starts at the date, Tasks at the Inbox. A collapsed Tasks section
+       keeps its header so it can be opened again. */
+    .today-heading .today-icon {
+        display: none;
+    }
+    .today-heading h1 {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip-path: inset(50%);
+        white-space: nowrap;
+    }
+    .today-heading p {
+        margin: 0;
+        font-size: 0.95rem;
+        font-weight: 600;
+        color: var(--text);
+    }
+    #section-tasks[open] > summary {
+        display: none;
+    }
 }
 .header-action,
 .app-menu > summary {
@@ -1333,12 +1483,6 @@ summary::-webkit-details-marker {
     flex-direction: column;
     align-items: flex-end;
     flex: 0 0 auto;
-}
-.task-schedule .text-action {
-    min-height: 44px;
-    padding: 0 0.35rem;
-    font-size: 0.78rem;
-    white-space: nowrap;
 }
 .todo-item .row-menu {
     position: relative;
@@ -1790,13 +1934,14 @@ summary::-webkit-details-marker {
     .view {
         max-width: none;
     }
-    .note-editor {
+    .note-editor,
+    .note-view {
         max-width: 75ch;
     }
 }
 @media (min-width: 1024px) {
     #app {
-        margin-left: 200px;
+        margin-left: 220px;
         min-height: 100vh;
     }
     .topbar {
@@ -1810,24 +1955,24 @@ summary::-webkit-details-marker {
         bottom: 0;
         left: 0;
         right: auto;
-        width: 200px;
+        width: 220px;
         flex-direction: column;
         justify-content: flex-start;
-        gap: 0.3rem;
+        gap: 2px;
         border: 0;
         border-right: 1px solid var(--border);
-        padding: 5rem 0.8rem 1rem;
+        padding: 4.75rem 0.75rem 0.9rem;
     }
     .bottom-nav:before {
         content: none;
     }
     .bottom-nav-btn {
-        flex: 0;
+        flex: 0 0 auto;
         flex-direction: row;
-        gap: 0.8rem;
-        padding: 0.8rem;
+        gap: 0.7rem;
+        padding: 0.45rem 0.7rem;
         font-size: 0.9rem;
-        min-height: 48px;
+        min-height: 36px;
     }
     #notes-content {
         position: relative;
@@ -1858,7 +2003,8 @@ summary::-webkit-details-marker {
         white-space: normal;
         overflow-wrap: anywhere;
     }
-    .note-editor {
+    .note-editor,
+    .note-view {
         width: 100%;
         min-height: 65vh;
         max-width: 75ch;
@@ -1867,9 +2013,9 @@ summary::-webkit-details-marker {
         position: fixed;
         z-index: 80;
         top: 72px;
-        left: calc(50% + 100px);
+        left: calc(50% + 110px);
         right: auto;
-        width: min(640px, calc(100vw - 264px));
+        width: min(640px, calc(100vw - 284px));
         max-width: none;
         max-height: none;
         border: 1px solid var(--border);
@@ -2170,7 +2316,10 @@ details[open] > summary > .disclosure-icon .icon {
     margin-left: auto;
     flex: 0 0 auto;
     border-radius: 50%;
-    background: conic-gradient(var(--accent) calc(var(--progress) / var(--total) * 1turn), var(--surface2) 0);
+    background: conic-gradient(
+        var(--accent) calc(var(--progress) / var(--total) * 1turn),
+        color-mix(in srgb, var(--text-dim) 32%, transparent) 0
+    );
     position: relative;
 }
 .project-progress::after {
@@ -2214,7 +2363,9 @@ details[open] > summary > .disclosure-icon .icon {
     border-radius: 50%;
     color: white;
     background: var(--accent);
-    box-shadow: 0 3px 10px color-mix(in srgb, var(--accent) 28%, transparent);
+    transition:
+        background-color 0.12s,
+        color 0.12s;
 }
 .add-circle .icon {
     width: 19px;
@@ -2227,6 +2378,17 @@ details[open] > summary > .disclosure-icon .icon {
 }
 .add-circle:active {
     transform: scale(0.94);
+}
+/* Until there is something to add, the button is a quiet plus beside the field. */
+.capture-form:has(> input[name='text']:placeholder-shown) .add-circle {
+    color: var(--text-dim);
+    background: transparent;
+}
+.capture-form:has(> input[name='text']:placeholder-shown) .add-circle:hover {
+    color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 10%, transparent);
+    filter: none;
+    transform: none;
 }
 .todo-item {
     min-height: 50px;
@@ -2420,9 +2582,13 @@ details[open] > summary > .disclosure-icon .icon {
         background: var(--surface);
     }
     #app,
-    .topbar,
-    .bottom-nav {
+    .topbar {
         background: color-mix(in srgb, var(--surface) 94%, transparent);
+    }
+    /* Solid: the bar has no blur on phones, so any translucency shows the
+       list scrolling underneath it. */
+    .bottom-nav {
+        background: var(--surface);
     }
     .view {
         padding: 1.1rem max(1rem, env(safe-area-inset-left)) calc(72px + var(--safe-bottom));
@@ -2536,16 +2702,36 @@ details[open] > summary > .disclosure-icon .icon {
         background: var(--bg);
         border-right-color: color-mix(in srgb, var(--border) 78%, transparent);
     }
+    /* Sidebar rows: one shape for lists, projects and the footer; the
+       selected row is a soft accent fill, hover a faint neutral one. */
     .bottom-nav-btn {
+        gap: 0.7rem;
+        color: var(--text);
+        border-radius: 8px;
+        transition:
+            background-color 0.12s,
+            color 0.12s;
+    }
+    .bottom-nav-btn .icon {
+        width: 18px;
+        height: 18px;
+        flex: 0 0 auto;
         color: var(--text-dim);
-        border-radius: 11px;
+    }
+    .bottom-nav-btn:hover {
+        background: color-mix(in srgb, var(--text) 5%, transparent);
     }
     .bottom-nav-btn.active {
         color: var(--accent);
         background: color-mix(in srgb, var(--accent) 10%, transparent);
+        font-weight: 500;
+    }
+    .bottom-nav-btn.active .icon {
+        color: var(--accent);
     }
     .topbar {
         background: color-mix(in srgb, var(--surface) 91%, transparent);
+        border-bottom-color: transparent;
     }
     .workspace-section {
         box-shadow: none;
@@ -2559,13 +2745,13 @@ details[open] > summary > .disclosure-icon .icon {
     .app-brand {
         position: absolute;
         top: 1.2rem;
-        left: 1rem;
-        right: 1rem;
+        left: 0.75rem;
+        right: 0.75rem;
         height: 42px;
         display: flex;
         align-items: center;
         gap: 0.65rem;
-        padding: 0 0.2rem;
+        padding: 0 0.45rem;
         color: var(--text);
     }
     .brand-mark {
@@ -2681,10 +2867,6 @@ details[open] > summary > .disclosure-icon .icon {
     }
     #todo-items > .workspace-section .quiet-empty {
         padding-left: 3rem;
-    }
-    .bottom-nav-btn.active {
-        box-shadow: inset 2px 0 0 var(--accent);
-        border-radius: 7px;
     }
 }
 
@@ -2871,31 +3053,32 @@ details[open] > summary > .disclosure-icon .icon {
     }
     .sidebar-heading {
         display: block;
-        margin: 0.9rem 0.8rem 0.2rem;
+        margin: 1.1rem 0.7rem 0.3rem;
         color: var(--text-dim);
-        font-size: 0.72rem;
+        font-size: 0.78rem;
         font-weight: 600;
-        letter-spacing: 0.04em;
-        text-transform: uppercase;
     }
     .sidebar-projects {
         display: grid;
         grid-template-columns: minmax(0, 1fr);
-        gap: 0.1rem;
-        margin-bottom: 0.6rem;
+        gap: 2px;
+        margin-bottom: 1rem;
     }
     .sidebar-project {
         display: flex;
         align-items: center;
-        gap: 0.65rem;
-        min-height: 38px;
-        padding: 0.45rem 0.8rem;
+        gap: 0.7rem;
+        min-height: 36px;
+        padding: 0.45rem 0.7rem;
         border: 0;
-        border-radius: 9px;
+        border-radius: 8px;
         background: none;
         color: var(--text);
-        font-size: 0.88rem;
+        font-size: 0.9rem;
         text-align: left;
+        transition:
+            background-color 0.12s,
+            color 0.12s;
     }
     .sidebar-project:hover {
         background: color-mix(in srgb, var(--text) 5%, transparent);
@@ -2907,7 +3090,8 @@ details[open] > summary > .disclosure-icon .icon {
     .sidebar-project .project-progress {
         width: 16px;
         height: 16px;
-        margin: 0;
+        margin: 0 1px;
+        flex: 0 0 auto;
     }
     .sidebar-project .project-progress::after {
         background: var(--bg);
@@ -2919,7 +3103,7 @@ details[open] > summary > .disclosure-icon .icon {
         white-space: nowrap;
     }
     .sidebar-empty {
-        padding: 0.3rem 0.8rem;
+        padding: 0.3rem 0.7rem;
         color: var(--text-dim);
         font-size: 0.8rem;
     }
@@ -2934,9 +3118,9 @@ details[open] > summary > .disclosure-icon .icon {
     .sidebar-link {
         display: flex;
         align-items: center;
-        gap: 0.45rem;
-        min-height: 40px;
-        padding: 0.4rem 0.55rem;
+        gap: 0.7rem;
+        min-height: 36px;
+        padding: 0.45rem 0.7rem;
         border: 0;
         border-radius: 8px;
         background: none;
@@ -2946,8 +3130,8 @@ details[open] > summary > .disclosure-icon .icon {
     }
     .sidebar-link .icon,
     .sidebar-logout .icon {
-        width: 17px;
-        height: 17px;
+        width: 18px;
+        height: 18px;
     }
     .sidebar-link:hover,
     .sidebar-link.active {
@@ -3165,7 +3349,8 @@ details[open] > summary > .disclosure-icon .icon {
         min-height: 1.1rem;
         padding: 0 0.3rem 0.6rem;
     }
-    .note-editor {
+    .note-editor,
+    .note-view {
         padding-inline: 0.3rem;
     }
 }
@@ -3419,4 +3604,27 @@ details[open] > .menu-panel {
 .capture-form .chip-date.is-set .icon:first-child {
     width: 15px;
     height: 15px;
+}
+/* Markdown import is a desktop affordance: a link under the note list and
+   dropping .md files on Notes. Phones have no files to bring in. */
+@media (max-width: 1023px) {
+    .note-import-action {
+        display: none !important;
+    }
+}
+/* Off-screen rather than display:none, so Safari opens the file picker. */
+.note-import-input {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+    pointer-events: none;
+}
+#notes-view.note-drop-target {
+    outline: 2px dashed color-mix(in srgb, var(--accent) 60%, transparent);
+    outline-offset: -6px;
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--accent) 6%, transparent);
 }

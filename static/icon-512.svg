@@ -1,30 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
-  <rect width="512" height="512" rx="96" fill="#0f0f0f"/>
-  <!-- Brain-like network nodes + connections -->
-  <g stroke="#6c9bff" stroke-width="4.5" fill="none" stroke-linecap="round" stroke-linejoin="round" transform="translate(256,256)">
-    <!-- Connections -->
-    <line x1="0" y1="-85" x2="-74" y2="-27" opacity="0.4"/>
-    <line x1="0" y1="-85" x2="74" y2="-27" opacity="0.4"/>
-    <line x1="-74" y1="-27" x2="-96" y2="59" opacity="0.4"/>
-    <line x1="74" y1="-27" x2="96" y2="59" opacity="0.4"/>
-    <line x1="-96" y1="59" x2="-32" y2="101" opacity="0.4"/>
-    <line x1="96" y1="59" x2="32" y2="101" opacity="0.4"/>
-    <line x1="-32" y1="101" x2="32" y2="101" opacity="0.4"/>
-    <line x1="-74" y1="-27" x2="74" y2="-27" opacity="0.25"/>
-    <line x1="-96" y1="59" x2="96" y2="59" opacity="0.25"/>
-    <line x1="0" y1="-85" x2="-32" y2="101" opacity="0.2"/>
-    <line x1="0" y1="-85" x2="32" y2="101" opacity="0.2"/>
+  <rect width="512" height="512" rx="108" fill="#355f9a"/>
+  <!-- Two cards: a task on top of a note. Same paths as the sidebar mark. -->
+  <g transform="translate(107.5 107.5) scale(12.37)" fill="none" stroke="#ffffff" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M8.5 7.5V6.5a3 3 0 0 1 3-3h6a3 3 0 0 1 3 3v6a3 3 0 0 1-3 3h-1"/><rect x="3.5" y="8.5" width="12" height="12" rx="3"/><path d="M7 14.6l2 2 3.6-4"/>
   </g>
-  <!-- Nodes -->
-  <g fill="#6c9bff">
-    <circle cx="256" cy="171" r="18"/>
-    <circle cx="182" cy="229" r="14.5"/>
-    <circle cx="330" cy="229" r="14.5"/>
-    <circle cx="160" cy="315" r="13"/>
-    <circle cx="352" cy="315" r="13"/>
-    <circle cx="224" cy="357" r="12"/>
-    <circle cx="288" cy="357" r="12"/>
-  </g>
-  <!-- Central glow -->
-  <circle cx="256" cy="171" r="8" fill="#fff" opacity="0.7"/>
 </svg>

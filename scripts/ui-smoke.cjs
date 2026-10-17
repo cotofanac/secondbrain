@@ -82,16 +82,18 @@ const shot = name => require('node:path').join(process.env.SCREENSHOT_DIR || req
  // Escape and tapping elsewhere close the editor too.
  await openTaskEditor('Book practical lessons');await page.keyboard.press('Escape');await page.locator('#task-editor').waitFor({state:'detached'});
  await openTaskEditor('Book practical lessons');await page.locator('[data-project-page] > summary').click();await page.locator('#task-editor').waitFor({state:'detached'});
- // Schedule from a project heading in one tap, without opening the editor.
+ // Schedule from a project heading through the row menu, without opening the editor.
  const lessonsRow=page.locator('.heading-group .todo-item').filter({hasText:'Book practical lessons'});
+ assert.equal(await lessonsRow.getByRole('button',{name:'Do today',exact:true}).isVisible(),false,'Do today shows outside the row menu');
+ await lessonsRow.locator('.row-menu > summary').click();
  await lessonsRow.getByRole('button',{name:'Do today',exact:true}).click();
  const scheduledToday=await page.evaluate(()=>todayISO());
  await lessonsRow.locator('time[datetime="'+scheduledToday+'"]').waitFor();
  assert.equal(await page.locator('#task-editor').count(),0,'Do today opened the editor');
- assert.equal(await lessonsRow.getByRole('button',{name:'Do today',exact:true}).count(),0,'already scheduled task still offers Do today');
+ assert.equal(await lessonsRow.locator('button[name="due_date"][value="today"]').count(),0,'already scheduled task still offers Do today');
  await page.locator('#toast .toast-action').click();
  await lessonsRow.locator('time[datetime="2026-10-01"]').waitFor();
- await lessonsRow.getByRole('button',{name:'Do today',exact:true}).waitFor();
+ await lessonsRow.locator('.row-menu button[name="due_date"][value="today"]').waitFor({state:'attached'});
  // Dismissing one toast must not hide a new confirmation during its fade.
  await page.evaluate(()=>{hideToast();showToast('New confirmation');});
  await page.waitForTimeout(350);
@@ -264,12 +266,27 @@ const shot = name => require('node:path').join(process.env.SCREENSHOT_DIR || req
   window.smokeOriginalFetch=window.fetch;let count=0;
   window.fetch=async(...args)=>{const response=await window.smokeOriginalFetch(...args);if(args[0]==='/notes/save'&&++count===1)await new Promise(resolve=>window.smokeReleaseNote=resolve);return response;};
  });
+ // Away from the editor a note shows formatted; a tap on it opens the editor.
+ await page.locator('#note-view').click();assert.equal(await page.locator('#note-editor').evaluate(el=>el===document.activeElement),true,'tapping a note did not open its editor');
  await page.locator('#note-editor').fill('First note revision');await page.evaluate(()=>{void saveCurrentNote();});
  await page.waitForFunction(()=>typeof window.smokeReleaseNote==='function');
  await page.locator('#note-editor').fill('Newer note revision');await page.evaluate(()=>window.smokeReleaseNote());
  await page.waitForFunction(()=>!document.getElementById('note-editor').dataset.dirty);
  assert.equal(await page.locator('#note-editor').inputValue(),'Newer note revision');
  await page.evaluate(()=>{window.fetch=window.smokeOriginalFetch;delete window.smokeOriginalFetch;delete window.smokeReleaseNote;});
+ await page.locator('#note-editor').fill('## Packing\n- [ ] **socks** and [map](https://example.com)\n```\n- [ ] literal\n```');
+ await page.waitForFunction(()=>!document.getElementById('note-editor').dataset.dirty);
+ await page.locator('.note-meta').click();await page.locator('#note-view h3').waitFor();
+ assert.equal(await page.locator('#note-view li.md-task strong').textContent(),'socks');
+ assert.equal(await page.locator('#note-view a[href="https://example.com"][rel~="noopener"]').count(),1);
+ assert.equal(await page.locator('#note-view input[type=checkbox]').count(),1,'checkbox inside a code block');
+ const taskSave=page.waitForResponse(response=>response.url().endsWith('/notes/save')&&response.ok());await page.locator('#note-view input[type=checkbox]').click();await taskSave;
+ assert.equal((await page.locator('#note-editor').inputValue()).split('\n')[1],'- [x] **socks** and [map](https://example.com)');
+ // Markdown import (the desktop link's file input): a new name opens, a taken one is skipped, Undo archives it.
+ await page.locator('#note-import-input').setInputFiles([{name:'Imported plan.md',mimeType:'text/markdown',buffer:Buffer.from('# Plan\n')},{name:'Imported plan.txt',mimeType:'text/plain',buffer:Buffer.from('dup')}]);
+ await page.waitForFunction(()=>document.querySelector('.note-current-title')?.textContent==='Imported plan');
+ assert.match(await page.locator('#toast').textContent(),/Imported 1 note, skipped Imported plan\.txt/);
+ await page.locator('#toast button').click();await page.waitForFunction(()=>!document.querySelector('.note-picker-item[data-title="Imported plan"]'));
  await page.evaluate(()=>openToday());await page.getByRole('heading',{name:'Today',exact:true}).waitFor();
  // Root service worker must become ready, unlike the old /static/ scope.
  const scope=await page.evaluate(async()=> (await navigator.serviceWorker.ready).scope);assert.equal(scope,base+'/');

@@ -20,7 +20,7 @@ const base = process.env.TEST_BASE_URL || 'http://127.0.0.1:18080';
  await page.locator('#capture-tasks [name=text]').fill('');
 
  await page.getByRole('button',{name:'Notes',exact:true}).click();
- await page.locator('#note-editor').waitFor();
+ await page.locator('#notes-content .note-meta').waitFor();
  await page.locator('.bottom-nav-btn[data-mode="today"]').click();
  await page.locator('#today-content .today-heading').waitFor();
  await page.goBack();

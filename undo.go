@@ -121,6 +121,20 @@ func applyUndo(token string) (skipped int, err error) {
 			return 0, errConflict
 		}
 	}
+	// Undoing an import archives notes; never leave the note list empty.
+	for _, change := range operation.Changes {
+		if change.Table != "notes" {
+			continue
+		}
+		var active int
+		if err = tx.QueryRow(`SELECT count(*) FROM notes WHERE archived=0`).Scan(&active); err != nil {
+			return 0, err
+		}
+		if active == 0 {
+			return 0, errConflict
+		}
+		break
+	}
 	if _, err = tx.Exec(`UPDATE undo_operations SET consumed=1 WHERE token=?`, token); err != nil {
 		return 0, err
 	}

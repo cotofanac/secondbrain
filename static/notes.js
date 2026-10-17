@@ -13,7 +13,9 @@ function initNoteEditor() {
     });
 
     editor.addEventListener('input', function () {
-        applyInlineNoteCommands(editor);
+        // A task box ticked in the view changes a line the caret is not on.
+        if (editor.hidden) renderNoteView(editor);
+        else applyInlineNoteCommands(editor);
         clearTimeout(saveTimer);
         editor.dataset.dirty = '1';
         editorDrafts.state(editor, 'dirty');
@@ -34,6 +36,95 @@ function initNoteEditor() {
 
     autoResize(editor);
     editor.addEventListener('input', () => autoResize(editor));
+    initNoteView(editor);
+}
+
+// --- Rendered view ---
+// A note opens formatted; tapping it opens the editor at that line, and
+// leaving the editor shows it formatted again. The textarea stays the only
+// source: the view is rebuilt from it and task boxes edit its lines.
+let noteEditingId = null;
+const NOTE_TASK_LINE = /^((?:[ \t]*>)*[ \t]*(?:[-*+]|\d{1,9}[.)])[ \t]+\[)([ xX])\]/;
+
+function initNoteView(editor) {
+    const view = document.getElementById('note-view');
+    if (!view) return;
+    view.addEventListener('click', e => {
+        if (e.target.closest('a, input') || String(getSelection?.() || '')) return;
+        const block = e.target.closest('[data-line]');
+        openNoteEditor(editor, block ? Number(block.dataset.line) : null);
+    });
+    view.addEventListener('keydown', e => {
+        if (e.target === view && (e.key === 'Enter' || e.key === ' ')) {
+            e.preventDefault();
+            openNoteEditor(editor, null);
+        }
+    });
+    view.addEventListener('change', e => {
+        const box = e.target.closest('input[type="checkbox"][data-line]');
+        if (box) toggleNoteTask(editor, Number(box.dataset.line));
+    });
+    editor.addEventListener('blur', () => {
+        // Wait for focus to settle. A swapped-out editor, a window switch (the
+        // editor stays the active element) or a dialog that will hand focus
+        // back (search, prompts) keeps the editing state.
+        setTimeout(() => {
+            if (editor.isConnected && document.activeElement !== editor && !modalStack.length)
+                showNoteView(editor);
+        }, 0);
+    });
+    // A reload of the note being typed in keeps the editor.
+    const editing = noteEditingId === editor.dataset.noteId && noteViewState?.focused;
+    if (!editing) showNoteView(editor);
+}
+
+function showNoteView(editor) {
+    const view = document.getElementById('note-view');
+    noteEditingId = null;
+    if (!view || !editor.value.trim()) return;
+    renderNoteView(editor, view);
+    view.hidden = false;
+    editor.hidden = true;
+}
+
+function renderNoteView(editor, view = document.getElementById('note-view')) {
+    if (!view) return;
+    view.replaceChildren(renderMarkdown(editor.value));
+    const locked = !!document.body.dataset.offlineCopy || !!noteConflict;
+    view.querySelectorAll('input[type="checkbox"]').forEach(box => (box.disabled = locked));
+}
+
+function openNoteEditor(editor, line) {
+    const view = document.getElementById('note-view');
+    let caret = editor.value.length;
+    if (line !== null) {
+        const lines = editor.value.split('\n');
+        if (line < lines.length) {
+            caret = 0;
+            for (let i = 0; i < line; i++) caret += lines[i].length + 1;
+            caret += lines[line].replace(/\r$/, '').length;
+        }
+    }
+    noteEditingId = editor.dataset.noteId;
+    if (view) view.hidden = true;
+    editor.hidden = false;
+    autoResize(editor);
+    editor.focus({ preventScroll: true });
+    editor.setSelectionRange(caret, caret);
+}
+
+function toggleNoteTask(editor, line) {
+    const lines = editor.value.split('\n');
+    const match = lines[line]?.match(NOTE_TASK_LINE);
+    if (!match || noteConflict || document.body.dataset.offlineCopy) {
+        renderNoteView(editor);
+        return;
+    }
+    lines[line] = match[1] + (match[2] === ' ' ? 'x' : ' ') + ']' + lines[line].slice(match[0].length);
+    editor.value = lines.join('\n');
+    // Saves and redraws the view like typing would.
+    editor.dispatchEvent(new Event('input', { bubbles: true }));
+    document.querySelector(`#note-view input[data-line="${line}"]`)?.focus({ preventScroll: true });
 }
 
 function toggleCheckboxLine(editor) {
@@ -55,7 +146,7 @@ function handleNoteEditorKeydown(e, editor) {
     const isMod = e.metaKey || e.ctrlKey;
     if (isMod && !e.shiftKey && (e.key === 'b' || e.key === 'B')) {
         e.preventDefault();
-        toggleWrappedSelection(editor, '*');
+        toggleWrappedSelection(editor, '**');
         return;
     }
     if (isMod && !e.shiftKey && (e.key === 'i' || e.key === 'I')) {
@@ -200,13 +291,17 @@ async function restoreNoteDraft(editor) {
             editor.dataset.dirty = '1';
             editorDrafts.state(editor, 'dirty');
             autoResize(editor);
+            if (editor.hidden) renderNoteView(editor);
             showNoteStatus('Unsaved draft restored.');
         } else await noteDraftDelete(noteId);
     } catch (_) {}
 }
 function clearNoteConflict() {
+    const hadConflict = noteConflict;
     document.getElementById('note-conflict')?.remove();
     noteConflict = null;
+    const editor = document.getElementById('note-editor');
+    if (hadConflict && editor?.hidden) renderNoteView(editor);
 }
 function showNoteConflict(editor, latest) {
     noteConflict = latest;
@@ -251,6 +346,7 @@ function showNoteConflict(editor, latest) {
         await noteDraftDelete(editor.dataset.noteId);
         clearNoteConflict();
         autoResize(editor);
+        if (editor.hidden) renderNoteView(editor);
         editorDrafts.state(editor, 'clean');
         showNoteStatus('Latest version loaded');
         editor.focus();
@@ -553,3 +649,90 @@ async function renameNote() {
         values: { id: editor.dataset.noteId, title },
     });
 }
+
+// --- Markdown import (desktop) ---
+// The link and drag-and-drop both post to /notes/import, the same endpoint
+// scripts/push-note.cjs uses. Existing names are skipped, never overwritten.
+function chooseNoteImport() {
+    closeNotePicker();
+    document.getElementById('note-import-input')?.click();
+}
+
+function importNoteFiles(input) {
+    const files = Array.from(input.files || []);
+    input.value = '';
+    importMarkdownFiles(files);
+}
+
+async function importMarkdownFiles(files) {
+    files = files.filter(file => /\.(md|markdown|txt)$/i.test(file.name));
+    if (files.length === 0) {
+        showToast('Only .md files can be imported.');
+        return;
+    }
+    if (!(await saveBeforeNoteAction())) return;
+    const body = new FormData();
+    files.forEach(file => body.append('file', file, file.name));
+    let response, result;
+    try {
+        response = await fetch('/notes/import', { method: 'POST', body });
+        result = await response.json();
+    } catch (_) {
+        showToast(response ? 'Could not import. Try again.' : 'Offline. Nothing was imported.');
+        return;
+    }
+    if (!response.ok) {
+        showToast(response.status < 500 && result.error ? result.error : 'Could not import. Try again.');
+        return;
+    }
+    reportMutationEffects(response);
+    const imported = result.imported || [];
+    const skipped = result.skipped || [];
+    if (imported.length) await loadNote(imported[0].id);
+    else refreshStaleView();
+    showToast(
+        importSummary(imported.length, skipped),
+        result.undo ? { label: 'Undo', onClick: () => undoMutation(result.undo) } : undefined,
+    );
+}
+
+function importSummary(count, skipped) {
+    const parts = [];
+    if (count) parts.push(count === 1 ? 'Imported 1 note' : `Imported ${count} notes`);
+    if (skipped.length === 1) {
+        parts.push(`skipped ${skipped[0].file}: ${skipped[0].reason}`);
+    } else if (skipped.length) {
+        parts.push(`skipped ${skipped.length} (names in use or not Markdown)`);
+    }
+    const text = parts.join(', ');
+    return text.charAt(0).toUpperCase() + text.slice(1) + '.';
+}
+
+(function () {
+    const view = document.getElementById('notes-view');
+    if (!view) return;
+    const hasFiles = e => Array.from(e.dataTransfer?.types || []).includes('Files');
+    let depth = 0;
+    view.addEventListener('dragenter', e => {
+        if (!hasFiles(e)) return;
+        depth++;
+        view.classList.add('note-drop-target');
+    });
+    view.addEventListener('dragleave', e => {
+        if (!hasFiles(e)) return;
+        depth = Math.max(0, depth - 1);
+        if (!depth) view.classList.remove('note-drop-target');
+    });
+    view.addEventListener('dragover', e => {
+        if (!hasFiles(e)) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'copy';
+    });
+    view.addEventListener('drop', e => {
+        if (!hasFiles(e)) return;
+        e.preventDefault();
+        depth = 0;
+        view.classList.remove('note-drop-target');
+        importMarkdownFiles(Array.from(e.dataTransfer.files));
+    });
+})();

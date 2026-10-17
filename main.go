@@ -54,7 +54,7 @@ var (
 // one of them changes.
 func computeAssetVersion() string {
 	h := sha256.New()
-	for _, name := range []string{"static/app.js", "static/notes.js", "static/drafts.js", "static/calendar.js", "static/style.css", "static/htmx.min.js", "static/workspace.js", "static/push.js", "static/login.js", "static/sw.js", "static/manifest.json"} {
+	for _, name := range []string{"static/app.js", "static/notes.js", "static/markdown.js", "static/drafts.js", "static/calendar.js", "static/style.css", "static/htmx.min.js", "static/workspace.js", "static/push.js", "static/login.js", "static/sw.js", "static/manifest.json"} {
 		b, err := staticFiles.ReadFile(name)
 		if err != nil {
 			// Fall back to a build-time value so the app still boots.
@@ -370,6 +370,7 @@ func main() {
 	http.HandleFunc("/notes", authMiddleware(handleNotes))
 	http.HandleFunc("/notes/save", authMiddleware(handleSaveNote))
 	http.HandleFunc("/notes/create", authMiddleware(handleCreateNote))
+	http.HandleFunc("/notes/import", authMiddleware(handleImportNotes))
 	http.HandleFunc("/notes/delete", authMiddleware(handleDeleteNote))
 	http.HandleFunc("/notes/rename", authMiddleware(handleRenameNote))
 	http.HandleFunc("/notes/restore", authMiddleware(handleRestoreNote))

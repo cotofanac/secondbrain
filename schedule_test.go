@@ -50,7 +50,7 @@ func TestDoTodayFromProjectAndUndo(t *testing.T) {
 	if !strings.Contains(rec.Body.String(), `data-group="heading-1"`) || strings.Contains(rec.Body.String(), `class="workspace-section`) {
 		t.Fatalf("did not return just the original group: %s", rec.Body.String())
 	}
-	if strings.Contains(rec.Body.String(), `>Do today</button>`) {
+	if strings.Contains(rec.Body.String(), `<span>Do today</span>`) {
 		t.Fatal("shortcut still shown on a task already due today")
 	}
 	var due, repeat string

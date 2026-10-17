@@ -21,9 +21,10 @@
                         data-title="{{.Title}}" data-call="selectNote" data-args='[{{.ID}}]'><span class="note-picker-title">{{.Title}}</span>{{if .UpdatedAt}}<span class="note-picker-time">{{formatUpdated .UpdatedAt}}</span>{{end}}</button>
                 {{end}}
             </div>
-            <div class="section-footer note-picker-archived"><button type="button" class="action-with-icon" data-call="showNotesArchive">{{template "icon-archive"}}<span>Archived notes</span></button></div>
+            <div class="section-footer note-picker-archived"><button type="button" class="action-with-icon" data-call="showNotesArchive">{{template "icon-archive"}}<span>Archived notes</span></button><button type="button" class="action-with-icon note-import-action" data-call="chooseNoteImport" title="Or drop .md files on Notes">{{template "icon-import"}}<span>Import Markdown…</span></button></div>
         </div>
     </div>
+    <input type="file" id="note-import-input" class="note-import-input" accept=".md,.markdown,.txt" multiple tabindex="-1" aria-hidden="true" data-call="importNoteFiles" data-args='["$el"]' data-event="change">
     <span class="note-current-title">{{.CurrentNote.Title}}</span>
     <div class="notes-actions">
         <button class="icon-button" data-call="createNote" title="New note" aria-label="New note">
@@ -43,8 +44,9 @@
     </div>
 </div>
 <p class="note-meta">{{if .CurrentNote.UpdatedAt}}<span class="note-updated">Edited {{formatUpdated .CurrentNote.UpdatedAt}}</span>{{end}}<span id="note-status" class="note-status" role="status" aria-live="polite"></span></p>
+<div id="note-view" class="note-view" tabindex="0" role="article" aria-label="{{.CurrentNote.Title}}, tap to edit" hidden></div>
 <textarea id="note-editor" class="note-editor" aria-label="{{.CurrentNote.Title}}"
           data-note-id="{{.CurrentNote.ID}}"
           data-updated-at="{{.CurrentNote.UpdatedAt}}"
           data-revision="{{.CurrentNote.Revision}}"
-          placeholder="Start typing... 1. list, *bold*, _italic_, [] checkbox">{{.CurrentNote.Content}}</textarea>
+          placeholder="Start typing… Markdown works here.">{{.CurrentNote.Content}}</textarea>

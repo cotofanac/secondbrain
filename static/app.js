@@ -7,6 +7,7 @@
 const CALLABLE = new Set([
     'chooseMobileUtility',
     'chooseMobileWorkspace',
+    'chooseNoteImport',
     'closeNotePicker',
     'closeSearch',
     'createNote',
@@ -19,6 +20,7 @@ const CALLABLE = new Set([
     'enablePush',
     'filterNotes',
     'hideArchive',
+    'importNoteFiles',
     'doLogout',
     'openArchive',
     'openMobileWorkspaceSwitcher',

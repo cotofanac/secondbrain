@@ -83,6 +83,14 @@ between notes; task navigation can proceed immediately. Drafts do not expire
 silently. Browser storage clearing removes them; if storage is unavailable,
 the task buffer remains in its tab and reports that limitation.
 
+Markdown import has one entry point, `POST /notes/import`, used by the desktop
+"Import Markdown…" link, by dropping files on Notes, and by
+`scripts/push-note.cjs`. Each multipart `file` part becomes a note named after
+the file; a name already held by any note, archived included, is skipped rather
+than overwritten. The JSON reply lists `imported` and `skipped` notes and carries
+one undo token that archives the new notes, keeping any edited since and never
+leaving the note list empty.
+
 HTMX and fetch mutations share `X-SB-Effects`. An inactive view is marked dirty,
 then refreshed when shown. A group response covers its own change without
 replacing the entire workspace. GET responses are owned by their targets;
