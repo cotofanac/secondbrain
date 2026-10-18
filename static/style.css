@@ -2877,9 +2877,6 @@ details[open] > summary > .disclosure-icon .icon {
 .bottom-nav .nav-count:not(#nav-count-today) {
     display: none;
 }
-#nav-count-today .nav-overdue {
-    display: none;
-}
 #nav-count-today {
     position: absolute;
     top: 4px;
@@ -3005,8 +3002,7 @@ details[open] > summary > .disclosure-icon .icon {
     .bottom-nav-btn .nav-label-desktop {
         display: inline;
     }
-    .bottom-nav .nav-count:not(#nav-count-today),
-    #nav-count-today .nav-overdue {
+    .bottom-nav .nav-count:not(#nav-count-today) {
         display: inline-flex;
     }
     .bottom-nav .nav-count,
@@ -3029,7 +3025,10 @@ details[open] > summary > .disclosure-icon .icon {
     #nav-count-today:empty {
         display: none;
     }
-    .nav-overdue {
+    /* Today shows one number, tasks due today or earlier; it becomes an
+       amber pill when any of them is overdue. */
+    #nav-count-today.has-overdue {
+        justify-content: center;
         min-width: 18px;
         padding: 2px 5px;
         border-radius: 9px;
@@ -3037,10 +3036,6 @@ details[open] > summary > .disclosure-icon .icon {
         color: var(--surface);
         font-size: 0.7rem;
         font-weight: 700;
-        text-align: center;
-    }
-    #nav-count-today.has-overdue {
-        background: none;
     }
     .sidebar-heading {
         display: block;

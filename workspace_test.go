@@ -847,7 +847,7 @@ func TestSidebarCountsAndArchive(t *testing.T) {
 	requireOK(t, w)
 	body := w.Body.String()
 	for _, want := range []string{
-		`id="nav-count-today" aria-hidden="true" hx-swap-oob="true"><span class="nav-overdue">1</span><span class="nav-total">2</span>`,
+		`class="nav-count has-overdue" id="nav-count-today" aria-hidden="true" hx-swap-oob="true">2<`,
 		`id="nav-count-tasks" aria-hidden="true" hx-swap-oob="true">2<`,
 		`id="nav-count-groceries" aria-hidden="true" hx-swap-oob="true">1<`,
 		`data-project-id="1"`,

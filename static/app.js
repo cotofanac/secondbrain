@@ -277,7 +277,7 @@ function openMobileWorkspaceSwitcher() {
     // The sheet repeats the counts shown beside each list in the sidebar.
     menu.querySelectorAll('[data-count-from]').forEach(count => {
         const source = document.getElementById(count.dataset.countFrom);
-        count.textContent = (source?.querySelector('.nav-total') || source)?.textContent.trim() || '';
+        count.textContent = source?.textContent.trim() || '';
         count.classList.toggle('has-overdue', !!source?.classList.contains('has-overdue'));
     });
     openModal(menu, menu.querySelector('.selected') || menu.querySelector('button'));
